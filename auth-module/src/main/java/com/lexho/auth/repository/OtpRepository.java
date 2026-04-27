@@ -1,0 +1,16 @@
+package com.lexho.auth.repository;
+
+import com.lexho.auth.entity.Otp;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface OtpRepository extends JpaRepository<Otp, Long> {
+
+    Optional<Otp> findTopByMobileOrderByIdDesc(String mobile);
+
+    List<Otp> findByMobileAndStatus(String mobile, String status);
+}
