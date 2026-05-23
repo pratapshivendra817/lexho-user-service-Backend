@@ -1,0 +1,73 @@
+name: Critical Smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: user_servicedb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      CI: "true"
+      DB_URL: jdbc:mysql://127.0.0.1:3306/user_servicedb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      JWT_SECRET: this-is-a-ci-only-jwt-secret-with-min-32-bytes
+      ADMIN_SEED_ENABLED: "true"
+      ADMIN_SEED_EMAIL: admin@lexho.com
+      ADMIN_SEED_PASSWORD: Admin@12345
+      ADMIN_ALLOW_CONSOLE_OTP_DELIVERY_FALLBACK: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Compile
+        run: ./mvnw -q -DskipTests compile
+
+      - name: Start application
+        run: nohup ./mvnw -q -pl application-module spring-boot:run > app.log 2>&1 &
+
+      - name: Wait for app
+        run: |
+          for i in {1..60}; do
+            if curl -sf http://127.0.0.1:8082/api/customer/profile-content > /dev/null; then
+              echo "App is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "App did not start in time"
+          tail -n 200 app.log || true
+          exit 1
+
+      - name: Run critical smoke
+        shell: pwsh
+        run: ./scripts/critical-smoke.ps1 -BaseUrl "http://127.0.0.1:8082" -AdminEmail "admin@lexho.com" -AdminPassword "Admin@12345" -SkipAdminOtpPrompt
+
+      - name: Upload app log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-log
+          path: app.log

@@ -1,0 +1,28 @@
+package com.lexho.auth.dto;
+
+import jakarta.validation.constraints.NotNull;
+
+public class IssueTokenRequest {
+
+    @NotNull
+    private Long userId;
+
+    @NotNull
+    private String role;
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
+}

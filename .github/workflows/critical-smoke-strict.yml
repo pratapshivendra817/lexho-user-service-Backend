@@ -1,0 +1,95 @@
+name: Critical Smoke Strict
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke-strict:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: user_servicedb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      CI: "true"
+      DB_URL: jdbc:mysql://127.0.0.1:3306/user_servicedb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      JWT_SECRET: this-is-a-ci-only-jwt-secret-with-min-32-bytes
+      ADMIN_SEED_ENABLED: "true"
+      ADMIN_SEED_EMAIL: admin@lexho.com
+      ADMIN_SEED_PASSWORD: Admin@12345
+      ADMIN_ALLOW_CONSOLE_OTP_DELIVERY_FALLBACK: "true"
+      APP_SECURITY_EXPOSE_SWAGGER: "false"
+      APP_SECURITY_ALLOW_INTERNAL_OPEN: "false"
+      APP_SECURITY_ALLOW_PUBLIC_CUSTOMER_READ: "true"
+      APP_SECURITY_ALLOW_PUBLIC_PROVIDER_ONBOARDING: "false"
+      APP_SECURITY_ALLOW_PUBLIC_ADMIN_PROFILE_CONTENT: "false"
+      INTERNAL_API_TOKEN: strict-ci-internal-token
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Compile
+        run: ./mvnw -q -DskipTests compile
+
+      - name: Start application
+        run: nohup ./mvnw -q -pl application-module spring-boot:run > app.log 2>&1 &
+
+      - name: Wait for app
+        run: |
+          for i in {1..60}; do
+            if curl -sf http://127.0.0.1:8082/api/customer/profile-content > /dev/null; then
+              echo "App is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "App did not start in time"
+          tail -n 200 app.log || true
+          exit 1
+
+      - name: Run base critical smoke
+        shell: pwsh
+        run: ./scripts/critical-smoke.ps1 -BaseUrl "http://127.0.0.1:8082" -AdminEmail "admin@lexho.com" -AdminPassword "Admin@12345" -SkipAdminOtpPrompt
+
+      - name: Verify internal API is blocked without token
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:8082/internal/bookings/users/1/summary")
+          if [ "$code" != "401" ]; then
+            echo "Expected 401 for internal endpoint without token, got $code"
+            exit 1
+          fi
+
+      - name: Verify internal API accepts valid token
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" -H "X-Internal-Token: strict-ci-internal-token" "http://127.0.0.1:8082/internal/bookings/users/1/summary")
+          if [ "$code" != "200" ] && [ "$code" != "404" ]; then
+            echo "Expected 200/404 for internal endpoint with token, got $code"
+            exit 1
+          fi
+
+      - name: Upload app log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-log-strict
+          path: app.log

@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS partner_service_requests (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    partner_id BIGINT NOT NULL,
+    cart_id BIGINT NOT NULL,
+    customer_id BIGINT NOT NULL,
+    service_id BIGINT NULL,
+    service_type VARCHAR(40) NULL,
+    quantity INT NULL,
+    scheduled_time DATETIME NULL,
+    full_address VARCHAR(255) NULL,
+    city VARCHAR(120) NULL,
+    latitude DECIMAL(10, 7) NULL,
+    longitude DECIMAL(10, 7) NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    rejection_reason VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_psr_partner_created (partner_id, created_at),
+    INDEX idx_psr_cart_status (cart_id, status)
+);

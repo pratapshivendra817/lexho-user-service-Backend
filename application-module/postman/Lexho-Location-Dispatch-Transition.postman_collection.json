@@ -1,0 +1,344 @@
+{
+  "info": {
+    "name": "Lexho Location + Dispatch Transition APIs",
+    "_postman_id": "d7f8f76a-3e2a-47cb-a90b-lexho-location-dispatch-transition",
+    "description": "Canonical and deprecated transition APIs for customer location and partner dispatch.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('HTTP status is success (< 400)', function () {",
+          "  pm.expect(pm.response.code).to.be.below(400);",
+          "});",
+          "",
+          "pm.test('Response is valid JSON when body is present', function () {",
+          "  const text = pm.response.text();",
+          "  if (!text || !text.trim()) {",
+          "    return;",
+          "  }",
+          "  pm.expect(function () { JSON.parse(text); }).to.not.throw();",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth Token Setup",
+      "item": [
+        {
+          "name": "Send OTP Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{customerMobile}}\",\n  \"role\": \"CUSTOMER\"\n}"
+            },
+            "url": "{{baseUrl}}/otp/send"
+          }
+        },
+        {
+          "name": "Verify OTP Customer (Set customerToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let res = {};",
+                  "try { res = pm.response.json(); } catch (e) { res = {}; }",
+                  "const token = (res.data && res.data.token) || res.token;",
+                  "if (token) { pm.environment.set('customerToken', token); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{customerMobile}}\",\n  \"otp\": \"{{customerOtp}}\",\n  \"role\": \"CUSTOMER\"\n}"
+            },
+            "url": "{{baseUrl}}/otp/verify"
+          }
+        },
+        {
+          "name": "Send OTP Partner",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{partnerMobile}}\",\n  \"role\": \"PARTNER\"\n}"
+            },
+            "url": "{{baseUrl}}/otp/send"
+          }
+        },
+        {
+          "name": "Verify OTP Partner (Set partnerToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let res = {};",
+                  "try { res = pm.response.json(); } catch (e) { res = {}; }",
+                  "const token = (res.data && res.data.token) || res.token;",
+                  "if (token) { pm.environment.set('partnerToken', token); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobile\": \"{{partnerMobile}}\",\n  \"otp\": \"{{partnerOtp}}\",\n  \"role\": \"PARTNER\"\n}"
+            },
+            "url": "{{baseUrl}}/otp/verify"
+          }
+        },
+        {
+          "name": "Admin Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/login"
+          }
+        },
+        {
+          "name": "Admin Verify OTP (Set adminToken)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let res = {};",
+                  "try { res = pm.response.json(); } catch (e) { res = {}; }",
+                  "if (res && res.accessToken) { pm.environment.set('adminToken', res.accessToken); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"otp\": \"{{adminOtp}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/verify-otp"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Customer Canonical",
+      "item": [
+        {
+          "name": "Save Address",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"Home\",\n  \"addressLine\": \"Flat 101, Rohini Sector 9\",\n  \"latitude\": 28.7333,\n  \"longitude\": 77.1333,\n  \"city\": \"Delhi\"\n}"
+            },
+            "url": "{{baseUrl}}/api/customer/location/save-address"
+          }
+        },
+        {
+          "name": "Update Address",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 2,\n  \"label\": \"Home Updated\",\n  \"addressLine\": \"Flat 101, Rohini Sector 9\",\n  \"latitude\": 28.734,\n  \"longitude\": 77.134,\n  \"city\": \"Delhi\"\n}"
+            },
+            "url": "{{baseUrl}}/api/customer/location/address/2"
+          }
+        },
+        {
+          "name": "Current Address",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/customer/location/current"
+          }
+        },
+        {
+          "name": "All Addresses",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/customer/location/all"
+          }
+        },
+        {
+          "name": "Reverse Geocode",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 22.7196,\n  \"longitude\": 75.8577\n}"
+            },
+            "url": "{{baseUrl}}/api/customer/location/reverse-geocode"
+          }
+        },
+        {
+          "name": "Serviceability Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 22.7196,\n  \"longitude\": 75.8577,\n  \"serviceType\": \"COOK\"\n}"
+            },
+            "url": "{{baseUrl}}/api/customer/location/serviceability/check"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Deprecated Adapters",
+      "item": [
+        {
+          "name": "Partner Shift Start",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{partnerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shiftStart\": \"2026-05-09T09:00:00\",\n  \"shiftEnd\": \"2026-05-09T18:00:00\"\n}"
+            },
+            "url": "{{baseUrl}}/api/partner/dispatch/shift/start"
+          }
+        },
+        {
+          "name": "Partner Availability Update",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{partnerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isOnline\": true,\n  \"maxActiveJobs\": 3\n}"
+            },
+            "url": "{{baseUrl}}/api/partner/dispatch/availability"
+          }
+        },
+        {
+          "name": "Partner Location Update",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{partnerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"latitude\": 22.7196,\n  \"longitude\": 75.8577,\n  \"source\": \"GPS\"\n}"
+            },
+            "url": "{{baseUrl}}/api/partner/dispatch/location"
+          }
+        },
+        {
+          "name": "Current Address (Deprecated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/customer/location/current/101"
+          }
+        },
+        {
+          "name": "Partner Shift Legacy",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{partnerToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isOnline\": true,\n  \"shiftStart\": \"2026-05-09T09:00:00\",\n  \"shiftEnd\": \"2026-05-09T18:00:00\",\n  \"maxActiveJobs\": 3\n}"
+            },
+            "url": "{{baseUrl}}/api/partner/dispatch/shift"
+          }
+        },
+        {
+          "name": "Legacy Address List",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{customerToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/address/list"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8082" },
+    { "key": "customerToken", "value": "" },
+    { "key": "partnerToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "customerMobile", "value": "9876543210" },
+    { "key": "partnerMobile", "value": "9876543211" },
+    { "key": "adminEmail", "value": "admin@lexho.com" },
+    { "key": "adminPassword", "value": "Admin@123" },
+    { "key": "customerOtp", "value": "" },
+    { "key": "partnerOtp", "value": "" },
+    { "key": "adminOtp", "value": "" }
+  ]
+}

@@ -1,0 +1,18 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="UserServiceApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <option name="ALTERNATIVE_JRE_PATH" value="17" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+    <module name="application-module" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.lexho.user_service.UserServiceApplication" />
+    <envs>
+      <env name="DB_URL" value="jdbc:mysql://localhost:3306/user_servicedb?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true" />
+      <env name="DB_USERNAME" value="root" />
+      <env name="DB_PASSWORD" value="Muskaan@8756" />
+      <env name="JWT_SECRET" value="9xK2mQ7pL8rT5vN1cW4yB6dF3hJ0sZ2uP9eR7tY1" />
+      <env name="ADMIN_SEED_PASSWORD" value="Admin@12345!" />
+    </envs>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

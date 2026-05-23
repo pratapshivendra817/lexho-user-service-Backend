@@ -1,0 +1,23 @@
+{
+  "info": {
+    "name": "Lexho Partner APIs",
+    "_postman_id": "f9dc5f2a-fd5b-4d98-b714-9ca67c34f4ea",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    { "name": "Partner Profile", "item": [
+      { "name": "Get Profile", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/profile" } },
+      { "name": "Update Profile", "request": { "method": "PUT", "header": [{"key":"Content-Type","value":"application/json"}], "body": { "mode":"raw","raw":"{\"name\":\"Rahul\",\"email\":\"rahul@lexho.com\",\"city\":\"Delhi\",\"address\":\"Dwarka\",\"serviceCategory\":\"cleaning\"}" }, "url":"{{baseUrl}}/api/partner/profile" } },
+      { "name": "Upload Profile Image", "request": { "method":"POST","body":{"mode":"formdata","formdata":[{"key":"file","type":"file","src":""}]},"url":"{{baseUrl}}/api/partner/profile-image" } }
+    ]},
+    { "name": "Orders", "item": [
+      { "name":"New Orders","request":{"method":"GET","url":"{{baseUrl}}/api/orders/new?page=0&size=20"} },
+      { "name":"Accept Order","request":{"method":"POST","url":"{{baseUrl}}/api/orders/1/accept"} },
+      { "name":"Start Order","request":{"method":"POST","body":{"mode":"formdata","formdata":[{"key":"beforeImage","type":"file","src":""}]},"url":"{{baseUrl}}/api/orders/1/start"} },
+      { "name":"Complete Order","request":{"method":"POST","body":{"mode":"formdata","formdata":[{"key":"afterImage","type":"file","src":""}]},"url":"{{baseUrl}}/api/orders/1/complete"} }
+    ]}
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" }
+  ]
+}

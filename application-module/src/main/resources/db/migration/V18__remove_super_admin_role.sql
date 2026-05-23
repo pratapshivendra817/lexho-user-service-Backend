@@ -1,0 +1,12 @@
+UPDATE admins SET role = 'ADMIN' WHERE role = 'SUPER_ADMIN';
+UPDATE customers SET role = 'ADMIN' WHERE role = 'SUPER_ADMIN';
+UPDATE lexho_user_profiles SET role = 'ADMIN' WHERE role = 'SUPER_ADMIN';
+
+ALTER TABLE admins
+    MODIFY COLUMN role ENUM ('ADMIN','CUSTOMER','PARTNER') NOT NULL;
+
+ALTER TABLE customers
+    MODIFY COLUMN role ENUM ('ADMIN','CUSTOMER','PARTNER') NOT NULL;
+
+ALTER TABLE lexho_user_profiles
+    MODIFY COLUMN role ENUM ('ADMIN','CUSTOMER','PARTNER') NOT NULL;
