@@ -1,6 +1,7 @@
 package com.lexho.user_service.banner.entity;
 
 import com.lexho.user_service.banner.enums.BannerPlatformType;
+import com.lexho.user_service.banner.enums.BannerPlacement;
 import com.lexho.user_service.banner.enums.BannerPromoType;
 import com.lexho.user_service.banner.enums.BannerRedirectType;
 import com.lexho.user_service.banner.enums.BannerStatus;
@@ -78,18 +79,8 @@ public class BannerPromotion {
     @Column(name = "end_date", nullable = false)
     private LocalDateTime endDate;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "redirect_type", nullable = false, length = 20)
-    private BannerRedirectType redirectType;
-
-    @Column(name = "redirect_value", length = 1000)
-    private String redirectValue;
-
     @Column(length = 100)
     private String city;
-
-    @Column(name = "service_category_id")
-    private Long serviceCategoryId;
 
     @Column(name = "new_user_only", nullable = false)
     private Boolean newUserOnly;
@@ -103,6 +94,17 @@ public class BannerPromotion {
     @Enumerated(EnumType.STRING)
     @Column(name = "platform_type", nullable = false, length = 20)
     private BannerPlatformType platformType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private BannerPlacement placement;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "redirect_type", nullable = false, length = 30)
+    private BannerRedirectType redirectType;
+
+    @Column(name = "redirect_value", length = 1000)
+    private String redirectValue;
 
     @Column(name = "click_count", nullable = false)
     private Long clickCount;
@@ -145,6 +147,12 @@ public class BannerPromotion {
         if (platformType == null) {
             platformType = BannerPlatformType.ALL;
         }
+        if (placement == null) {
+            placement = BannerPlacement.TOP;
+        }
+        if (redirectType == null) {
+            redirectType = BannerRedirectType.NONE;
+        }
         if (newUserOnly == null) {
             newUserOnly = false;
         }
@@ -170,4 +178,3 @@ public class BannerPromotion {
         updatedAt = LocalDateTime.now();
     }
 }
-

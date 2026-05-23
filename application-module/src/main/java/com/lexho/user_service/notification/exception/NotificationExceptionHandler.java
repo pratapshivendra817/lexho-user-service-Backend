@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.Map;
 
-@RestControllerAdvice(basePackages = "com.lexho.user_service.notification")
+@RestControllerAdvice
 public class NotificationExceptionHandler {
 
     @ExceptionHandler(NotificationNotFoundException.class)

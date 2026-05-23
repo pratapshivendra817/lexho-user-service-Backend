@@ -21,6 +21,15 @@ public class Payout {
     @Column(nullable = false, length = 40)
     private String status;
 
+    @Column(name = "reference_booking_id")
+    private Long referenceBookingId;
+
+    @Column(name = "remarks", length = 500)
+    private String remarks;
+
+    @Column(name = "processed_at")
+    private LocalDateTime processedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -59,5 +68,29 @@ public class Payout {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public Long getReferenceBookingId() {
+        return referenceBookingId;
+    }
+
+    public void setReferenceBookingId(Long referenceBookingId) {
+        this.referenceBookingId = referenceBookingId;
+    }
+
+    public String getRemarks() {
+        return remarks;
+    }
+
+    public void setRemarks(String remarks) {
+        this.remarks = remarks;
+    }
+
+    public LocalDateTime getProcessedAt() {
+        return processedAt;
+    }
+
+    public void setProcessedAt(LocalDateTime processedAt) {
+        this.processedAt = processedAt;
     }
 }

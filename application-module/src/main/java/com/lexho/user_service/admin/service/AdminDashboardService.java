@@ -6,7 +6,7 @@ import com.lexho.user_service.admin.dto.AdminServiceSummaryResponse;
 import com.lexho.user_service.admin.dto.DataResponse;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
-import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.partner.repository.PartnerRepository;
 import com.lexho.user.repository.UserRepository;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import org.springframework.stereotype.Service;

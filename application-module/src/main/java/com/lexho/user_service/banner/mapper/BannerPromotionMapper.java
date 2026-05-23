@@ -12,7 +12,9 @@ public class BannerPromotionMapper {
         banner.setTitle(request.getTitle());
         banner.setSubtitle(request.getSubtitle());
         banner.setDescription(request.getDescription());
-        banner.setBannerImageUrl(request.getBannerImageUrl());
+        if (request.getBannerImageUrl() != null && !request.getBannerImageUrl().trim().isBlank()) {
+            banner.setBannerImageUrl(request.getBannerImageUrl().trim());
+        }
         banner.setPromoType(request.getPromoType());
         banner.setStatus(request.getStatus());
         banner.setSlotNumber(request.getSlotNumber());
@@ -22,14 +24,14 @@ public class BannerPromotionMapper {
         banner.setCouponId(request.getCouponId());
         banner.setStartDate(request.getStartDate());
         banner.setEndDate(request.getEndDate());
-        banner.setRedirectType(request.getRedirectType());
-        banner.setRedirectValue(request.getRedirectValue());
         banner.setCity(request.getCity());
-        banner.setServiceCategoryId(request.getServiceCategoryId());
         banner.setNewUserOnly(request.getNewUserOnly());
         banner.setPremiumUserOnly(request.getPremiumUserOnly());
         banner.setMinOrderValue(request.getMinOrderValue());
         banner.setPlatformType(request.getPlatformType());
+        banner.setPlacement(request.getPlacement());
+        banner.setRedirectType(request.getRedirectType());
+        banner.setRedirectValue(request.getRedirectValue());
         banner.setMaxViewsPerUserPerDay(request.getMaxViewsPerUserPerDay());
     }
 
@@ -49,14 +51,14 @@ public class BannerPromotionMapper {
         response.setCouponId(banner.getCouponId());
         response.setStartDate(banner.getStartDate());
         response.setEndDate(banner.getEndDate());
-        response.setRedirectType(banner.getRedirectType());
-        response.setRedirectValue(banner.getRedirectValue());
         response.setCity(banner.getCity());
-        response.setServiceCategoryId(banner.getServiceCategoryId());
         response.setNewUserOnly(banner.getNewUserOnly());
         response.setPremiumUserOnly(banner.getPremiumUserOnly());
         response.setMinOrderValue(banner.getMinOrderValue());
         response.setPlatformType(banner.getPlatformType());
+        response.setPlacement(banner.getPlacement());
+        response.setRedirectType(banner.getRedirectType());
+        response.setRedirectValue(banner.getRedirectValue());
         response.setClickCount(banner.getClickCount());
         response.setImpressionCount(banner.getImpressionCount());
         response.setRedemptionCount(banner.getRedemptionCount());
@@ -67,4 +69,3 @@ public class BannerPromotionMapper {
         return response;
     }
 }
-

@@ -29,9 +29,11 @@ public class AdminFileUploadService {
     );
 
     private final Path servicesUploadDir;
+    private final Path bannersUploadDir;
 
     public AdminFileUploadService(@Value("${app.upload.base-dir:uploads}") String uploadBaseDir) {
         this.servicesUploadDir = Paths.get(uploadBaseDir, "services").toAbsolutePath().normalize();
+        this.bannersUploadDir = Paths.get(uploadBaseDir, "banners").toAbsolutePath().normalize();
     }
 
     public String uploadServiceImage(MultipartFile file) {
@@ -55,7 +57,31 @@ public class AdminFileUploadService {
             throw new InfrastructureException("Unable to store uploaded file");
         }
 
-        return "/uploads/services/" + fileName;
+        return "/images/services/" + fileName;
+    }
+
+    public String uploadBannerImage(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BadRequestException("File is required");
+        }
+
+        String extension = resolveExtension(file);
+        String fileName = UUID.randomUUID().toString().replace("-", "") + "." + extension;
+
+        try {
+            Files.createDirectories(bannersUploadDir);
+            Path target = bannersUploadDir.resolve(fileName).normalize();
+            if (!target.startsWith(bannersUploadDir)) {
+                throw new BadRequestException("Invalid file name");
+            }
+            try (InputStream inputStream = file.getInputStream()) {
+                Files.copy(inputStream, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException ex) {
+            throw new InfrastructureException("Unable to store uploaded file");
+        }
+
+        return "/images/banners/" + fileName;
     }
 
     private String resolveExtension(MultipartFile file) {

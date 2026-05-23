@@ -4,7 +4,10 @@ import com.lexho.user_service.admin.controller.AdminManagementController;
 import com.lexho.user_service.admin.service.AdminCatalogService;
 import com.lexho.user_service.admin.service.AdminFileUploadService;
 import com.lexho.user_service.admin.service.AdminManagementService;
+import com.lexho.user_service.admin.service.AdminSupportFaqService;
+import com.lexho.user_service.customer.banner.service.AdminCustomerBannerService;
 import com.lexho.user_service.config.JwtFilter;
+import com.lexho.user_service.service.ApiRateLimiterService;
 import com.lexho.user_service.TestWebSliceApp;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,7 +42,13 @@ class AdminManagementControllerTest {
     @MockBean
     private AdminFileUploadService adminFileUploadService;
     @MockBean
+    private AdminCustomerBannerService adminCustomerBannerService;
+    @MockBean
+    private AdminSupportFaqService adminSupportFaqService;
+    @MockBean
     private JwtFilter jwtFilter;
+    @MockBean
+    private ApiRateLimiterService apiRateLimiterService;
 
     @Test
     void uploadImageReturnsDataUrl() throws Exception {

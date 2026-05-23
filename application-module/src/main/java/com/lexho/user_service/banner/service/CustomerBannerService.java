@@ -9,6 +9,7 @@ import com.lexho.user_service.banner.entity.BannerImpressionLog;
 import com.lexho.user_service.banner.entity.BannerPromotion;
 import com.lexho.user_service.banner.entity.PromoRedemptionLog;
 import com.lexho.user_service.banner.enums.BannerPlatformType;
+import com.lexho.user_service.banner.enums.BannerPlacement;
 import com.lexho.user_service.banner.enums.BannerStatus;
 import com.lexho.user_service.banner.exception.BannerNotFoundException;
 import com.lexho.user_service.banner.exception.BannerValidationException;
@@ -17,6 +18,7 @@ import com.lexho.user_service.banner.repository.BannerClickLogRepository;
 import com.lexho.user_service.banner.repository.BannerImpressionLogRepository;
 import com.lexho.user_service.banner.repository.BannerPromotionRepository;
 import com.lexho.user_service.banner.repository.PromoRedemptionLogRepository;
+import com.lexho.user_service.util.MediaUrlResolver;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -35,23 +37,25 @@ public class CustomerBannerService {
     private final BannerClickLogRepository bannerClickLogRepository;
     private final PromoRedemptionLogRepository promoRedemptionLogRepository;
     private final BannerPromotionMapper bannerPromotionMapper;
+    private final MediaUrlResolver mediaUrlResolver;
 
     public CustomerBannerService(BannerPromotionRepository bannerPromotionRepository,
                                  BannerImpressionLogRepository bannerImpressionLogRepository,
                                  BannerClickLogRepository bannerClickLogRepository,
                                  PromoRedemptionLogRepository promoRedemptionLogRepository,
-                                 BannerPromotionMapper bannerPromotionMapper) {
+                                 BannerPromotionMapper bannerPromotionMapper,
+                                 MediaUrlResolver mediaUrlResolver) {
         this.bannerPromotionRepository = bannerPromotionRepository;
         this.bannerImpressionLogRepository = bannerImpressionLogRepository;
         this.bannerClickLogRepository = bannerClickLogRepository;
         this.promoRedemptionLogRepository = promoRedemptionLogRepository;
         this.bannerPromotionMapper = bannerPromotionMapper;
+        this.mediaUrlResolver = mediaUrlResolver;
     }
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "homepageBanners", key = "T(java.util.Objects).hash(#city,#serviceCategoryId,#platformType,#newUser,#premiumUser,#orderValue,#userId,#deviceId)")
+    @Cacheable(value = "homepageBanners", key = "T(java.util.Objects).hash(#city,#platformType,#newUser,#premiumUser,#orderValue,#userId,#deviceId)")
     public List<BannerPromotionResponse> homepageBanners(String city,
-                                                         Long serviceCategoryId,
                                                          BannerPlatformType platformType,
                                                          Boolean newUser,
                                                          Boolean premiumUser,
@@ -73,14 +77,16 @@ public class CustomerBannerService {
 
         return bannerPromotionRepository.findAll(spec).stream()
                 .filter(b -> city == null || city.isBlank() || b.getCity() == null || b.getCity().equalsIgnoreCase(city))
-                .filter(b -> serviceCategoryId == null || b.getServiceCategoryId() == null || serviceCategoryId.equals(b.getServiceCategoryId()))
                 .filter(b -> b.getPlatformType() == BannerPlatformType.ALL || b.getPlatformType() == requestedPlatform || requestedPlatform == BannerPlatformType.ALL)
                 .filter(b -> !Boolean.TRUE.equals(b.getNewUserOnly()) || isNewUser)
                 .filter(b -> !Boolean.TRUE.equals(b.getPremiumUserOnly()) || isPremiumUser)
                 .filter(b -> b.getMinOrderValue() == null || safeOrderValue.compareTo(b.getMinOrderValue()) >= 0)
                 .filter(b -> withinDailyViewLimit(b, userId, deviceId))
-                .sorted(Comparator.comparing(BannerPromotion::getPriority).reversed().thenComparing(BannerPromotion::getSlotNumber))
-                .map(bannerPromotionMapper::toResponse)
+                .sorted(Comparator
+                        .comparingInt((BannerPromotion b) -> placementOrder(b.getPlacement()))
+                        .thenComparing(BannerPromotion::getPriority, Comparator.reverseOrder())
+                        .thenComparing(BannerPromotion::getSlotNumber))
+                .map(this::toPublicResponse)
                 .toList();
     }
 
@@ -151,5 +157,20 @@ public class CustomerBannerService {
         }
         return banner;
     }
-}
 
+    private BannerPromotionResponse toPublicResponse(BannerPromotion banner) {
+        BannerPromotionResponse response = bannerPromotionMapper.toResponse(banner);
+        response.setBannerImageUrl(mediaUrlResolver.toPublicUrl(response.getBannerImageUrl()));
+        return response;
+    }
+
+    private int placementOrder(BannerPlacement placement) {
+        if (placement == BannerPlacement.TOP) {
+            return 0;
+        }
+        if (placement == BannerPlacement.BOTTOM) {
+            return 1;
+        }
+        return 2;
+    }
+}

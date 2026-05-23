@@ -6,9 +6,13 @@ import com.lexho.user_service.banner.dto.BannerStatsResponse;
 import com.lexho.user_service.banner.dto.BannerUpsertRequest;
 import com.lexho.user_service.banner.enums.BannerStatus;
 import com.lexho.user_service.banner.service.AdminBannerPromotionService;
+import com.lexho.user_service.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,17 +25,26 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import com.lexho.user_service.admin.service.AdminFileUploadService;
+
+import java.util.Map;
 
 @RestController
-@RequestMapping("/api/admin/banners")
+@RequestMapping({"/api/admin/home-banners", "/api/v1/admin/home-banners"})
 @PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Banner Promotions", description = "Banner and promotions management APIs for admin")
 public class AdminBannerPromotionController {
+    private static final Logger log = LoggerFactory.getLogger(AdminBannerPromotionController.class);
 
     private final AdminBannerPromotionService adminBannerPromotionService;
+    private final AdminFileUploadService adminFileUploadService;
 
-    public AdminBannerPromotionController(AdminBannerPromotionService adminBannerPromotionService) {
+    public AdminBannerPromotionController(AdminBannerPromotionService adminBannerPromotionService,
+                                          AdminFileUploadService adminFileUploadService) {
         this.adminBannerPromotionService = adminBannerPromotionService;
+        this.adminFileUploadService = adminFileUploadService;
     }
 
     @PostMapping
@@ -40,11 +53,23 @@ public class AdminBannerPromotionController {
         return ResponseEntity.ok(adminBannerPromotionService.create(request));
     }
 
+    @PostMapping(value = "/upload/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Upload banner image")
+    public ResponseEntity<Map<String, Object>> uploadBannerImage(@RequestParam("file") MultipartFile file) {
+        String relativeUrl = adminFileUploadService.uploadBannerImage(file);
+        String absoluteUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path(relativeUrl)
+                .toUriString();
+        return ResponseEntity.ok(Map.of("data", Map.of("url", absoluteUrl)));
+    }
+
     @PutMapping("/{id}")
     @Operation(summary = "Update banner")
-    public ResponseEntity<BannerPromotionResponse> update(@PathVariable Long id,
-                                                          @Valid @RequestBody BannerUpsertRequest request) {
-        return ResponseEntity.ok(adminBannerPromotionService.update(id, request));
+    public ResponseEntity<ApiResponse<BannerPromotionResponse>> update(@PathVariable Long id,
+                                                                       @Valid @RequestBody BannerUpsertRequest request) {
+        log.info("Banner update API called: id={}, title={}, bannerImageUrl={}", id, request.getTitle(), request.getBannerImageUrl());
+        BannerPromotionResponse response = adminBannerPromotionService.update(id, request);
+        return ResponseEntity.ok(ApiResponse.success("Banner updated", response));
     }
 
     @DeleteMapping("/{id}")
@@ -99,4 +124,3 @@ public class AdminBannerPromotionController {
         return ResponseEntity.ok(adminBannerPromotionService.dashboardStats());
     }
 }
-

@@ -1,7 +1,7 @@
 package com.lexho.user_service.controller;
 
-import com.lexho.provider.entity.Partner;
-import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.partner.entity.Partner;
+import com.lexho.partner.repository.PartnerRepository;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.dto.PartnerResponseDTO;
 import org.springframework.security.access.prepost.PreAuthorize;

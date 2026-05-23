@@ -26,6 +26,15 @@ public class SupportTicket {
     @Column(nullable = false, length = 40)
     private String status;
 
+    @Column(name = "category_id", length = 100)
+    private String categoryId;
+
+    @Column(name = "booking_id", length = 100)
+    private String bookingId;
+
+    @Column(length = 20)
+    private String priority;
+
     @OneToMany(mappedBy = "ticket", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SupportTicketReply> replies = new ArrayList<>();
 
@@ -85,6 +94,30 @@ public class SupportTicket {
 
     public List<SupportTicketReply> getReplies() {
         return replies;
+    }
+
+    public String getCategoryId() {
+        return categoryId;
+    }
+
+    public void setCategoryId(String categoryId) {
+        this.categoryId = categoryId;
+    }
+
+    public String getBookingId() {
+        return bookingId;
+    }
+
+    public void setBookingId(String bookingId) {
+        this.bookingId = bookingId;
+    }
+
+    public String getPriority() {
+        return priority;
+    }
+
+    public void setPriority(String priority) {
+        this.priority = priority;
     }
 
     public LocalDateTime getCreatedAt() {

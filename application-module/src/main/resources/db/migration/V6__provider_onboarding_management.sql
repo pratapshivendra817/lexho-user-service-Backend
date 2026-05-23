@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS providers (
+CREATE TABLE IF NOT EXISTS partners (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     provider_code VARCHAR(20) UNIQUE,
     full_name VARCHAR(120) NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS providers (
 CREATE TABLE IF NOT EXISTS provider_service_areas (
     provider_id BIGINT NOT NULL,
     service_area VARCHAR(100) NOT NULL,
-    CONSTRAINT fk_provider_service_areas_provider FOREIGN KEY (provider_id) REFERENCES providers(id)
+    CONSTRAINT fk_provider_service_areas_provider FOREIGN KEY (provider_id) REFERENCES partners(id)
 );
 
 CREATE TABLE IF NOT EXISTS provider_documents (
@@ -43,14 +43,14 @@ CREATE TABLE IF NOT EXISTS provider_documents (
     file_name VARCHAR(255) NOT NULL,
     file_type VARCHAR(100) NOT NULL,
     uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_provider_documents_provider FOREIGN KEY (provider_id) REFERENCES providers(id)
+    CONSTRAINT fk_provider_documents_provider FOREIGN KEY (provider_id) REFERENCES partners(id)
 );
 
-CREATE INDEX idx_providers_onboarding_status ON providers(onboarding_status);
-CREATE INDEX idx_providers_kyc_status ON providers(kyc_status);
-CREATE INDEX idx_providers_city ON providers(city);
-CREATE INDEX idx_providers_service_category ON providers(service_category_id);
-CREATE INDEX idx_providers_phone_number ON providers(phone_number);
+CREATE INDEX idx_providers_onboarding_status ON partners(onboarding_status);
+CREATE INDEX idx_providers_kyc_status ON partners(kyc_status);
+CREATE INDEX idx_providers_city ON partners(city);
+CREATE INDEX idx_providers_service_category ON partners(service_category_id);
+CREATE INDEX idx_providers_phone_number ON partners(phone_number);
 CREATE INDEX idx_provider_documents_provider ON provider_documents(provider_id);
 CREATE UNIQUE INDEX uq_provider_documents_provider_type ON provider_documents(provider_id, document_type);
 

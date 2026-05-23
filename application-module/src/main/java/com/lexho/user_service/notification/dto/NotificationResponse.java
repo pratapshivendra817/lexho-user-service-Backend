@@ -26,12 +26,14 @@ public class NotificationResponse {
     private Long referenceId;
     private String referenceType;
     private String redirectType;
+    private String bookingId;
     private String redirectValue;
     private LocalDateTime scheduledTime;
     private LocalDateTime expiryTime;
     private LocalDateTime sentAt;
     private LocalDateTime readAt;
     private LocalDateTime clickedAt;
+    private String failureReason;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

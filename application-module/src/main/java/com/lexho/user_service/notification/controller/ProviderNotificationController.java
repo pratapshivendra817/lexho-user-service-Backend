@@ -18,9 +18,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/provider/notifications")
-@PreAuthorize("hasAnyRole('PARTNER','PROVIDER')")
-@Tag(name = "Provider Notification APIs", description = "Notification APIs for provider/partner app")
+@RequestMapping("/api/internal/provider/notifications")
+@PreAuthorize("hasRole('PARTNER')")
+@Tag(name = "Partner Notification APIs", description = "Notification APIs for partner/partner app")
 public class ProviderNotificationController {
 
     private final NotificationManagementService notificationManagementService;
@@ -33,7 +33,7 @@ public class ProviderNotificationController {
     }
 
     @GetMapping
-    @Operation(summary = "Get provider notifications")
+    @Operation(summary = "Get partner notifications")
     public ResponseEntity<NotificationPageResponse<NotificationResponse>> notifications(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
@@ -41,14 +41,14 @@ public class ProviderNotificationController {
     }
 
     @PatchMapping("/{id}/read")
-    @Operation(summary = "Mark provider notification as read")
+    @Operation(summary = "Mark partner notification as read")
     public ResponseEntity<NotificationResponse> markRead(@PathVariable Long id) {
         Notification updated = notificationManagementService.markAsReadForCurrentUser(id);
         return ResponseEntity.ok(notificationMapper.toResponse(updated));
     }
 
     @GetMapping("/unread-count")
-    @Operation(summary = "Get provider unread count")
+    @Operation(summary = "Get partner unread count")
     public ResponseEntity<UnreadCountResponse> unreadCount() {
         return ResponseEntity.ok(new UnreadCountResponse(notificationManagementService.unreadCountForCurrentUser()));
     }

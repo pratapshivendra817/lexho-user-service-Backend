@@ -1,6 +1,7 @@
 package com.lexho.user_service.banner.dto;
 
 import com.lexho.user_service.banner.enums.BannerPlatformType;
+import com.lexho.user_service.banner.enums.BannerPlacement;
 import com.lexho.user_service.banner.enums.BannerPromoType;
 import com.lexho.user_service.banner.enums.BannerRedirectType;
 import com.lexho.user_service.banner.enums.BannerStatus;
@@ -27,14 +28,14 @@ public class BannerPromotionResponse {
     private Long couponId;
     private LocalDateTime startDate;
     private LocalDateTime endDate;
-    private BannerRedirectType redirectType;
-    private String redirectValue;
     private String city;
-    private Long serviceCategoryId;
     private Boolean newUserOnly;
     private Boolean premiumUserOnly;
     private BigDecimal minOrderValue;
     private BannerPlatformType platformType;
+    private BannerPlacement placement;
+    private BannerRedirectType redirectType;
+    private String redirectValue;
     private Long clickCount;
     private Long impressionCount;
     private Long redemptionCount;
@@ -43,4 +44,3 @@ public class BannerPromotionResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

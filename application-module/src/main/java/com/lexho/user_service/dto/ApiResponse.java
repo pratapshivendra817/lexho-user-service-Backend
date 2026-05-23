@@ -5,6 +5,8 @@ public class ApiResponse<T> {
     private boolean success;
     private String message;
     private T data;
+    private String token;
+    private String timestamp;
 
     public ApiResponse() {
     }
@@ -13,10 +15,23 @@ public class ApiResponse<T> {
         this.success = success;
         this.message = message;
         this.data = data;
+        this.timestamp = java.time.OffsetDateTime.now().toString();
+    }
+
+    public ApiResponse(boolean success, String message, T data, String token) {
+        this.success = success;
+        this.message = message;
+        this.data = data;
+        this.token = token;
+        this.timestamp = java.time.OffsetDateTime.now().toString();
     }
 
     public static <T> ApiResponse<T> success(String message, T data) {
         return new ApiResponse<>(true, message, data);
+    }
+
+    public static <T> ApiResponse<T> success(String message, T data, String token) {
+        return new ApiResponse<>(true, message, data, token);
     }
 
     public static <T> ApiResponse<T> failure(String message) {
@@ -45,5 +60,21 @@ public class ApiResponse<T> {
 
     public void setData(T data) {
         this.data = data;
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public void setToken(String token) {
+        this.token = token;
+    }
+
+    public String getTimestamp() {
+        return timestamp;
+    }
+
+    public void setTimestamp(String timestamp) {
+        this.timestamp = timestamp;
     }
 }

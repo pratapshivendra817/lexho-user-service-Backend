@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 );
 
 INSERT INTO admins (email, password_hash, role, is_active)
-SELECT 'admin@lexho.com', '$2a$10$R1V7k/NM1h2Y89bJ8jA1PecW6QdOi4f6rDqXj6Vw8MlyQkzV3u6fO', 'SUPER_ADMIN', TRUE
+SELECT 'admin@lexho.com', '$2a$10$R1V7k/NM1h2Y89bJ8jA1PecW6QdOi4f6rDqXj6Vw8MlyQkzV3u6fO', 'ADMIN', TRUE
 WHERE NOT EXISTS (SELECT 1 FROM admins WHERE email = 'admin@lexho.com');
 
 INSERT INTO banners (title, image_url, active)

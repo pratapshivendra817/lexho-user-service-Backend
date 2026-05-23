@@ -1,6 +1,7 @@
 package com.lexho.user_service.controller;
 
 import com.lexho.user_service.dto.ApiResponse;
+import com.lexho.user_service.service.DeprecatedApiUsageService;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,9 +13,21 @@ import java.util.Map;
 @RequestMapping("/api/ops")
 public class OpsController {
 
+    private final DeprecatedApiUsageService deprecatedApiUsageService;
+
+    public OpsController(DeprecatedApiUsageService deprecatedApiUsageService) {
+        this.deprecatedApiUsageService = deprecatedApiUsageService;
+    }
+
     @GetMapping("/summary")
     @PreAuthorize("hasAnyRole('ADMIN','PARTNER')")
     public ApiResponse<Map<String, String>> opsSummary() {
         return ApiResponse.success("Admin/Partner access granted", Map.of("scope", "ADMIN_OR_PARTNER"));
+    }
+
+    @GetMapping("/deprecations")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<Map<String, Object>> deprecatedUsage() {
+        return ApiResponse.success("Deprecated API usage snapshot", deprecatedApiUsageService.snapshot());
     }
 }

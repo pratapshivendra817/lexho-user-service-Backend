@@ -1,6 +1,7 @@
 package com.lexho.user_service.banner.dto;
 
 import com.lexho.user_service.banner.enums.BannerPlatformType;
+import com.lexho.user_service.banner.enums.BannerPlacement;
 import com.lexho.user_service.banner.enums.BannerPromoType;
 import com.lexho.user_service.banner.enums.BannerRedirectType;
 import com.lexho.user_service.banner.enums.BannerStatus;
@@ -29,7 +30,6 @@ public class BannerUpsertRequest {
     @Size(max = 1000, message = "Description must be at most 1000 characters")
     private String description;
 
-    @NotBlank(message = "Banner image URL is required")
     @Size(max = 1000, message = "Banner image URL must be at most 1000 characters")
     private String bannerImageUrl;
 
@@ -60,16 +60,8 @@ public class BannerUpsertRequest {
     @NotNull(message = "End date is required")
     private LocalDateTime endDate;
 
-    @NotNull(message = "Redirect type is required")
-    private BannerRedirectType redirectType;
-
-    @Size(max = 1000, message = "Redirect value must be at most 1000 characters")
-    private String redirectValue;
-
     @Size(max = 100, message = "City must be at most 100 characters")
     private String city;
-
-    private Long serviceCategoryId;
 
     private Boolean newUserOnly;
 
@@ -81,6 +73,14 @@ public class BannerUpsertRequest {
     @NotNull(message = "Platform type is required")
     private BannerPlatformType platformType;
 
+    @NotNull(message = "Placement is required")
+    private BannerPlacement placement;
+
+    @NotNull(message = "Redirect type is required")
+    private BannerRedirectType redirectType;
+
+    @Size(max = 1000, message = "Redirect value must be at most 1000 characters")
+    private String redirectValue;
+
     private Integer maxViewsPerUserPerDay;
 }
-

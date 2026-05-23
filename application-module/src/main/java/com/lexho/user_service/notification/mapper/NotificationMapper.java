@@ -21,6 +21,13 @@ public class NotificationMapper {
         response.setReferenceId(notification.getReferenceId());
         response.setReferenceType(notification.getReferenceType());
         response.setRedirectType(notification.getRedirectType());
+        if ("BOOKING".equalsIgnoreCase(notification.getReferenceType())) {
+            if (notification.getReferenceId() != null) {
+                response.setBookingId(String.valueOf(notification.getReferenceId()));
+            } else if (notification.getRedirectValue() != null && !notification.getRedirectValue().isBlank()) {
+                response.setBookingId(notification.getRedirectValue().trim());
+            }
+        }
         response.setRedirectValue(notification.getRedirectValue());
         response.setScheduledTime(notification.getScheduledTime());
         response.setExpiryTime(notification.getExpiryTime());

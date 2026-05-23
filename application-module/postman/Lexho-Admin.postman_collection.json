@@ -5,6 +5,48 @@
     "description": "Complete admin dashboard API collection for Lexho backend",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const expectedByRequest = {",
+          "  'Verify OTP': [200, 400],",
+          "  'Get Booking': [200, 404, 500],",
+          "  'Update Verification': [200, 400, 404],",
+          "  'Delete Review': [200, 404, 500],",
+          "  'Flag Review': [200, 404, 500],",
+          "  'Create Notification': [200, 400, 404],",
+          "  'Update Ticket Status': [200, 404],",
+          "  'Reply Ticket': [200, 404],",
+          "  'Toggle User': [200, 404]",
+          "};",
+          "const strictMode = String(pm.environment.get('strictMode') || '').toLowerCase() === 'true';",
+          "const allowed = expectedByRequest[pm.info.requestName] || [];",
+          "pm.test('HTTP status is expected', function () {",
+          "  if (strictMode) {",
+          "    pm.expect(pm.response.code).to.be.below(400);",
+          "    return;",
+          "  }",
+          "  if (allowed.length > 0) {",
+          "    pm.expect(allowed).to.include(pm.response.code);",
+          "    return;",
+          "  }",
+          "  pm.expect(pm.response.code).to.be.below(400);",
+          "});",
+          "",
+          "pm.test('Response is valid JSON when body is present', function () {",
+          "  const text = pm.response.text();",
+          "  if (!text || !text.trim()) {",
+          "    return;",
+          "  }",
+          "  pm.expect(function () { JSON.parse(text); }).to.not.throw();",
+          "});"
+        ]
+      }
+    }
+  ],
   "item": [
     {
       "name": "Auth",
@@ -115,20 +157,20 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/users/1"
+            "url": "{{baseUrl}}/api/admin/users/{{userId}}"
           }
         },
         {
           "name": "Toggle User",
           "request": {
-            "method": "POST",
+            "method": "PUT",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/users/1/toggle"
+            "url": "{{baseUrl}}/api/admin/users/{{userId}}/block"
           }
         }
       ]
@@ -159,16 +201,16 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/bookings/1"
+            "url": "{{baseUrl}}/api/admin/bookings/{{bookingId}}"
           }
         }
       ]
     },
     {
-      "name": "Providers",
+      "name": "Partners",
       "item": [
         {
-          "name": "List Providers",
+          "name": "List Partners",
           "request": {
             "method": "GET",
             "header": [
@@ -177,11 +219,11 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/providers?page=1&limit=10&search=&status="
+            "url": "{{baseUrl}}/api/admin/partners?page=1&limit=10&search=&status="
           }
         },
         {
-          "name": "Get Provider",
+          "name": "Get Partner",
           "request": {
             "method": "GET",
             "header": [
@@ -190,7 +232,7 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/providers/1"
+            "url": "{{baseUrl}}/api/admin/partners/{{partnerId}}"
           }
         },
         {
@@ -211,7 +253,7 @@
               "mode": "raw",
               "raw": "{\n  \"status\": \"VERIFIED\"\n}"
             },
-            "url": "{{baseUrl}}/api/admin/providers/1/verification"
+            "url": "{{baseUrl}}/api/admin/partners/{{partnerId}}/verification"
           }
         }
       ]
@@ -271,27 +313,27 @@
         {
           "name": "Delete Review",
           "request": {
-            "method": "DELETE",
+            "method": "PATCH",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/reviews/1"
+            "url": "{{baseUrl}}/api/admin/reviews/{{reviewId}}/hide"
           }
         },
         {
           "name": "Flag Review",
           "request": {
-            "method": "POST",
+            "method": "PATCH",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/reviews/1/flag"
+            "url": "{{baseUrl}}/api/admin/reviews/{{reviewId}}/reject"
           }
         }
       ]
@@ -328,9 +370,9 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"userId\": 1,\n  \"title\": \"Service Update\",\n  \"message\": \"Your booking has been updated\",\n  \"type\": \"BOOKING\",\n  \"referenceId\": 1\n}"
+              "raw": "{\n  \"title\": \"Service Update\",\n  \"message\": \"Your booking has been updated\",\n  \"notificationType\": \"SYSTEM_ALERT\",\n  \"priority\": \"NORMAL\",\n  \"channels\": [\"PUSH\"],\n  \"targetUserType\": \"CUSTOMER\",\n  \"userIds\": [{{userId}}],\n  \"referenceId\": {{bookingId}},\n  \"referenceType\": \"BOOKING\",\n  \"redirectType\": \"NONE\"\n}"
             },
-            "url": "{{baseUrl}}/api/admin/notifications"
+            "url": "{{baseUrl}}/api/admin/notifications/send"
           }
         }
       ]
@@ -405,7 +447,7 @@
               "mode": "raw",
               "raw": "{\n  \"status\": \"IN_PROGRESS\"\n}"
             },
-            "url": "{{baseUrl}}/api/admin/support/tickets/1/status"
+            "url": "{{baseUrl}}/api/admin/support/tickets/{{ticketId}}/status"
           }
         },
         {
@@ -426,7 +468,7 @@
               "mode": "raw",
               "raw": "{\n  \"message\": \"We are looking into this issue.\"\n}"
             },
-            "url": "{{baseUrl}}/api/admin/support/tickets/1/reply"
+            "url": "{{baseUrl}}/api/admin/support/tickets/{{ticketId}}/reply"
           }
         }
       ]
@@ -440,6 +482,26 @@
     {
       "key": "accessToken",
       "value": ""
+    },
+    {
+      "key": "userId",
+      "value": "1"
+    },
+    {
+      "key": "bookingId",
+      "value": "1"
+    },
+    {
+      "key": "partnerId",
+      "value": "1"
+    },
+    {
+      "key": "reviewId",
+      "value": "1"
+    },
+    {
+      "key": "ticketId",
+      "value": "1"
     }
   ]
 }

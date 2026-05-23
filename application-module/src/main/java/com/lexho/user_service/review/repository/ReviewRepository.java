@@ -20,6 +20,8 @@ public interface ReviewRepository extends JpaRepository<ReviewEntity, Long>, Jpa
 
     List<ReviewEntity> findByCustomerIdAndDeletedFalseOrderByCreatedAtDesc(Long customerId);
 
+    List<ReviewEntity> findByServiceIdAndDeletedFalseOrderByCreatedAtDesc(Long serviceId);
+
     Page<ReviewEntity> findByProviderIdAndDeletedFalse(Long providerId, Pageable pageable);
 
     Page<ReviewEntity> findByReportCountGreaterThanAndDeletedFalse(long reportCount, Pageable pageable);

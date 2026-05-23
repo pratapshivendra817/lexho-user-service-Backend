@@ -13,6 +13,9 @@ public class NotificationWebSocketConfig implements WebSocketMessageBrokerConfig
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws-notifications").setAllowedOriginPatterns("*");
+        registry.addEndpoint("/ws/admin/notifications").setAllowedOriginPatterns("*");
+        registry.addEndpoint("/ws/customer/bookings").setAllowedOriginPatterns("*");
+        registry.addEndpoint("/ws/customer/bookings/{bookingId}").setAllowedOriginPatterns("*");
     }
 
     @Override

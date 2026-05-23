@@ -2,8 +2,8 @@ package com.lexho.user_service.service;
 
 import com.lexho.booking.entity.Cart;
 import com.lexho.booking.repository.CartRepository;
-import com.lexho.provider.entity.Partner;
-import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.partner.entity.Partner;
+import com.lexho.partner.repository.PartnerRepository;
 import com.lexho.user_service.dto.CartRequest;
 import com.lexho.user_service.dto.CartResponseDTO;
 import com.lexho.user_service.dto.CartSummaryDTO;

@@ -48,7 +48,7 @@ public class AdminSeedService implements CommandLineRunner {
         Admin admin = adminRepository.findByEmailIgnoreCase(email).orElseGet(Admin::new);
         admin.setEmail(email);
         admin.setPasswordHash(encodedPassword);
-        admin.setRole(Role.SUPER_ADMIN);
+        admin.setRole(Role.ADMIN);
         admin.setActive(true);
         admin.resetFailedAttempts();
 

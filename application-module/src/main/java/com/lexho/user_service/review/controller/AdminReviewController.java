@@ -15,10 +15,17 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestBody;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
+
+import java.util.List;
+import java.util.Map;
 
 @RestController
-@RequestMapping("/api/admin/reviews")
-@PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
+@RequestMapping({"/api/admin/reviews", "/api/v1/admin/reviews"})
+@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Review Management", description = "Admin moderation and analytics APIs for reviews")
 public class AdminReviewController {
 
@@ -69,6 +76,12 @@ public class AdminReviewController {
         return ResponseEntity.ok(reviewManagementService.hideReview(id));
     }
 
+    @PatchMapping("/{id}/unhide")
+    @Operation(summary = "Unhide review (set to approved)")
+    public ResponseEntity<ReviewResponse> unhide(@PathVariable Long id) {
+        return ResponseEntity.ok(reviewManagementService.approveReview(id));
+    }
+
     @GetMapping("/reported")
     @Operation(summary = "Get reported reviews")
     public ResponseEntity<ReviewPageResponse<ReviewResponse>> reported(
@@ -81,5 +94,31 @@ public class AdminReviewController {
     @Operation(summary = "Review analytics")
     public ResponseEntity<ReviewStatsResponse> stats() {
         return ResponseEntity.ok(reviewManagementService.getReviewStats());
+    }
+
+    @PatchMapping("/bulk/status")
+    @Operation(summary = "Bulk moderation on reviews")
+    public ResponseEntity<Map<String, Object>> bulkStatus(@Valid @RequestBody BulkReviewStatusRequest request) {
+        long processed = 0;
+        for (Long reviewId : request.reviewIds) {
+            if (reviewId == null) {
+                continue;
+            }
+            switch ((request.action == null ? "" : request.action.trim().toUpperCase())) {
+                case "APPROVE" -> reviewManagementService.approveReview(reviewId);
+                case "REJECT" -> reviewManagementService.rejectReview(reviewId);
+                case "HIDE" -> reviewManagementService.hideReview(reviewId);
+                case "UNHIDE" -> reviewManagementService.approveReview(reviewId);
+                default -> throw new IllegalArgumentException("Invalid action. Use APPROVE, REJECT, HIDE, UNHIDE");
+            }
+            processed++;
+        }
+        return ResponseEntity.ok(Map.of("success", true, "processed", processed));
+    }
+
+    public static class BulkReviewStatusRequest {
+        @NotEmpty(message = "reviewIds are required")
+        public List<Long> reviewIds;
+        public String action;
     }
 }

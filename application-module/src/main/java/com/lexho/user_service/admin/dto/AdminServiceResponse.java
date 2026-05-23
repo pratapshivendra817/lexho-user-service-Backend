@@ -2,6 +2,7 @@ package com.lexho.user_service.admin.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class AdminServiceResponse {
 
@@ -10,12 +11,14 @@ public class AdminServiceResponse {
     private Long categoryId;
     private String categoryName;
     private String description;
+    private String serviceType;
     private BigDecimal basePrice;
     private Integer durationMinutes;
     private Double rating;
     private boolean active;
     private long totalBookings;
     private String imageUrl;
+    private List<AdminServiceDetailResponse> details;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -57,6 +60,14 @@ public class AdminServiceResponse {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getServiceType() {
+        return serviceType;
+    }
+
+    public void setServiceType(String serviceType) {
+        this.serviceType = serviceType;
     }
 
     public BigDecimal getBasePrice() {
@@ -107,6 +118,14 @@ public class AdminServiceResponse {
         this.imageUrl = imageUrl;
     }
 
+    public List<AdminServiceDetailResponse> getDetails() {
+        return details;
+    }
+
+    public void setDetails(List<AdminServiceDetailResponse> details) {
+        this.details = details;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -123,4 +142,3 @@ public class AdminServiceResponse {
         this.updatedAt = updatedAt;
     }
 }
-

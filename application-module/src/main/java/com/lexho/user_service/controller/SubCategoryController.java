@@ -28,7 +28,6 @@ public class SubCategoryController {
 
     @GetMapping("/category/{id}")
     public List<SubCategory> getByCategory(@PathVariable Long id) {
-        return repo.findByCategory_Id(id);
+        return repo.findByCategoryId(id);
     }
 }
-

@@ -5,6 +5,9 @@ This repository contains admin backend APIs. Frontend project is not present her
 ## 1) Backend prerequisites
 
 - Run backend on `http://localhost:8082` (or your deployed host).
+- For physical phone testing, use your laptop LAN IP instead of localhost:
+  - example: `http://192.168.1.23:8082`
+  - phone and laptop must be on same Wi-Fi
 - Ensure admin seed user exists:
   - `admin.seed.enabled=true`
   - default email/password from `application.properties`:
@@ -22,8 +25,8 @@ This repository contains admin backend APIs. Frontend project is not present her
 4. Send `Authorization: Bearer <accessToken>` for all protected `/api/admin/**` endpoints.
 
 Important:
-- Admin frontend must never call `/auth/login` or `/api/auth/*` for admin sign-in.
-- Customer OTP/auth flows remain under `/otp/*` and `/api/auth/*`.
+- Admin frontend must never call `/auth/login` for admin sign-in.
+- Customer OTP/auth flows remain under `/otp/*` and `/auth/*`.
 
 ## 3) Ready client in this repo
 
@@ -34,7 +37,7 @@ Important:
 import { createAdminApiClient } from "./admin-api-client";
 
 const adminApi = createAdminApiClient({
-  baseUrl: "http://localhost:8082",
+  baseUrl: "http://192.168.1.23:8082",
 });
 ```
 
@@ -51,7 +54,7 @@ Image upload:
 ## 4) Minimal frontend API client example (JavaScript)
 
 ```js
-const BASE_URL = "http://localhost:8082";
+const BASE_URL = "http://192.168.1.23:8082";
 
 async function adminLogin(email, password) {
   const res = await fetch(`${BASE_URL}/api/admin/login`, {
@@ -89,7 +92,7 @@ async function adminApi(path, options = {}) {
 
 // Examples:
 // adminApi("/api/admin/dashboard/stats");
-// adminApi("/api/admin/providers/1/verification", { method: "PATCH", body: JSON.stringify({ status: "VERIFIED" }) });
+// adminApi("/api/admin/partners/1/verification", { method: "PATCH", body: JSON.stringify({ status: "VERIFIED" }) });
 ```
 
 ## 5) Smoke test command
@@ -104,4 +107,4 @@ The script performs:
 - login -> OTP
 - verify OTP -> token
 - dashboard stats API call
-- provider verification `PATCH` API call
+- partner verification `PATCH` API call

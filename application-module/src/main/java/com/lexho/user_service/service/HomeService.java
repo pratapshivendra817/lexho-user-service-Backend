@@ -2,8 +2,8 @@ package com.lexho.user_service.service;
 
 import com.lexho.catalog.entity.ServiceCategory;
 import com.lexho.catalog.repository.CategoryRepository;
-import com.lexho.provider.entity.Partner;
-import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.partner.entity.Partner;
+import com.lexho.partner.repository.PartnerRepository;
 import com.lexho.user.entity.User;
 import com.lexho.user.repository.UserRepository;
 import com.lexho.user_service.config.AppProperties;

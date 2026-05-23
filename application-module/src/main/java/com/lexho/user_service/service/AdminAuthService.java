@@ -157,15 +157,8 @@ public class AdminAuthService {
         }
         String normalizedRawPassword = rawPassword == null ? null : rawPassword.trim();
 
-        // TEMP DEBUG (remove after investigation)
-        log.debug("Admin login password debug: email={}, adminId={}, rawPassword='{}'", email, adminId, normalizedRawPassword);
-        log.debug("Admin login password debug: email={}, adminId={}, storedHash='{}'", email, adminId, normalizedHash);
-
         try {
-            // BCrypt comparison (raw password vs stored hash)
             boolean matches = passwordEncoder.matches(normalizedRawPassword, normalizedHash);
-            // TEMP DEBUG (remove after investigation)
-            log.debug("Admin login password debug: email={}, adminId={}, passwordMatch={}", email, adminId, matches);
             return matches;
         } catch (RuntimeException ex) {
             log.warn("Admin login failed: password hash validation error for email={}, adminId={}", email, adminId, ex);

@@ -1,18 +1,24 @@
 package com.lexho.user_service.notification.event;
 
 import com.lexho.notification.entity.Notification;
-import com.lexho.notification.entity.UserDeviceToken;
 import com.lexho.notification.enums.ChannelType;
 import com.lexho.notification.enums.NotificationStatus;
+import com.lexho.notification.enums.NotificationUserType;
+import com.lexho.user_service.notification.service.EmailNotificationService;
+import com.lexho.user_service.notification.service.FcmPushService;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.notification.service.PushTokenService;
+import com.lexho.user_service.notification.service.SmsNotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Component
@@ -21,25 +27,45 @@ public class NotificationDispatchListener {
     private static final Logger log = LoggerFactory.getLogger(NotificationDispatchListener.class);
 
     private final NotificationManagementService notificationManagementService;
+    private final PushTokenService pushTokenService;
+    private final FcmPushService fcmPushService;
+    private final EmailNotificationService emailNotificationService;
+    private final SmsNotificationService smsNotificationService;
     private final SimpMessagingTemplate messagingTemplate;
 
     public NotificationDispatchListener(NotificationManagementService notificationManagementService,
+                                        PushTokenService pushTokenService,
+                                        FcmPushService fcmPushService,
+                                        EmailNotificationService emailNotificationService,
+                                        SmsNotificationService smsNotificationService,
                                         SimpMessagingTemplate messagingTemplate) {
         this.notificationManagementService = notificationManagementService;
+        this.pushTokenService = pushTokenService;
+        this.fcmPushService = fcmPushService;
+        this.emailNotificationService = emailNotificationService;
+        this.smsNotificationService = smsNotificationService;
         this.messagingTemplate = messagingTemplate;
     }
 
     @Async
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onDispatch(NotificationDispatchEvent event) {
-        Notification notification = notificationManagementService.findActive(event.getNotificationId());
         try {
+            Notification notification = notificationManagementService.findActive(event.getNotificationId());
             dispatchByChannel(notification, event.getChannelType());
             notificationManagementService.markDispatched(notification);
         } catch (Exception exception) {
+            Notification notification = null;
+            try {
+                notification = notificationManagementService.findActive(event.getNotificationId());
+            } catch (Exception ignored) {
+                // If notification is still unavailable, there is nothing to update.
+            }
             log.error("Notification dispatch failed. notificationId={}, channel={}",
-                    notification.getId(), event.getChannelType(), exception);
-            notificationManagementService.markFailed(notification, exception.getMessage());
+                    event.getNotificationId(), event.getChannelType(), exception);
+            if (notification != null) {
+                notificationManagementService.markFailed(notification, exception.getMessage());
+            }
         }
     }
 
@@ -54,39 +80,58 @@ public class NotificationDispatchListener {
     }
 
     private void dispatchInApp(Notification notification) {
-        messagingTemplate.convertAndSend(
-                "/topic/notifications/" + notification.getUserId(),
-                Map.of(
-                        "id", notification.getId(),
-                        "title", notification.getTitle(),
-                        "message", notification.getMessage(),
-                        "type", notification.getNotificationType().name(),
-                        "status", NotificationStatus.SENT.name()
-                )
+        Map<String, Object> payload = Map.of(
+                "id", notification.getId(),
+                "title", notification.getTitle(),
+                "message", notification.getMessage(),
+                "type", notification.getNotificationType().name(),
+                "status", NotificationStatus.SENT.name(),
+                "userId", notification.getUserId(),
+                "userType", notification.getUserType() == null ? "" : notification.getUserType().name()
         );
+        messagingTemplate.convertAndSend("/topic/notifications/" + notification.getUserId(), payload);
+        messagingTemplate.convertAndSend("/topic/admin/notifications", payload);
     }
 
     private void dispatchPush(Notification notification) {
-        List<UserDeviceToken> deviceTokens = notificationManagementService.activeDeviceTokens(notification.getUserId());
-        if (deviceTokens.isEmpty()) {
+        String role = resolveRole(notification.getUserType());
+        List<String> tokens = pushTokenService.activeTokens(notification.getUserId(), role);
+        if (tokens.isEmpty()) {
             throw new IllegalStateException("No active device token found for push notification");
         }
-        // FCM integration hook point.
-        log.info("Push queued for userId={} tokenCount={}", notification.getUserId(), deviceTokens.size());
+        Map<String, String> data = Map.of(
+                "notificationId", String.valueOf(notification.getId()),
+                "type", notification.getNotificationType().name(),
+                "redirectType", notification.getRedirectType() == null ? "" : notification.getRedirectType(),
+                "redirectValue", notification.getRedirectValue() == null ? "" : notification.getRedirectValue()
+        );
+        int sent = fcmPushService.sendToTokens(tokens, notification.getTitle(), notification.getMessage(), data);
+        if (sent <= 0) {
+            throw new IllegalStateException("FCM dispatch failed for all tokens");
+        }
+        log.info("Push dispatched for userId={} sentCount={} tokenCount={}",
+                notification.getUserId(), sent, tokens.size());
     }
 
     private void dispatchEmail(Notification notification) {
-        // SMTP/ESP integration hook point.
-        log.info("Email queued for notificationId={}", notification.getId());
+        emailNotificationService.send(notification);
+        log.info("Email dispatched for notificationId={}", notification.getId());
     }
 
     private void dispatchSms(Notification notification) {
-        // SMS provider integration hook point.
-        log.info("SMS queued for notificationId={}", notification.getId());
+        smsNotificationService.send(notification);
+        log.info("SMS dispatched for notificationId={}", notification.getId());
     }
 
     private void dispatchWhatsApp(Notification notification) {
-        // WhatsApp provider integration hook point.
+        // WhatsApp partner integration hook point.
         log.info("WhatsApp queued for notificationId={}", notification.getId());
+    }
+
+    private String resolveRole(NotificationUserType userType) {
+        if (userType == null) {
+            return "CUSTOMER";
+        }
+        return userType.name().toUpperCase(Locale.ROOT);
     }
 }

@@ -84,7 +84,7 @@ public class ReviewManagementService {
         ReviewEntity review = new ReviewEntity();
         review.setBookingId(booking.getId());
         review.setCustomerId(customerId);
-        review.setProviderId(booking.getProvider() != null ? booking.getProvider().getId() : null);
+        review.setProviderId(booking.getPartner() != null ? booking.getPartner().getId() : null);
         review.setServiceId(booking.getService() != null ? booking.getService().getId() : null);
         review.setRating(request.getRating());
         review.setReviewComment(normalizeComment(request.getReviewComment()));

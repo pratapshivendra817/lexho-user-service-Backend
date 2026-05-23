@@ -14,17 +14,21 @@
     <artifactId>application-module</artifactId>
     <packaging>jar</packaging>
     <name>application-module</name>
-    <description>Spring Boot application module for Lexho</description>
+    <description>Single Spring Boot runtime module for Lexho multi-module backend</description>
+
+    <properties>
+        <spotbugs.skip>true</spotbugs.skip>
+    </properties>
 
     <dependencies>
         <dependency>
             <groupId>com.lexho</groupId>
-            <artifactId>common-module</artifactId>
+            <artifactId>common-lib</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.lexho</groupId>
-            <artifactId>auth-module</artifactId>
+            <artifactId>auth-service</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -34,17 +38,22 @@
         </dependency>
         <dependency>
             <groupId>com.lexho</groupId>
-            <artifactId>user-module</artifactId>
+            <artifactId>user-service</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.lexho</groupId>
-            <artifactId>booking-module</artifactId>
+            <artifactId>order-service</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>com.lexho</groupId>
-            <artifactId>provider-module</artifactId>
+            <artifactId>payment-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lexho</groupId>
+            <artifactId>partner-module</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -123,12 +132,6 @@
         </dependency>
 
         <dependency>
-            <groupId>com.h2database</groupId>
-            <artifactId>h2</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-
-        <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>
             <version>${jjwt.version}</version>
@@ -154,10 +157,27 @@
             <version>${lombok.version}</version>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+            <version>1.5.5.Final</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>1.21.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <version>1.21.0</version>
             <scope>test</scope>
         </dependency>
 
@@ -165,6 +185,20 @@
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>9.4.3</version>
         </dependency>
     </dependencies>
 
@@ -181,6 +215,42 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.mapstruct</groupId>
+                            <artifactId>mapstruct-processor</artifactId>
+                            <version>1.5.5.Final</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.5</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

@@ -2,9 +2,18 @@ package com.lexho.user_service.dto;
 
 public class OrderItemDTO {
 
+    private Long partnerId;
     private String partnerName;
     private Double price;
     private Integer quantity;
+
+    public Long getPartnerId() {
+        return partnerId;
+    }
+
+    public void setPartnerId(Long partnerId) {
+        this.partnerId = partnerId;
+    }
 
     public String getPartnerName() {
         return partnerName;
@@ -30,4 +39,3 @@ public class OrderItemDTO {
         this.quantity = quantity;
     }
 }
-

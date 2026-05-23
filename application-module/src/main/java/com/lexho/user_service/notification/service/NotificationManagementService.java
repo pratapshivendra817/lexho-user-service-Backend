@@ -19,6 +19,8 @@ import com.lexho.notification.repository.UserDeviceTokenRepository;
 import com.lexho.user.entity.User;
 import com.lexho.user.enums.UserStatus;
 import com.lexho.user.repository.UserRepository;
+import com.lexho.user_service.lexho.entity.LexhoUserProfile;
+import com.lexho.user_service.lexho.repository.LexhoUserProfileRepository;
 import com.lexho.user_service.notification.dto.AdminBulkNotificationRequest;
 import com.lexho.user_service.notification.dto.ChannelStatResponse;
 import com.lexho.user_service.notification.dto.NotificationPageResponse;
@@ -48,6 +50,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -57,12 +60,14 @@ public class NotificationManagementService {
     private static final Logger log = LoggerFactory.getLogger(NotificationManagementService.class);
     private static final int MAX_RETRY = 3;
     private static final int PER_TYPE_MINUTE_LIMIT = 5;
+    private static final int DUPLICATE_GUARD_SECONDS = 10;
 
     private final NotificationRepository notificationRepository;
     private final NotificationLogRepository notificationLogRepository;
     private final NotificationPreferenceRepository notificationPreferenceRepository;
     private final UserDeviceTokenRepository userDeviceTokenRepository;
     private final UserRepository userRepository;
+    private final LexhoUserProfileRepository lexhoUserProfileRepository;
     private final AdminRepository adminRepository;
     private final NotificationMapper notificationMapper;
     private final ApplicationEventPublisher eventPublisher;
@@ -73,6 +78,7 @@ public class NotificationManagementService {
                                          NotificationPreferenceRepository notificationPreferenceRepository,
                                          UserDeviceTokenRepository userDeviceTokenRepository,
                                          UserRepository userRepository,
+                                         LexhoUserProfileRepository lexhoUserProfileRepository,
                                          AdminRepository adminRepository,
                                          NotificationMapper notificationMapper,
                                          ApplicationEventPublisher eventPublisher,
@@ -82,6 +88,7 @@ public class NotificationManagementService {
         this.notificationPreferenceRepository = notificationPreferenceRepository;
         this.userDeviceTokenRepository = userDeviceTokenRepository;
         this.userRepository = userRepository;
+        this.lexhoUserProfileRepository = lexhoUserProfileRepository;
         this.adminRepository = adminRepository;
         this.notificationMapper = notificationMapper;
         this.eventPublisher = eventPublisher;
@@ -90,31 +97,64 @@ public class NotificationManagementService {
 
     @Transactional
     public NotificationSendResponse sendBulkNotification(AdminBulkNotificationRequest request) {
-        validateBulkRequest(request);
-        Set<Long> targets = resolveTargetUsers(request);
-        if (targets.isEmpty()) {
-            return new NotificationSendResponse(0, 0, "No target users matched");
-        }
+        try {
+            validateBulkRequest(request);
+            Set<Long> targets = resolveTargetUsers(request);
+            log.info("admin_notification_send_request type={} channels={} targetUserType={} city={} scheduledTime={} targetCount={}",
+                    request.getNotificationType(),
+                    request.getChannels(),
+                    request.getTargetUserType(),
+                    request.getCity(),
+                    request.getScheduledTime(),
+                    targets.size());
+            if (targets.isEmpty()) {
+                log.warn("admin_notification_send_no_targets type={} targetUserType={} city={}",
+                        request.getNotificationType(), request.getTargetUserType(), request.getCity());
+                return new NotificationSendResponse(0, 0, "No target users matched");
+            }
 
-        int created = 0;
-        for (Long userId : targets) {
-            for (ChannelType channelType : request.getChannels()) {
-                if (!isChannelAllowedByPreference(userId, request.getNotificationType(), channelType)) {
-                    continue;
-                }
-                if (isRateLimited(userId, request.getNotificationType())) {
-                    log.warn("Notification skipped due to per-minute rate-limit. userId={}, type={}", userId, request.getNotificationType());
-                    continue;
-                }
-                Notification notification = buildNotification(request, userId, channelType);
-                Notification saved = notificationRepository.save(notification);
-                created++;
-                if (saved.getScheduledTime() == null || !saved.getScheduledTime().isAfter(LocalDateTime.now())) {
-                    publishDispatch(saved);
+            int created = 0;
+            for (Long userId : targets) {
+                for (ChannelType channelType : request.getChannels()) {
+                    if (!isChannelAllowedByPreference(userId, request.getNotificationType(), channelType)) {
+                        continue;
+                    }
+                    if (isRateLimited(userId, request.getNotificationType())) {
+                        log.warn("Notification skipped due to per-minute rate-limit. userId={}, type={}", userId, request.getNotificationType());
+                        continue;
+                    }
+                    Notification notification = buildNotification(request, userId, channelType);
+                    if (isRecentDuplicate(notification)) {
+                        log.warn("Duplicate notification skipped. userId={}, channel={}, type={}, title={}",
+                                notification.getUserId(), notification.getChannelType(),
+                                notification.getNotificationType(), notification.getTitle());
+                        continue;
+                    }
+                    if (channelType == ChannelType.IN_APP) {
+                        // Keep in-app notifications real-time for app UX.
+                        notification.setScheduledTime(null);
+                        notification.setStatus(NotificationStatus.SENT);
+                        notification.setSentAt(LocalDateTime.now());
+                    }
+                    Notification saved = notificationRepository.save(notification);
+                    created++;
+                    log.info("admin_notification_created notificationId={} userId={} channel={} type={} status={}",
+                            saved.getId(), userId, channelType, saved.getNotificationType(), saved.getStatus());
+                    if (channelType == ChannelType.IN_APP
+                            || saved.getScheduledTime() == null
+                            || !saved.getScheduledTime().isAfter(LocalDateTime.now())) {
+                        publishDispatch(saved);
+                    }
                 }
             }
+            log.info("admin_notification_send_completed targetCount={} createdCount={}", targets.size(), created);
+            return new NotificationSendResponse(targets.size(), created, "Notifications queued successfully");
+        } catch (NotificationValidationException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.error("Bulk notification send failed", ex);
+            throw new IllegalArgumentException("Invalid notification request data");
         }
-        return new NotificationSendResponse(targets.size(), created, "Notifications queued successfully");
     }
 
     public NotificationPageResponse<NotificationResponse> getCustomerNotifications(int page, int size) {
@@ -183,23 +223,41 @@ public class NotificationManagementService {
     }
 
     public NotificationResponse getAdminNotificationById(Long id) {
-        return notificationMapper.toResponse(findActive(id));
+        return toResponseWithFailure(findActive(id));
     }
 
     @Transactional
     public NotificationResponse retryNotification(Long id) {
-        Notification notification = findActive(id);
-        if (notification.getStatus() != NotificationStatus.FAILED && notification.getStatus() != NotificationStatus.PENDING) {
-            throw new NotificationValidationException("Only failed/pending notifications can be retried");
+        try {
+            Notification notification = findActive(id);
+            if (notification.getStatus() != NotificationStatus.FAILED && notification.getStatus() != NotificationStatus.PENDING) {
+                throw new NotificationValidationException("Only failed/pending notifications can be retried");
+            }
+            int currentRetryCount = notification.getRetryCount() == null ? 0 : notification.getRetryCount();
+            if (currentRetryCount >= MAX_RETRY) {
+                throw new NotificationValidationException("Max retry reached for notification");
+            }
+            notification.setStatus(NotificationStatus.PENDING);
+            notification.setRetryCount(currentRetryCount + 1);
+            Notification saved = notificationRepository.save(notification);
+            try {
+                publishDispatch(saved);
+            } catch (RuntimeException publishException) {
+                log.error("Failed to publish retry dispatch event. notificationId={}", id, publishException);
+                saveLog(saved.getId(), DeliveryStatus.FAILED,
+                        "Retry dispatch enqueue failed: " + publishException.getMessage(),
+                        saved.getRetryCount());
+            }
+            return toResponseWithFailure(saved);
+        } catch (NotificationValidationException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.error("Notification retry failed. notificationId={}", id, ex);
+            String message = ex.getMessage() == null || ex.getMessage().isBlank()
+                    ? "Retry failed due to internal processing error"
+                    : ex.getMessage();
+            throw new NotificationValidationException("Retry failed: " + message);
         }
-        if (notification.getRetryCount() >= MAX_RETRY) {
-            throw new NotificationValidationException("Max retry reached for notification");
-        }
-        notification.setStatus(NotificationStatus.PENDING);
-        notification.setRetryCount(notification.getRetryCount() + 1);
-        Notification saved = notificationRepository.save(notification);
-        publishDispatch(saved);
-        return notificationMapper.toResponse(saved);
     }
 
     public NotificationStatsResponse getStats() {
@@ -270,7 +328,10 @@ public class NotificationManagementService {
     public void markFailed(Notification notification, String errorMessage) {
         notification.setStatus(NotificationStatus.FAILED);
         notificationRepository.save(notification);
-        saveLog(notification.getId(), DeliveryStatus.FAILED, errorMessage, notification.getRetryCount());
+        String normalizedError = (errorMessage == null || errorMessage.isBlank())
+                ? "Dispatch failed due to unknown error"
+                : errorMessage;
+        saveLog(notification.getId(), DeliveryStatus.FAILED, normalizedError, notification.getRetryCount());
     }
 
     public Notification findActive(Long id) {
@@ -284,7 +345,7 @@ public class NotificationManagementService {
 
     private void validateBulkRequest(AdminBulkNotificationRequest request) {
         if (request.getScheduledTime() != null && request.getScheduledTime().isBefore(LocalDateTime.now())) {
-            throw new NotificationValidationException("scheduledTime cannot be in the past");
+            request.setScheduledTime(null);
         }
         if (request.getExpiryTime() != null && request.getScheduledTime() != null
                 && !request.getExpiryTime().isAfter(request.getScheduledTime())) {
@@ -321,14 +382,27 @@ public class NotificationManagementService {
                 .toList();
         int start = Math.min((int) pageable.getOffset(), all.size());
         int end = Math.min(start + pageable.getPageSize(), all.size());
-        List<NotificationResponse> content = all.subList(start, end).stream().map(notificationMapper::toResponse).toList();
+        List<NotificationResponse> content = all.subList(start, end).stream().map(this::toResponseWithFailure).toList();
         int totalPages = pageable.getPageSize() == 0 ? 0 : (int) Math.ceil((double) all.size() / pageable.getPageSize());
         return new NotificationPageResponse<>(content, all.size(), totalPages, pageable.getPageNumber());
     }
 
     private NotificationPageResponse<NotificationResponse> mapPage(Page<Notification> page) {
-        List<NotificationResponse> content = page.getContent().stream().map(notificationMapper::toResponse).toList();
+        List<NotificationResponse> content = page.getContent().stream().map(this::toResponseWithFailure).toList();
         return new NotificationPageResponse<>(content, page.getTotalElements(), page.getTotalPages(), page.getNumber());
+    }
+
+    private NotificationResponse toResponseWithFailure(Notification notification) {
+        NotificationResponse response = notificationMapper.toResponse(notification);
+        String failureReason = notificationLogRepository.findByNotificationIdOrderByCreatedAtDesc(notification.getId()).stream()
+                .map(NotificationLog::getErrorMessage)
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(message -> !message.isEmpty())
+                .findFirst()
+                .orElse(null);
+        response.setFailureReason(failureReason);
+        return response;
     }
 
     private Pageable buildPageable(int page, int size, String sortBy, String sortDir) {
@@ -381,6 +455,23 @@ public class NotificationManagementService {
         return recentCount >= PER_TYPE_MINUTE_LIMIT;
     }
 
+    private boolean isRecentDuplicate(Notification notification) {
+        LocalDateTime threshold = LocalDateTime.now().minusSeconds(DUPLICATE_GUARD_SECONDS);
+        return notificationRepository.existsRecentDuplicate(
+                notification.getUserId(),
+                notification.getUserType(),
+                notification.getNotificationType(),
+                notification.getChannelType(),
+                notification.getTitle(),
+                notification.getMessage(),
+                notification.getReferenceType(),
+                notification.getReferenceId(),
+                notification.getRedirectType(),
+                notification.getRedirectValue(),
+                threshold
+        );
+    }
+
     private Set<Long> resolveTargetUsers(AdminBulkNotificationRequest request) {
         Set<Long> targetIds = new HashSet<>();
         if (request.getUserIds() != null && !request.getUserIds().isEmpty()) {
@@ -391,6 +482,19 @@ public class NotificationManagementService {
         if (request.getTargetUserType() == NotificationUserType.ADMIN) {
             targetIds.addAll(adminRepository.findAll().stream().map(admin -> admin.getId()).collect(Collectors.toSet()));
             return targetIds;
+        }
+
+        // Customer app authenticates via Lexho profile ids, so include those ids for customer broadcasts.
+        if (request.getTargetUserType() == NotificationUserType.CUSTOMER) {
+            boolean hasLegacyOnlyFilter = (request.getCity() != null && !request.getCity().isBlank())
+                    || Boolean.TRUE.equals(request.getInactiveUsers())
+                    || Boolean.TRUE.equals(request.getPremiumUsers());
+            if (!hasLegacyOnlyFilter) {
+                List<LexhoUserProfile> lexhoCustomers = lexhoUserProfileRepository.findAll().stream()
+                        .filter(profile -> profile.getRole() == Role.CUSTOMER)
+                        .toList();
+                targetIds.addAll(lexhoCustomers.stream().map(LexhoUserProfile::getId).collect(Collectors.toSet()));
+            }
         }
 
         List<User> users = userRepository.findAll().stream()
@@ -426,7 +530,7 @@ public class NotificationManagementService {
         if (userType == NotificationUserType.CUSTOMER) {
             return user.getRole() == Role.CUSTOMER;
         }
-        if (userType == NotificationUserType.PROVIDER) {
+        if ("PARTNER".equals(userType.name())) {
             return user.getRole() == Role.PARTNER;
         }
         return false;

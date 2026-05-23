@@ -59,7 +59,7 @@ Indexes:
 
 Base path: `/api/admin/users`
 
-1. `GET /api/admin/users?page=0&size=10&role=PROVIDER&status=ACTIVE`
+1. `GET /api/admin/users?page=0&size=10&role=PARTNER&status=ACTIVE`
 2. `POST /api/admin/users`
 3. `PUT /api/admin/users/{id}`
 4. `PUT /api/admin/users/{id}/block`
@@ -77,7 +77,7 @@ Base path: `/api/admin/users`
   "email": "amit@lexho.com",
   "phoneNumber": "9876543210",
   "password": "Admin@12345",
-  "role": "PROVIDER",
+  "role": "PARTNER",
   "profileImage": "http://localhost:8082/uploads/services/abc.jpg",
   "city": "Bhopal",
   "state": "MP",
@@ -107,7 +107,7 @@ Base path: `/api/admin/users`
   "fullName": "Amit Sharma",
   "email": "amit@lexho.com",
   "phoneNumber": "9876543210",
-  "role": "PROVIDER",
+  "role": "PARTNER",
   "profileImage": "http://localhost:8082/uploads/services/abc.jpg",
   "city": "Bhopal",
   "state": "MP",
@@ -123,4 +123,4 @@ Base path: `/api/admin/users`
 
 - Feign client: `BookingServiceClient`
 - Target endpoint: `GET /internal/bookings/users/{userId}/summary`
-- Backing provider endpoint implemented in `InternalBookingController`
+- Backing partner endpoint implemented in `InternalBookingController`

@@ -28,7 +28,7 @@ public class NotificationTriggerService {
 
     public void providerAssigned(Long userId, String providerName, String bookingId) {
         publish(userId, NotificationUserType.CUSTOMER, NotificationType.BOOKING, NotificationPriority.HIGH,
-                "Provider Assigned", providerName + " has been assigned for booking " + bookingId + ".", null, "BOOKING");
+                "Partner Assigned", providerName + " has been assigned for booking " + bookingId + ".", null, "BOOKING");
     }
 
     public void serviceCompleted(Long userId, String bookingId) {

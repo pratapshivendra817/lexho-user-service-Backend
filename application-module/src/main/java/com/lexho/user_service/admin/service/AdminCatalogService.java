@@ -3,11 +3,16 @@ package com.lexho.user_service.admin.service;
 import com.lexho.user_service.admin.dto.*;
 import com.lexho.user_service.admin.entity.AdminCategoryEntity;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
+import com.lexho.user_service.admin.entity.ServiceDetailEntity;
 import com.lexho.user_service.admin.repository.AdminCategoryRepository;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
+import com.lexho.user_service.admin.repository.ServiceDetailRepository;
+import com.lexho.user_service.banner.entity.BannerPromotion;
+import com.lexho.user_service.banner.repository.BannerPromotionRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.security.SecurityUtils;
+import com.lexho.user_service.util.MediaUrlResolver;
 import org.springframework.data.domain.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,17 +26,26 @@ public class AdminCatalogService {
 
     private final AdminCategoryRepository adminCategoryRepository;
     private final AdminServiceEntityRepository adminServiceEntityRepository;
+    private final ServiceDetailRepository serviceDetailRepository;
+    private final BannerPromotionRepository bannerPromotionRepository;
     private final AdminAuditService adminAuditService;
     private final SecurityUtils securityUtils;
+    private final MediaUrlResolver mediaUrlResolver;
 
     public AdminCatalogService(AdminCategoryRepository adminCategoryRepository,
                                AdminServiceEntityRepository adminServiceEntityRepository,
+                               ServiceDetailRepository serviceDetailRepository,
+                               BannerPromotionRepository bannerPromotionRepository,
                                AdminAuditService adminAuditService,
-                               SecurityUtils securityUtils) {
+                               SecurityUtils securityUtils,
+                               MediaUrlResolver mediaUrlResolver) {
         this.adminCategoryRepository = adminCategoryRepository;
         this.adminServiceEntityRepository = adminServiceEntityRepository;
+        this.serviceDetailRepository = serviceDetailRepository;
+        this.bannerPromotionRepository = bannerPromotionRepository;
         this.adminAuditService = adminAuditService;
         this.securityUtils = securityUtils;
+        this.mediaUrlResolver = mediaUrlResolver;
     }
 
     @Transactional
@@ -45,7 +59,7 @@ public class AdminCatalogService {
         }
 
         category.setName(normalizedName);
-        category.setIconUrl(normalize(request.getIconUrl()));
+        category.setIconUrl(mediaUrlResolver.toStorablePath(normalize(request.getIconUrl())));
         category.setActive(request.getActive() == null || request.getActive());
         category.setDeleted(false);
 
@@ -63,7 +77,7 @@ public class AdminCatalogService {
         }
 
         category.setName(normalizedName);
-        category.setIconUrl(normalize(request.getIconUrl()));
+        category.setIconUrl(mediaUrlResolver.toStorablePath(normalize(request.getIconUrl())));
         if (request.getActive() != null) {
             category.setActive(request.getActive());
         }
@@ -110,7 +124,7 @@ public class AdminCatalogService {
 
     @Transactional
     public DataResponse<AdminServiceResponse> createService(AdminServiceUpsertRequest request) {
-        AdminCategoryEntity category = getCategory(request.getCategoryId());
+        AdminCategoryEntity category = resolveCategory(request.getCategoryId());
         AdminServiceEntity service = new AdminServiceEntity();
         applyServiceFields(service, request, category);
         service.setDeleted(false);
@@ -122,7 +136,7 @@ public class AdminCatalogService {
     @Transactional
     public DataResponse<AdminServiceResponse> updateService(Long id, AdminServiceUpsertRequest request) {
         AdminServiceEntity service = getService(id);
-        AdminCategoryEntity category = getCategory(request.getCategoryId());
+        AdminCategoryEntity category = resolveCategoryForUpdate(service, request.getCategoryId());
         applyServiceFields(service, request, category);
         AdminServiceEntity saved = adminServiceEntityRepository.save(service);
         audit("SERVICE_UPDATE", "services", saved.getId(), "name=" + saved.getName());
@@ -131,6 +145,55 @@ public class AdminCatalogService {
 
     public DataResponse<AdminServiceResponse> getServiceById(Long id) {
         return new DataResponse<>(mapService(getService(id)));
+    }
+
+    @Transactional
+    public DataResponse<List<AdminServiceDetailResponse>> addServiceDetails(Long serviceId, AdminServiceDetailBulkRequest request) {
+        AdminServiceEntity service = getService(serviceId);
+        List<ServiceDetailEntity> entities = request.getItems().stream()
+                .map(String::trim)
+                .filter(item -> !item.isBlank())
+                .distinct()
+                .map(item -> {
+                    ServiceDetailEntity detail = new ServiceDetailEntity();
+                    detail.setService(service);
+                    detail.setType(request.getType());
+                    detail.setItemName(item);
+                    return detail;
+                })
+                .toList();
+
+        if (entities.isEmpty()) {
+            throw new BadRequestException("At least one non-empty item is required");
+        }
+
+        List<ServiceDetailEntity> saved = serviceDetailRepository.saveAll(entities);
+        audit("SERVICE_DETAIL_CREATE_BULK", "service_details", serviceId, "count=" + saved.size());
+        return new DataResponse<>(saved.stream().map(this::mapDetail).toList());
+    }
+
+    @Transactional
+    public DataResponse<AdminServiceDetailResponse> updateServiceDetail(Long serviceId,
+                                                                        Long detailId,
+                                                                        AdminServiceDetailUpdateRequest request) {
+        getService(serviceId);
+        ServiceDetailEntity detail = serviceDetailRepository.findByIdAndService_Id(detailId, serviceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Service detail not found"));
+        detail.setType(request.getType());
+        detail.setItemName(request.getItemName().trim());
+        ServiceDetailEntity saved = serviceDetailRepository.save(detail);
+        audit("SERVICE_DETAIL_UPDATE", "service_details", detailId, "serviceId=" + serviceId);
+        return new DataResponse<>(mapDetail(saved));
+    }
+
+    @Transactional
+    public AdminMessageResponse deleteServiceDetail(Long serviceId, Long detailId) {
+        getService(serviceId);
+        ServiceDetailEntity detail = serviceDetailRepository.findByIdAndService_Id(detailId, serviceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Service detail not found"));
+        serviceDetailRepository.delete(detail);
+        audit("SERVICE_DETAIL_DELETE", "service_details", detailId, "serviceId=" + serviceId);
+        return new AdminMessageResponse("Service detail deleted successfully");
     }
 
     public PagedDataResponse<AdminServiceResponse> listServices(int page,
@@ -211,17 +274,116 @@ public class AdminCatalogService {
         return new DataResponse<>(data);
     }
 
+    public DataResponse<java.util.Map<String, Object>> mediaDebugSnapshot(int limit) {
+        int safeLimit = Math.min(Math.max(limit, 1), 100);
+        Pageable pageable = PageRequest.of(0, safeLimit, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        List<java.util.Map<String, Object>> categories = adminCategoryRepository.findAll(pageable).getContent().stream()
+                .map(category -> java.util.Map.<String, Object>of(
+                        "id", category.getId(),
+                        "name", category.getName() == null ? "" : category.getName(),
+                        "iconUrlStored", category.getIconUrl() == null ? "" : category.getIconUrl(),
+                        "imageUrlResolved", mediaUrlResolver.toPublicUrl(category.getIconUrl()) == null ? "" : mediaUrlResolver.toPublicUrl(category.getIconUrl()),
+                        "active", category.isActive(),
+                        "deleted", category.isDeleted(),
+                        "createdAt", category.getCreatedAt() == null ? "" : category.getCreatedAt().toString()
+                ))
+                .collect(Collectors.toList());
+
+        List<java.util.Map<String, Object>> banners = bannerPromotionRepository.findAll(pageable).getContent().stream()
+                .map(banner -> java.util.Map.<String, Object>of(
+                        "id", banner.getId(),
+                        "title", banner.getTitle() == null ? "" : banner.getTitle(),
+                        "bannerImageStored", banner.getBannerImageUrl() == null ? "" : banner.getBannerImageUrl(),
+                        "imageUrlResolved", mediaUrlResolver.toPublicUrl(banner.getBannerImageUrl()) == null ? "" : mediaUrlResolver.toPublicUrl(banner.getBannerImageUrl()),
+                        "status", banner.getStatus() == null ? "" : banner.getStatus().name(),
+                        "slotNumber", banner.getSlotNumber() == null ? "" : banner.getSlotNumber(),
+                        "deleted", banner.isDeleted(),
+                        "createdAt", banner.getCreatedAt() == null ? "" : banner.getCreatedAt().toString()
+                ))
+                .collect(Collectors.toList());
+
+        return new DataResponse<>(java.util.Map.of(
+                "categories", categories,
+                "banners", banners
+        ));
+    }
+
+    public DataResponse<java.util.Map<String, Object>> mediaDebugLatestActive(int limit) {
+        int safeLimit = Math.min(Math.max(limit, 1), 100);
+
+        List<java.util.Map<String, Object>> categories = adminCategoryRepository
+                .findAllByDeletedFalseOrderByCreatedAtDesc(PageRequest.of(0, safeLimit))
+                .stream()
+                .map(category -> java.util.Map.<String, Object>of(
+                        "id", category.getId(),
+                        "name", category.getName() == null ? "" : category.getName(),
+                        "iconUrlStored", category.getIconUrl() == null ? "" : category.getIconUrl(),
+                        "imageUrlResolved", mediaUrlResolver.toPublicUrl(category.getIconUrl()) == null ? "" : mediaUrlResolver.toPublicUrl(category.getIconUrl()),
+                        "active", category.isActive(),
+                        "deleted", category.isDeleted(),
+                        "createdAt", category.getCreatedAt() == null ? "" : category.getCreatedAt().toString()
+                ))
+                .collect(Collectors.toList());
+
+        List<java.util.Map<String, Object>> banners = bannerPromotionRepository
+                .findByDeletedFalseOrderByCreatedAtDesc(PageRequest.of(0, safeLimit))
+                .stream()
+                .map(banner -> java.util.Map.<String, Object>of(
+                        "id", banner.getId(),
+                        "title", banner.getTitle() == null ? "" : banner.getTitle(),
+                        "bannerImageStored", banner.getBannerImageUrl() == null ? "" : banner.getBannerImageUrl(),
+                        "imageUrlResolved", mediaUrlResolver.toPublicUrl(banner.getBannerImageUrl()) == null ? "" : mediaUrlResolver.toPublicUrl(banner.getBannerImageUrl()),
+                        "status", banner.getStatus() == null ? "" : banner.getStatus().name(),
+                        "slotNumber", banner.getSlotNumber() == null ? "" : banner.getSlotNumber(),
+                        "deleted", banner.isDeleted(),
+                        "createdAt", banner.getCreatedAt() == null ? "" : banner.getCreatedAt().toString()
+                ))
+                .collect(Collectors.toList());
+
+        return new DataResponse<>(java.util.Map.of(
+                "categories", categories,
+                "banners", banners
+        ));
+    }
+
     private void applyServiceFields(AdminServiceEntity service, AdminServiceUpsertRequest request, AdminCategoryEntity category) {
         service.setName(normalizeRequired(request.getName(), "Service name is required"));
         service.setCategory(category);
         service.setDescription(normalize(request.getDescription()));
-        service.setBasePrice(request.getBasePrice());
-        service.setDurationMinutes(request.getDurationMinutes());
+        service.setServiceType(normalize(request.getServiceType()));
+        java.math.BigDecimal effectivePrice = request.getBasePrice() != null ? request.getBasePrice() : request.getPrice();
+        if (effectivePrice == null || effectivePrice.signum() <= 0) {
+            throw new BadRequestException("Price is required and must be greater than 0");
+        }
+        service.setBasePrice(effectivePrice);
+        service.setDurationMinutes(request.getDurationMinutes() == null ? 60 : request.getDurationMinutes());
         service.setAvgRating(request.getRating() == null ? 0.0 : request.getRating());
+        service.setImageUrl(mediaUrlResolver.toStorablePath(normalize(request.getImageUrl())));
         service.setActive(request.getActive() == null || request.getActive());
         if (service.getTotalBookings() == null) {
             service.setTotalBookings(0L);
         }
+    }
+
+    private AdminCategoryEntity resolveCategory(Long categoryId) {
+        if (categoryId != null) {
+            return getCategory(categoryId);
+        }
+        return adminCategoryRepository.findFirstByNameContainingIgnoreCaseAndDeletedFalse("All Services")
+                .or(() -> adminCategoryRepository.findAllByDeletedFalseOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, 1))
+                        .stream().findFirst())
+                .orElseThrow(() -> new BadRequestException("Category is required. No default category found."));
+    }
+
+    private AdminCategoryEntity resolveCategoryForUpdate(AdminServiceEntity existing, Long categoryId) {
+        if (categoryId != null) {
+            return getCategory(categoryId);
+        }
+        if (existing.getCategory() != null) {
+            return existing.getCategory();
+        }
+        return resolveCategory(null);
     }
 
     private AdminCategoryEntity getCategory(Long id) {
@@ -238,7 +400,9 @@ public class AdminCatalogService {
         AdminCategoryResponse response = new AdminCategoryResponse();
         response.setId(category.getId());
         response.setName(category.getName());
-        response.setIconUrl(category.getIconUrl());
+        String imageUrl = mediaUrlResolver.toPublicUrl(category.getIconUrl());
+        response.setIconUrl(imageUrl);
+        response.setImageUrl(imageUrl);
         response.setActive(category.isActive());
         response.setCreatedAt(category.getCreatedAt());
         response.setUpdatedAt(category.getUpdatedAt());
@@ -257,14 +421,26 @@ public class AdminCatalogService {
         response.setCategoryId(service.getCategory() == null ? null : service.getCategory().getId());
         response.setCategoryName(service.getCategory() == null ? service.getCategoryName() : service.getCategory().getName());
         response.setDescription(service.getDescription());
+        response.setServiceType(service.getServiceType());
         response.setBasePrice(service.getBasePrice());
         response.setDurationMinutes(service.getDurationMinutes());
         response.setRating(service.getAvgRating() == null ? 0.0 : service.getAvgRating());
         response.setActive(service.isActive());
         response.setTotalBookings(service.getTotalBookings() == null ? 0L : service.getTotalBookings());
-        response.setImageUrl(service.getImageUrl());
+        response.setImageUrl(mediaUrlResolver.toPublicUrl(service.getImageUrl()));
+        response.setDetails(serviceDetailRepository.findByService_Id(service.getId()).stream()
+                .map(this::mapDetail)
+                .toList());
         response.setCreatedAt(service.getCreatedAt());
         response.setUpdatedAt(service.getUpdatedAt());
+        return response;
+    }
+
+    private AdminServiceDetailResponse mapDetail(ServiceDetailEntity detail) {
+        AdminServiceDetailResponse response = new AdminServiceDetailResponse();
+        response.setId(detail.getId());
+        response.setType(detail.getType());
+        response.setItemName(detail.getItemName());
         return response;
     }
 

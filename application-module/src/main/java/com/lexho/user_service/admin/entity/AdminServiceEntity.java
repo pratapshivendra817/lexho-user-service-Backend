@@ -6,7 +6,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "services")
+@Table(name = "services", indexes = {
+        @Index(name = "idx_services_category_id", columnList = "category_id")
+})
 public class AdminServiceEntity {
 
     @Id
@@ -23,8 +25,14 @@ public class AdminServiceEntity {
     @Column(name = "description", length = 1000)
     private String description;
 
+    @Column(name = "service_type", length = 100)
+    private String serviceType;
+
     @Column(name = "base_price", precision = 12, scale = 2)
     private BigDecimal basePrice;
+
+    @Column(name = "discounted_price", precision = 12, scale = 2)
+    private BigDecimal discountedPrice;
 
     @Column(name = "duration_minutes")
     private Integer durationMinutes;
@@ -35,8 +43,14 @@ public class AdminServiceEntity {
     @Column(name = "total_bookings")
     private Long totalBookings;
 
+    @Column(name = "total_reviews")
+    private Long totalReviews;
+
     @Column(name = "image_url", length = 500)
     private String imageUrl;
+
+    @Column(name = "is_new", nullable = false)
+    private boolean isNew;
 
     @Column(name = "is_active", nullable = false)
     private boolean active;
@@ -69,6 +83,9 @@ public class AdminServiceEntity {
         }
         if (this.avgRating == null) {
             this.avgRating = 0.0;
+        }
+        if (this.totalReviews == null) {
+            this.totalReviews = 0L;
         }
         syncCategoryName();
     }
@@ -108,6 +125,14 @@ public class AdminServiceEntity {
         this.description = description;
     }
 
+    public String getServiceType() {
+        return serviceType;
+    }
+
+    public void setServiceType(String serviceType) {
+        this.serviceType = serviceType;
+    }
+
     public BigDecimal getBasePrice() {
         return basePrice;
     }
@@ -122,6 +147,14 @@ public class AdminServiceEntity {
 
     public void setDurationMinutes(Integer durationMinutes) {
         this.durationMinutes = durationMinutes;
+    }
+
+    public BigDecimal getDiscountedPrice() {
+        return discountedPrice;
+    }
+
+    public void setDiscountedPrice(BigDecimal discountedPrice) {
+        this.discountedPrice = discountedPrice;
     }
 
     public Double getAvgRating() {
@@ -140,12 +173,28 @@ public class AdminServiceEntity {
         this.totalBookings = totalBookings;
     }
 
+    public Long getTotalReviews() {
+        return totalReviews;
+    }
+
+    public void setTotalReviews(Long totalReviews) {
+        this.totalReviews = totalReviews;
+    }
+
     public String getImageUrl() {
         return imageUrl;
     }
 
     public void setImageUrl(String imageUrl) {
         this.imageUrl = imageUrl;
+    }
+
+    public boolean isNew() {
+        return isNew;
+    }
+
+    public void setNew(boolean aNew) {
+        isNew = aNew;
     }
 
     public boolean isActive() {

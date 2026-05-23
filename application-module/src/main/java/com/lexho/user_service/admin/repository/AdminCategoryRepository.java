@@ -25,4 +25,9 @@ public interface AdminCategoryRepository extends JpaRepository<AdminCategoryEnti
     boolean existsByNameIgnoreCaseAndDeletedFalseAndIdNot(String name, Long id);
 
     Optional<AdminCategoryEntity> findByNameIgnoreCase(String name);
+    Optional<AdminCategoryEntity> findFirstByNameContainingIgnoreCaseAndDeletedFalse(String namePart);
+
+    java.util.List<AdminCategoryEntity> findAllByDeletedFalseOrderByCreatedAtDesc(Pageable pageable);
+
+    java.util.List<AdminCategoryEntity> findByActiveTrueAndDeletedFalseOrderByCreatedAtDesc(Pageable pageable);
 }

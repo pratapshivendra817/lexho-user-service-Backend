@@ -3,8 +3,8 @@ package com.lexho.user_service.admin.service;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
-import com.lexho.provider.entity.Partner;
-import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.partner.entity.Partner;
+import com.lexho.partner.repository.PartnerRepository;
 import com.lexho.user_service.admin.dto.*;
 import com.lexho.user_service.admin.entity.*;
 import com.lexho.user_service.admin.repository.*;
@@ -69,14 +69,14 @@ public class AdminManagementService {
         return new DataResponse<>(mapOrder(order));
     }
 
-    public PagedDataResponse<Map<String, Object>> providers(int page, int limit, String search, String status) {
+    public PagedDataResponse<Map<String, Object>> partners(int page, int limit, String search, String status) {
         Pageable pageable = page(page, limit, "id");
         Page<Partner> result = partnerRepository.searchPartners(normalize(search), normalize(status), pageable);
         return new PagedDataResponse<>(result.getContent().stream().map(this::mapProvider).collect(Collectors.toList()), result.getTotalElements());
     }
 
     public DataResponse<Map<String, Object>> providerById(Long id) {
-        Partner partner = partnerRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Provider not found"));
+        Partner partner = partnerRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
         return new DataResponse<>(mapProvider(partner));
     }
 
@@ -85,10 +85,10 @@ public class AdminManagementService {
         if (status == null || status.isBlank()) {
             throw new BadRequestException("Verification status is required");
         }
-        Partner partner = partnerRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Provider not found"));
+        Partner partner = partnerRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
         partner.setVerificationStatus(status.trim().toUpperCase(Locale.ROOT));
         partnerRepository.save(partner);
-        audit("PROVIDER_VERIFICATION_UPDATE", "providers", partner.getId(), "status=" + partner.getVerificationStatus());
+        audit("PROVIDER_VERIFICATION_UPDATE", "partners", partner.getId(), "status=" + partner.getVerificationStatus());
         return new DataResponse<>(mapProvider(partner));
     }
 
@@ -128,10 +128,27 @@ public class AdminManagementService {
         return new PagedDataResponse<>(items, result.getTotalElements());
     }
 
-    public PagedDataResponse<Map<String, Object>> supportTickets(int page, int limit, String search, String status) {
+    public PagedDataResponse<Map<String, Object>> supportTickets(int page,
+                                                                 int limit,
+                                                                 String search,
+                                                                 String status,
+                                                                 String categoryId,
+                                                                 String priority) {
         Pageable pageable = page(page, limit, "updatedAt");
-        Page<SupportTicket> result = supportTicketRepository.search(normalize(search), normalize(status), pageable);
+        Page<SupportTicket> result = supportTicketRepository.search(
+                normalize(search),
+                normalize(status),
+                normalize(categoryId),
+                normalize(priority),
+                pageable
+        );
         return new PagedDataResponse<>(result.getContent().stream().map(this::mapTicket).collect(Collectors.toList()), result.getTotalElements());
+    }
+
+    public DataResponse<Map<String, Object>> supportTicketDetail(Long id) {
+        SupportTicket ticket = supportTicketRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Support ticket not found"));
+        return new DataResponse<>(mapTicket(ticket));
     }
 
     @Transactional
@@ -139,8 +156,12 @@ public class AdminManagementService {
         if (status == null || status.isBlank()) {
             throw new BadRequestException("Status is required");
         }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if (!Set.of("OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED").contains(normalized)) {
+            throw new BadRequestException("Status must be OPEN, IN_PROGRESS, RESOLVED or CLOSED");
+        }
         SupportTicket ticket = supportTicketRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Support ticket not found"));
-        ticket.setStatus(status.trim().toUpperCase(Locale.ROOT));
+        ticket.setStatus(normalized);
         supportTicketRepository.save(ticket);
         audit("SUPPORT_STATUS_UPDATE", "support_tickets", ticket.getId(), "status=" + ticket.getStatus());
         return new DataResponse<>(mapTicket(ticket));
@@ -268,17 +289,31 @@ public class AdminManagementService {
         map.put("subject", ticket.getSubject());
         map.put("message", ticket.getMessage());
         map.put("status", ticket.getStatus());
+        map.put("categoryId", ticket.getCategoryId());
+        map.put("bookingId", ticket.getBookingId());
+        map.put("priority", ticket.getPriority());
+        map.put("ticketId", "TCK-" + (10000 + ticket.getId()));
         map.put("createdAt", ticket.getCreatedAt());
         map.put("updatedAt", ticket.getUpdatedAt());
-        map.put("replies", supportTicketReplyRepository.findByTicket_IdOrderByCreatedAtAsc(ticket.getId())
-                .stream()
-                .map(reply -> Map.<String, Object>of(
-                        "id", reply.getId(),
-                        "adminId", reply.getAdminId(),
-                        "message", reply.getMessage(),
-                        "createdAt", reply.getCreatedAt()
-                ))
-                .collect(Collectors.toList()));
+        List<Map<String, Object>> messages = new ArrayList<>();
+        messages.add(Map.of(
+                "id", "MSG-1",
+                "sender", "CUSTOMER",
+                "message", ticket.getMessage(),
+                "createdAt", ticket.getCreatedAt()
+        ));
+        List<SupportTicketReply> replies = supportTicketReplyRepository.findByTicket_IdOrderByCreatedAtAsc(ticket.getId());
+        for (int i = 0; i < replies.size(); i++) {
+            SupportTicketReply reply = replies.get(i);
+            messages.add(Map.of(
+                    "id", "MSG-" + (i + 2),
+                    "sender", "SUPPORT",
+                    "adminId", reply.getAdminId(),
+                    "message", reply.getMessage(),
+                    "createdAt", reply.getCreatedAt()
+            ));
+        }
+        map.put("messages", messages);
         return map;
     }
 

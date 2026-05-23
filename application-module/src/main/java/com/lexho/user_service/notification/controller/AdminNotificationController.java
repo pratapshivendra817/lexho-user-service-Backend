@@ -9,10 +9,13 @@ import com.lexho.user_service.notification.dto.NotificationPageResponse;
 import com.lexho.user_service.notification.dto.NotificationResponse;
 import com.lexho.user_service.notification.dto.NotificationSendResponse;
 import com.lexho.user_service.notification.dto.NotificationStatsResponse;
+import com.lexho.user_service.notification.exception.NotificationValidationException;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,11 +26,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Locale;
+
 @RestController
-@RequestMapping("/api/admin/notifications")
-@PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
+@RequestMapping({"/api/admin/notifications", "/api/v1/admin/notifications"})
+@PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Admin Notification APIs", description = "Admin notification management APIs")
 public class AdminNotificationController {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminNotificationController.class);
 
     private final NotificationManagementService notificationManagementService;
 
@@ -41,6 +48,12 @@ public class AdminNotificationController {
         return ResponseEntity.ok(notificationManagementService.sendBulkNotification(request));
     }
 
+    @PostMapping
+    @Operation(summary = "Send bulk notifications (legacy route)")
+    public ResponseEntity<NotificationSendResponse> sendLegacy(@Valid @RequestBody AdminBulkNotificationRequest request) {
+        return send(request);
+    }
+
     @GetMapping
     @Operation(summary = "Get all notifications with filters")
     public ResponseEntity<NotificationPageResponse<NotificationResponse>> all(
@@ -48,13 +61,14 @@ public class AdminNotificationController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
-            @RequestParam(required = false) NotificationUserType userType,
-            @RequestParam(required = false) NotificationType notificationType,
+            @RequestParam(required = false) String userType,
+            @RequestParam(required = false) String notificationType,
             @RequestParam(required = false) ChannelType channelType,
             @RequestParam(required = false) NotificationStatus status,
             @RequestParam(required = false) String search) {
         return ResponseEntity.ok(notificationManagementService.getAdminNotifications(
-                page, size, sortBy, sortDir, userType, notificationType, channelType, status, search
+                page, size, sortBy, sortDir, normalizeUserType(userType),
+                normalizeNotificationType(notificationType), channelType, status, search
         ));
     }
 
@@ -67,12 +81,47 @@ public class AdminNotificationController {
     @PostMapping("/{id}/retry")
     @Operation(summary = "Retry failed notification")
     public ResponseEntity<NotificationResponse> retry(@PathVariable Long id) {
-        return ResponseEntity.ok(notificationManagementService.retryNotification(id));
+        try {
+            return ResponseEntity.ok(notificationManagementService.retryNotification(id));
+        } catch (NotificationValidationException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.error("Admin retry API failed. notificationId={}", id, ex);
+            throw new NotificationValidationException("Retry failed: " + ex.getMessage());
+        }
     }
 
     @GetMapping("/stats")
     @Operation(summary = "Get notification dashboard stats")
     public ResponseEntity<NotificationStatsResponse> stats() {
         return ResponseEntity.ok(notificationManagementService.getStats());
+    }
+
+    private NotificationUserType normalizeUserType(String userType) {
+        if (userType == null || userType.isBlank()) {
+            return null;
+        }
+        String normalized = userType.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "CUSTOMER", "CUSTOMERS" -> NotificationUserType.CUSTOMER;
+            case "PARTNER", "PARTNERS" -> NotificationUserType.PARTNER;
+            case "ADMIN", "ADMINS" -> NotificationUserType.ADMIN;
+            default -> throw new IllegalArgumentException("Invalid userType");
+        };
+    }
+
+    private NotificationType normalizeNotificationType(String notificationType) {
+        if (notificationType == null || notificationType.isBlank()) {
+            return null;
+        }
+        String normalized = notificationType.trim().toUpperCase(Locale.ROOT);
+        if ("OFFER".equals(normalized)) {
+            normalized = "PROMOTION";
+        }
+        try {
+            return NotificationType.valueOf(normalized);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("Invalid notificationType");
+        }
     }
 }

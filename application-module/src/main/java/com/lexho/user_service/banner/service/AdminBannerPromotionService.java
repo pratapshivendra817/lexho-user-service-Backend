@@ -5,13 +5,17 @@ import com.lexho.user_service.banner.dto.BannerPromotionResponse;
 import com.lexho.user_service.banner.dto.BannerStatsResponse;
 import com.lexho.user_service.banner.dto.BannerUpsertRequest;
 import com.lexho.user_service.banner.entity.BannerPromotion;
+import com.lexho.user_service.banner.enums.BannerPlatformType;
 import com.lexho.user_service.banner.enums.BannerStatus;
 import com.lexho.user_service.banner.exception.BannerNotFoundException;
 import com.lexho.user_service.banner.exception.BannerValidationException;
 import com.lexho.user_service.banner.mapper.BannerPromotionMapper;
 import com.lexho.user_service.banner.repository.BannerPromotionRepository;
 import com.lexho.user_service.security.SecurityUtils;
+import com.lexho.user_service.util.MediaUrlResolver;
 import jakarta.persistence.criteria.Predicate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,41 +33,55 @@ import java.util.List;
 
 @Service
 public class AdminBannerPromotionService {
+    private static final Logger log = LoggerFactory.getLogger(AdminBannerPromotionService.class);
 
     private final BannerPromotionRepository bannerPromotionRepository;
     private final BannerPromotionMapper bannerPromotionMapper;
     private final SecurityUtils securityUtils;
+    private final MediaUrlResolver mediaUrlResolver;
 
     public AdminBannerPromotionService(BannerPromotionRepository bannerPromotionRepository,
                                        BannerPromotionMapper bannerPromotionMapper,
-                                       SecurityUtils securityUtils) {
+                                       SecurityUtils securityUtils,
+                                       MediaUrlResolver mediaUrlResolver) {
         this.bannerPromotionRepository = bannerPromotionRepository;
         this.bannerPromotionMapper = bannerPromotionMapper;
         this.securityUtils = securityUtils;
+        this.mediaUrlResolver = mediaUrlResolver;
     }
 
     @Transactional
     @CacheEvict(value = "homepageBanners", allEntries = true)
     public BannerPromotionResponse create(BannerUpsertRequest request) {
-        validateRequest(request, null);
+        log.info("Create banner payload={}", request);
+        normalizeBannerImagePath(request);
+        validateRequest(request, null, null);
         BannerPromotion banner = new BannerPromotion();
         bannerPromotionMapper.apply(banner, request);
+        banner.setBannerImageUrl(mediaUrlResolver.toStorablePath(request.getBannerImageUrl()));
+        log.info("Creating banner: title={}, incomingImage={}, resolvedImage={}",
+                request.getTitle(), request.getBannerImageUrl(), banner.getBannerImageUrl());
         banner.setDeleted(false);
         banner.setCreatedBy(currentUserId());
         banner.setUpdatedBy(currentUserId());
         BannerPromotion saved = bannerPromotionRepository.save(banner);
-        return bannerPromotionMapper.toResponse(saved);
+        return toPublicResponse(saved);
     }
 
     @Transactional
     @CacheEvict(value = "homepageBanners", allEntries = true)
     public BannerPromotionResponse update(Long id, BannerUpsertRequest request) {
+        log.info("Update banner id={}, payload={}", id, request);
+        normalizeBannerImagePath(request);
         BannerPromotion banner = getBanner(id);
-        validateRequest(request, id);
+        log.info("Updating banner id={}: payload title={}, payloadImage={}", id, request.getTitle(), request.getBannerImageUrl());
+        validateRequest(request, id, banner);
         bannerPromotionMapper.apply(banner, request);
+        banner.setBannerImageUrl(mediaUrlResolver.toStorablePath(request.getBannerImageUrl()));
+        log.info("Resolved banner image path for id={}: {}", id, banner.getBannerImageUrl());
         banner.setUpdatedBy(currentUserId());
         BannerPromotion saved = bannerPromotionRepository.save(banner);
-        return bannerPromotionMapper.toResponse(saved);
+        return toPublicResponse(saved);
     }
 
     @Transactional
@@ -77,7 +95,7 @@ public class AdminBannerPromotionService {
 
     @Transactional(readOnly = true)
     public BannerPromotionResponse getById(Long id) {
-        return bannerPromotionMapper.toResponse(getBanner(id));
+        return toPublicResponse(getBanner(id));
     }
 
     @Transactional(readOnly = true)
@@ -125,7 +143,7 @@ public class AdminBannerPromotionService {
         };
 
         Page<BannerPromotion> result = bannerPromotionRepository.findAll(specification, pageable);
-        List<BannerPromotionResponse> content = result.getContent().stream().map(bannerPromotionMapper::toResponse).toList();
+        List<BannerPromotionResponse> content = result.getContent().stream().map(this::toPublicResponse).toList();
         return new BannerPageResponse<>(content, result.getTotalElements(), result.getTotalPages(), result.getNumber());
     }
 
@@ -136,12 +154,14 @@ public class AdminBannerPromotionService {
         if (banner.getStatus() == BannerStatus.EXPIRED) {
             throw new BannerValidationException("Expired banner cannot be activated");
         }
-        if (bannerPromotionRepository.existsByStatusAndSlotNumberAndDeletedFalseAndIdNot(BannerStatus.ACTIVE, banner.getSlotNumber(), id)) {
-            throw new BannerValidationException("Active banner slot already in use: " + banner.getSlotNumber());
+        if (bannerPromotionRepository.existsByStatusAndPlacementAndSlotNumberAndDeletedFalseAndIdNot(
+                BannerStatus.ACTIVE, banner.getPlacement(), banner.getSlotNumber(), id)) {
+            throw new BannerValidationException("Active banner slot already in use for placement "
+                    + banner.getPlacement() + ": " + banner.getSlotNumber());
         }
         banner.setStatus(BannerStatus.ACTIVE);
         banner.setUpdatedBy(currentUserId());
-        return bannerPromotionMapper.toResponse(bannerPromotionRepository.save(banner));
+        return toPublicResponse(bannerPromotionRepository.save(banner));
     }
 
     @Transactional
@@ -150,7 +170,7 @@ public class AdminBannerPromotionService {
         BannerPromotion banner = getBanner(id);
         banner.setStatus(BannerStatus.INACTIVE);
         banner.setUpdatedBy(currentUserId());
-        return bannerPromotionMapper.toResponse(bannerPromotionRepository.save(banner));
+        return toPublicResponse(bannerPromotionRepository.save(banner));
     }
 
     @Transactional
@@ -159,7 +179,7 @@ public class AdminBannerPromotionService {
         BannerPromotion banner = getBanner(id);
         banner.setStatus(BannerStatus.DRAFT);
         banner.setUpdatedBy(currentUserId());
-        return bannerPromotionMapper.toResponse(bannerPromotionRepository.save(banner));
+        return toPublicResponse(bannerPromotionRepository.save(banner));
     }
 
     @Transactional(readOnly = true)
@@ -184,16 +204,40 @@ public class AdminBannerPromotionService {
                 .orElseThrow(() -> new BannerNotFoundException(id));
     }
 
-    private void validateRequest(BannerUpsertRequest request, Long id) {
-        if (request.getEndDate().isBefore(request.getStartDate()) || request.getEndDate().isEqual(request.getStartDate())) {
-            throw new BannerValidationException("End date must be greater than start date");
+    private void validateRequest(BannerUpsertRequest request, Long id, BannerPromotion existingBanner) {
+        if (request.getPlatformType() == null) {
+            request.setPlatformType(BannerPlatformType.ALL);
+        }
+        if (request.getNewUserOnly() == null) {
+            request.setNewUserOnly(false);
+        }
+        if (request.getPremiumUserOnly() == null) {
+            request.setPremiumUserOnly(false);
+        }
+        if (request.getTitle() == null || request.getTitle().isBlank()) {
+            throw new BannerValidationException("Title is required");
+        }
+        String requestedImageUrl = request.getBannerImageUrl() == null ? "" : request.getBannerImageUrl().trim();
+        String existingImageUrl = existingBanner == null || existingBanner.getBannerImageUrl() == null
+                ? "" : existingBanner.getBannerImageUrl().trim();
+        if (requestedImageUrl.isBlank() && existingImageUrl.isBlank()) {
+            throw new BannerValidationException("Banner image is required");
+        }
+        if (request.getStartDate() == null || request.getEndDate() == null) {
+            throw new BannerValidationException("Start date and end date are required");
+        }
+        if (request.getEndDate().isBefore(request.getStartDate())) {
+            throw new BannerValidationException("End date must be greater than or equal to start date");
         }
         if (request.getStatus() == BannerStatus.ACTIVE) {
             boolean slotExists = id == null
-                    ? bannerPromotionRepository.existsByStatusAndSlotNumberAndDeletedFalse(BannerStatus.ACTIVE, request.getSlotNumber())
-                    : bannerPromotionRepository.existsByStatusAndSlotNumberAndDeletedFalseAndIdNot(BannerStatus.ACTIVE, request.getSlotNumber(), id);
+                    ? bannerPromotionRepository.existsByStatusAndPlacementAndSlotNumberAndDeletedFalse(
+                    BannerStatus.ACTIVE, request.getPlacement(), request.getSlotNumber())
+                    : bannerPromotionRepository.existsByStatusAndPlacementAndSlotNumberAndDeletedFalseAndIdNot(
+                    BannerStatus.ACTIVE, request.getPlacement(), request.getSlotNumber(), id);
             if (slotExists) {
-                throw new BannerValidationException("Active banner slot already in use: " + request.getSlotNumber());
+                throw new BannerValidationException("Active banner slot already in use for placement "
+                        + request.getPlacement() + ": " + request.getSlotNumber());
             }
         }
         if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
@@ -219,5 +263,19 @@ public class AdminBannerPromotionService {
     private Long currentUserId() {
         return securityUtils.getCurrentUserId().orElse(0L);
     }
-}
 
+    private BannerPromotionResponse toPublicResponse(BannerPromotion banner) {
+        BannerPromotionResponse response = bannerPromotionMapper.toResponse(banner);
+        response.setBannerImageUrl(mediaUrlResolver.toPublicUrl(response.getBannerImageUrl()));
+        return response;
+    }
+
+    private void normalizeBannerImagePath(BannerUpsertRequest request) {
+        if (request == null) {
+            return;
+        }
+        String rawValue = request.getBannerImageUrl();
+        String storablePath = mediaUrlResolver.toStorablePath(rawValue);
+        request.setBannerImageUrl(storablePath);
+    }
+}

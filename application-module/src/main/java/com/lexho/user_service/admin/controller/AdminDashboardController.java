@@ -15,8 +15,8 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/admin/dashboard")
-@PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
+@RequestMapping({"/api/admin/dashboard", "/api/v1/admin/dashboard"})
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminDashboardController {
 
     private final AdminDashboardService adminDashboardService;

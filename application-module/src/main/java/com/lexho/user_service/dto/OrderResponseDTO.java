@@ -1,5 +1,6 @@
 package com.lexho.user_service.dto;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public class OrderResponseDTO {
@@ -9,6 +10,10 @@ public class OrderResponseDTO {
     private String status;
     private String paymentStatus;
     private String address;
+    private String bookingType;
+    private LocalDateTime promisedStartTime;
+    private Integer slaMinutes;
+    private String unavailableReason;
     private List<OrderItemDTO> items;
 
     public Long getId() {
@@ -51,6 +56,38 @@ public class OrderResponseDTO {
         this.address = address;
     }
 
+    public String getBookingType() {
+        return bookingType;
+    }
+
+    public void setBookingType(String bookingType) {
+        this.bookingType = bookingType;
+    }
+
+    public LocalDateTime getPromisedStartTime() {
+        return promisedStartTime;
+    }
+
+    public void setPromisedStartTime(LocalDateTime promisedStartTime) {
+        this.promisedStartTime = promisedStartTime;
+    }
+
+    public Integer getSlaMinutes() {
+        return slaMinutes;
+    }
+
+    public void setSlaMinutes(Integer slaMinutes) {
+        this.slaMinutes = slaMinutes;
+    }
+
+    public String getUnavailableReason() {
+        return unavailableReason;
+    }
+
+    public void setUnavailableReason(String unavailableReason) {
+        this.unavailableReason = unavailableReason;
+    }
+
     public List<OrderItemDTO> getItems() {
         return items;
     }
@@ -59,4 +96,3 @@ public class OrderResponseDTO {
         this.items = items;
     }
 }
-

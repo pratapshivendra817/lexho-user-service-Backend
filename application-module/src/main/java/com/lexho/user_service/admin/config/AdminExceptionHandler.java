@@ -1,12 +1,10 @@
 package com.lexho.user_service.admin.config;
 
-import com.lexho.user_service.admin.controller.AdminDashboardController;
-import com.lexho.user_service.admin.controller.AdminManagementController;
-import com.lexho.user_service.controller.AdminAuthController;
-import com.lexho.user.controller.AdminUserManagementController;
 import com.lexho.user.exception.InvalidRoleException;
 import com.lexho.user.exception.UserAlreadyExistsException;
 import com.lexho.user.exception.UserNotFoundException;
+import com.lexho.user_service.banner.exception.BannerNotFoundException;
+import com.lexho.user_service.banner.exception.BannerValidationException;
 import com.lexho.user_service.exception.*;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -14,6 +12,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -22,11 +21,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.Map;
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(basePackageClasses = {
-        AdminAuthController.class,
-        AdminDashboardController.class,
-        AdminManagementController.class,
-        AdminUserManagementController.class
+@RestControllerAdvice(basePackages = {
+        "com.lexho.user_service.controller",
+        "com.lexho.user_service.admin.controller",
+        "com.lexho.user.controller"
 })
 public class AdminExceptionHandler {
 
@@ -41,6 +39,8 @@ public class AdminExceptionHandler {
             InvalidRoleException.class,
             InfrastructureException.class,
             DataIntegrityViolationException.class,
+            BannerValidationException.class,
+            BannerNotFoundException.class,
             MethodArgumentNotValidException.class,
             ConstraintViolationException.class,
             HttpMessageNotReadableException.class,
@@ -55,6 +55,11 @@ public class AdminExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleGeneric(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "Something went wrong"));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<Map<String, String>> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Access denied"));
     }
 
     private String resolveMessage(Exception ex) {
@@ -75,6 +80,9 @@ public class AdminExceptionHandler {
             return HttpStatus.NOT_FOUND;
         }
         if (ex instanceof UserNotFoundException) {
+            return HttpStatus.NOT_FOUND;
+        }
+        if (ex instanceof BannerNotFoundException) {
             return HttpStatus.NOT_FOUND;
         }
         if (ex instanceof UnauthorizedException) {

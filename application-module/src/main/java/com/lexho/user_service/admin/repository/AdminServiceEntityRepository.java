@@ -36,8 +36,27 @@ public interface AdminServiceEntityRepository extends JpaRepository<AdminService
                                            Pageable pageable);
 
     Optional<AdminServiceEntity> findByIdAndDeletedFalse(Long id);
+    Page<AdminServiceEntity> findByDeletedFalseAndActiveTrue(Pageable pageable);
+
+    @Query("""
+            SELECT s FROM AdminServiceEntity s
+            WHERE s.deleted = false
+              AND s.active = true
+              AND (:search IS NULL OR :search = '' OR LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')))
+            ORDER BY
+              CASE
+                WHEN :search IS NULL OR :search = '' THEN 4
+                WHEN LOWER(s.name) = LOWER(:search) THEN 1
+                WHEN LOWER(s.name) LIKE LOWER(CONCAT(:search, '%')) THEN 2
+                WHEN LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) THEN 3
+                ELSE 4
+              END,
+              s.name ASC
+            """)
+    Page<AdminServiceEntity> searchActiveCatalogForCustomer(@Param("search") String search, Pageable pageable);
 
     List<AdminServiceEntity> findByCategory_IdAndDeletedFalse(Long categoryId);
+    List<AdminServiceEntity> findByDeletedFalseAndActiveTrue();
 
     @Query("""
             SELECT COALESCE(s.categoryName, 'UNKNOWN'), COUNT(s)

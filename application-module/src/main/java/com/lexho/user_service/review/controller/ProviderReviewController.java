@@ -13,9 +13,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/provider/reviews")
-@PreAuthorize("hasAnyRole('PARTNER','PROVIDER')")
-@Tag(name = "Provider Reviews", description = "Provider-side review listing APIs")
+@RequestMapping("/api/partner/reviews")
+@PreAuthorize("hasAnyRole('PARTNER','PARTNER')")
+@Tag(name = "Partner Reviews", description = "Partner-side review listing APIs")
 public class ProviderReviewController {
 
     private final ReviewManagementService reviewManagementService;
@@ -25,7 +25,7 @@ public class ProviderReviewController {
     }
 
     @GetMapping
-    @Operation(summary = "Get provider reviews")
+    @Operation(summary = "Get partner reviews")
     public ResponseEntity<ReviewPageResponse<ReviewResponse>> providerReviews(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {

@@ -38,6 +38,34 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     List<Notification> findByExpiryTimeBeforeAndDeletedFalse(LocalDateTime now);
 
     @Query("""
+            SELECT CASE WHEN COUNT(n) > 0 THEN true ELSE false END
+            FROM Notification n
+            WHERE n.deleted = false
+              AND n.userId = :userId
+              AND n.userType = :userType
+              AND n.notificationType = :notificationType
+              AND n.channelType = :channelType
+              AND n.title = :title
+              AND n.message = :message
+              AND COALESCE(n.referenceType, '') = COALESCE(:referenceType, '')
+              AND COALESCE(n.referenceId, -1) = COALESCE(:referenceId, -1)
+              AND COALESCE(n.redirectType, '') = COALESCE(:redirectType, '')
+              AND COALESCE(n.redirectValue, '') = COALESCE(:redirectValue, '')
+              AND n.createdAt >= :createdAfter
+            """)
+    boolean existsRecentDuplicate(@Param("userId") Long userId,
+                                  @Param("userType") NotificationUserType userType,
+                                  @Param("notificationType") NotificationType notificationType,
+                                  @Param("channelType") ChannelType channelType,
+                                  @Param("title") String title,
+                                  @Param("message") String message,
+                                  @Param("referenceType") String referenceType,
+                                  @Param("referenceId") Long referenceId,
+                                  @Param("redirectType") String redirectType,
+                                  @Param("redirectValue") String redirectValue,
+                                  @Param("createdAfter") LocalDateTime createdAfter);
+
+    @Query("""
             SELECT n FROM Notification n
             WHERE n.deleted = false
               AND (:search IS NULL OR LOWER(COALESCE(n.title, '')) LIKE LOWER(CONCAT('%', :search, '%'))
