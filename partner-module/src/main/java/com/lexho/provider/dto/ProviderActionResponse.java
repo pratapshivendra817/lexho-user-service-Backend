@@ -1,6 +1,6 @@
-package com.lexho.partner.dto;
+package com.lexho.provider.dto;
 
-import com.lexho.partner.enums.OnboardingStatus;
+import com.lexho.provider.enums.OnboardingStatus;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 

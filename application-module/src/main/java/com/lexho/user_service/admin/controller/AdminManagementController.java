@@ -115,8 +115,8 @@ public class AdminManagementController {
     }
 
     @PostMapping("/services/{serviceId}/details")
-    public DataResponse<java.util.List<AdminServiceDetailResponse>> addServiceDetails(@PathVariable Long serviceId,
-                                                                                       @Valid @RequestBody AdminServiceDetailBulkRequest request) {
+    public AdminServiceDetailBulkCreateResponse addServiceDetails(@PathVariable Long serviceId,
+                                                                  @Valid @RequestBody AdminServiceDetailBulkRequest request) {
         return adminCatalogService.addServiceDetails(serviceId, request);
     }
 

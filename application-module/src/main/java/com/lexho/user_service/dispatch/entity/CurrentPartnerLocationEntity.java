@@ -35,6 +35,33 @@ public class CurrentPartnerLocationEntity {
     @Column(nullable = false, length = 30)
     private String source = "GPS";
 
+    @Column(name = "geohash", length = 20)
+    private String geohash;
+
+    @Column(name = "accuracy_meters", precision = 8, scale = 2)
+    private BigDecimal accuracyMeters;
+
+    @Column(name = "heading_degrees", precision = 7, scale = 2)
+    private BigDecimal headingDegrees;
+
+    @Column(name = "speed_kmh", precision = 8, scale = 2)
+    private BigDecimal speedKmh;
+
+    @Column(name = "location_seq", nullable = false)
+    private long locationSeq = 0L;
+
+    @Column(name = "last_heartbeat_at")
+    private LocalDateTime lastHeartbeatAt;
+
+    @Column(name = "fraud_score", precision = 6, scale = 2)
+    private BigDecimal fraudScore;
+
+    @Column(name = "fraud_reason", length = 120)
+    private String fraudReason;
+
+    @Column(name = "last_suspicious_at")
+    private LocalDateTime lastSuspiciousAt;
+
     @Column(nullable = false)
     private boolean deleted = false;
 
@@ -106,6 +133,78 @@ public class CurrentPartnerLocationEntity {
         this.source = source;
     }
 
+    public String getGeohash() {
+        return geohash;
+    }
+
+    public void setGeohash(String geohash) {
+        this.geohash = geohash;
+    }
+
+    public BigDecimal getAccuracyMeters() {
+        return accuracyMeters;
+    }
+
+    public void setAccuracyMeters(BigDecimal accuracyMeters) {
+        this.accuracyMeters = accuracyMeters;
+    }
+
+    public BigDecimal getHeadingDegrees() {
+        return headingDegrees;
+    }
+
+    public void setHeadingDegrees(BigDecimal headingDegrees) {
+        this.headingDegrees = headingDegrees;
+    }
+
+    public BigDecimal getSpeedKmh() {
+        return speedKmh;
+    }
+
+    public void setSpeedKmh(BigDecimal speedKmh) {
+        this.speedKmh = speedKmh;
+    }
+
+    public long getLocationSeq() {
+        return locationSeq;
+    }
+
+    public void setLocationSeq(long locationSeq) {
+        this.locationSeq = locationSeq;
+    }
+
+    public LocalDateTime getLastHeartbeatAt() {
+        return lastHeartbeatAt;
+    }
+
+    public void setLastHeartbeatAt(LocalDateTime lastHeartbeatAt) {
+        this.lastHeartbeatAt = lastHeartbeatAt;
+    }
+
+    public BigDecimal getFraudScore() {
+        return fraudScore;
+    }
+
+    public void setFraudScore(BigDecimal fraudScore) {
+        this.fraudScore = fraudScore;
+    }
+
+    public String getFraudReason() {
+        return fraudReason;
+    }
+
+    public void setFraudReason(String fraudReason) {
+        this.fraudReason = fraudReason;
+    }
+
+    public LocalDateTime getLastSuspiciousAt() {
+        return lastSuspiciousAt;
+    }
+
+    public void setLastSuspiciousAt(LocalDateTime lastSuspiciousAt) {
+        this.lastSuspiciousAt = lastSuspiciousAt;
+    }
+
     public boolean isDeleted() {
         return deleted;
     }
@@ -138,4 +237,3 @@ public class CurrentPartnerLocationEntity {
         this.updatedBy = updatedBy;
     }
 }
-

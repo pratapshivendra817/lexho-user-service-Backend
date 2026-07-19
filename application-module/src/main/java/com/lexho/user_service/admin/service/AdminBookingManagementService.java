@@ -15,6 +15,9 @@ import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexhopartner.entity.PartnerOrder;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
+import com.lexho.user_service.map.dto.NavigationRouteResponse;
+import com.lexho.user_service.map.service.NavigationEtaPushService;
+import com.lexho.user_service.map.service.PartnerNavigationService;
 import com.lexho.user_service.service.OrderService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -38,19 +41,25 @@ public class AdminBookingManagementService {
     private final CurrentPartnerLocationRepository currentPartnerLocationRepository;
     private final PartnerOrderRepository partnerOrderRepository;
     private final PayoutRepository payoutRepository;
+    private final PartnerNavigationService partnerNavigationService;
+    private final NavigationEtaPushService navigationEtaPushService;
 
     public AdminBookingManagementService(OrderRepository orderRepository,
                                          OrderService orderService,
                                          BookingEventRepository bookingEventRepository,
                                          CurrentPartnerLocationRepository currentPartnerLocationRepository,
                                          PartnerOrderRepository partnerOrderRepository,
-                                         PayoutRepository payoutRepository) {
+                                         PayoutRepository payoutRepository,
+                                         PartnerNavigationService partnerNavigationService,
+                                         NavigationEtaPushService navigationEtaPushService) {
         this.orderRepository = orderRepository;
         this.orderService = orderService;
         this.bookingEventRepository = bookingEventRepository;
         this.currentPartnerLocationRepository = currentPartnerLocationRepository;
         this.partnerOrderRepository = partnerOrderRepository;
         this.payoutRepository = payoutRepository;
+        this.partnerNavigationService = partnerNavigationService;
+        this.navigationEtaPushService = navigationEtaPushService;
     }
 
     @Transactional(readOnly = true)
@@ -123,16 +132,22 @@ public class AdminBookingManagementService {
         List<Map<String, Object>> events = bookingEventRepository.findByBookingIdOrderByCreatedAtAsc(orderId).stream()
                 .map(this::toEventRow)
                 .toList();
+        NavigationRouteResponse navigation = resolveNavigation(orderId, true);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("bookingId", order.getId());
+        response.put("status", order.getStatus() == null ? null : order.getStatus().name());
+        response.put("paymentStatus", order.getPaymentStatus() == null ? null : order.getPaymentStatus().name());
+        response.put("scheduledAt", order.getScheduledAt());
+        response.put("partnerId", partnerId);
+        response.put("partnerLocation", location == null ? null : toLocationRow(location));
+        response.put("navigation", navigation);
+        response.put("events", events);
+        return response;
+    }
 
-        return Map.of(
-                "bookingId", order.getId(),
-                "status", order.getStatus() == null ? null : order.getStatus().name(),
-                "paymentStatus", order.getPaymentStatus() == null ? null : order.getPaymentStatus().name(),
-                "scheduledAt", order.getScheduledAt(),
-                "partnerId", partnerId,
-                "partnerLocation", location == null ? null : toLocationRow(location),
-                "events", events
-        );
+    @Transactional(readOnly = true)
+    public NavigationRouteResponse navigation(Long orderId) {
+        return resolveNavigation(orderId, true);
     }
 
     @Transactional
@@ -155,10 +170,13 @@ public class AdminBookingManagementService {
         location.setSource("ADMIN_OVERRIDE");
         location.setUpdatedBy("ADMIN");
         CurrentPartnerLocationEntity saved = currentPartnerLocationRepository.save(location);
+        NavigationRouteResponse navigation = resolveNavigation(orderId, true);
+        navigationEtaPushService.publish(orderId, navigation);
         return Map.of(
                 "bookingId", orderId,
                 "partnerId", saved.getPartnerId(),
-                "location", toLocationRow(saved)
+                "location", toLocationRow(saved),
+                "navigation", navigation
         );
     }
 
@@ -166,32 +184,41 @@ public class AdminBookingManagementService {
     public Map<String, Object> paymentReconciliation(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
-        Payout payout = payoutRepository.search(String.valueOf(orderId), null, PageRequest.of(0, 1))
-                .stream().findFirst().orElse(null);
-        return Map.of(
-                "bookingId", order.getId(),
-                "amount", order.getTotalAmount(),
-                "bookingStatus", order.getStatus() == null ? null : order.getStatus().name(),
-                "paymentStatus", order.getPaymentStatus() == null ? null : order.getPaymentStatus().name(),
-                "payout", payout == null ? null : Map.of(
-                        "id", payout.getId(),
-                        "providerId", payout.getProviderId(),
-                        "amount", payout.getAmount(),
-                        "status", payout.getStatus(),
-                        "createdAt", payout.getCreatedAt()
-                )
-        );
+        Payout payout = payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(orderId).orElse(null);
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("bookingId", order.getId());
+        response.put("amount", order.getTotalAmount());
+        response.put("bookingStatus", order.getStatus() == null ? null : order.getStatus().name());
+        response.put("paymentStatus", order.getPaymentStatus() == null ? null : order.getPaymentStatus().name());
+        response.put("payout", payout == null ? null : toPayoutRow(payout));
+        return response;
     }
 
     @Transactional
-    public Map<String, Object> updatePaymentStatus(Long orderId, PaymentStatus paymentStatus) {
+    public Map<String, Object> updatePaymentStatus(Long orderId,
+                                                   PaymentStatus paymentStatus,
+                                                   String reason,
+                                                   Long adminId) {
         if (paymentStatus == null) {
             throw new BadRequestException("paymentStatus is required");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BadRequestException("reason is required");
+        }
+        if (paymentStatus == PaymentStatus.SUCCESS || paymentStatus == PaymentStatus.REFUNDED) {
+            throw new BadRequestException("SUCCESS and REFUNDED must be updated through Razorpay reconciliation");
         }
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
         order.setPaymentStatus(paymentStatus);
         Order saved = orderRepository.save(order);
+        BookingEventEntity event = new BookingEventEntity();
+        event.setBookingId(orderId);
+        event.setEventType("ADMIN_PAYMENT_OVERRIDE");
+        event.setEventPayload("{\"adminId\":" + adminId
+                + ",\"paymentStatus\":\"" + paymentStatus.name()
+                + "\",\"reason\":\"" + sanitizeJson(reason) + "\"}");
+        bookingEventRepository.save(event);
         return Map.of(
                 "bookingId", saved.getId(),
                 "paymentStatus", saved.getPaymentStatus().name(),
@@ -205,10 +232,10 @@ public class AdminBookingManagementService {
             throw new BadRequestException("providerId and positive amount are required");
         }
         String normalizedStatus = (status == null || status.isBlank()) ? "PENDING" : status.trim().toUpperCase();
-        Payout payout = payoutRepository.search(String.valueOf(orderId), null, PageRequest.of(0, 1)).stream()
-                .findFirst()
+        Payout payout = payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(orderId)
                 .orElseGet(Payout::new);
         payout.setProviderId(providerId);
+        payout.setReferenceBookingId(orderId);
         payout.setAmount(amount);
         payout.setStatus(normalizedStatus);
         Payout saved = payoutRepository.save(payout);
@@ -256,12 +283,27 @@ public class AdminBookingManagementService {
         return row;
     }
 
+    private Map<String, Object> toPayoutRow(Payout payout) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", payout.getId());
+        row.put("providerId", payout.getProviderId());
+        row.put("referenceBookingId", payout.getReferenceBookingId());
+        row.put("amount", payout.getAmount());
+        row.put("status", payout.getStatus());
+        row.put("createdAt", payout.getCreatedAt());
+        return row;
+    }
+
     private String normalize(String value) {
         if (value == null) {
             return null;
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String sanitizeJson(String value) {
+        return value.trim().replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private OrderStatus parseStatus(String status) {
@@ -283,5 +325,15 @@ public class AdminBookingManagementService {
             case "id", "createdAt", "updatedAt", "scheduledAt", "totalAmount", "status", "paymentStatus" -> sortBy;
             default -> "createdAt";
         };
+    }
+
+    private NavigationRouteResponse resolveNavigation(Long bookingId, boolean activateTracking) {
+        try {
+            return activateTracking
+                    ? partnerNavigationService.etaForBooking(bookingId)
+                    : partnerNavigationService.etaForBookingSnapshot(bookingId);
+        } catch (ResourceNotFoundException | BadRequestException ex) {
+            return null;
+        }
     }
 }

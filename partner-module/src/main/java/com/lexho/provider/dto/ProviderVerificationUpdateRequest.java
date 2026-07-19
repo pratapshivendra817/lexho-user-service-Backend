@@ -1,4 +1,4 @@
-package com.lexho.partner.dto;
+package com.lexho.provider.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;

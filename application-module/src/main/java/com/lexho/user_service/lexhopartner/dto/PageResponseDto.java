@@ -7,6 +7,10 @@ public record PageResponseDto<T>(
         int page,
         int size,
         long totalElements,
-        int totalPages
+        int totalPages,
+        boolean last
 ) {
+    public PageResponseDto(List<T> content, int page, int size, long totalElements, int totalPages) {
+        this(content, page, size, totalElements, totalPages, page >= Math.max(totalPages - 1, 0));
+    }
 }

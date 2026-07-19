@@ -3,18 +3,18 @@ package com.lexho.user_service.integration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.user_service.customer.location.controller.CustomerLocationController;
 import com.lexho.user_service.customer.location.dto.LocationUpdateResponse;
+import com.lexho.user_service.customer.location.dto.ServiceabilityCheckResponse;
 import com.lexho.user_service.customer.location.service.AddressService;
 import com.lexho.user_service.customer.location.service.LocationService;
 import com.lexho.user_service.customer.location.service.ReverseGeocodeService;
 import com.lexho.user_service.customer.location.service.ServiceabilityService;
+import com.lexho.user_service.service.ApiRateLimiterService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -22,27 +22,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = CustomerLocationController.class)
-@AutoConfigureMockMvc(addFilters = false)
 class CustomerLocationTransitionIT {
 
-    @Autowired
     private MockMvc mockMvc;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @MockBean
-    private LocationService locationService;
+    private final LocationService locationService = Mockito.mock(LocationService.class);
 
-    @MockBean
-    private AddressService addressService;
+    private final AddressService addressService = Mockito.mock(AddressService.class);
 
-    @MockBean
-    private ReverseGeocodeService reverseGeocodeService;
+    private final ReverseGeocodeService reverseGeocodeService = Mockito.mock(ReverseGeocodeService.class);
 
-    @MockBean
-    private ServiceabilityService serviceabilityService;
+    private final ServiceabilityService serviceabilityService = Mockito.mock(ServiceabilityService.class);
+    private final ApiRateLimiterService apiRateLimiterService = Mockito.mock(ApiRateLimiterService.class);
+
+    @BeforeEach
+    void setUp() {
+        CustomerLocationController controller = new CustomerLocationController(
+                locationService, addressService, reverseGeocodeService, serviceabilityService, apiRateLimiterService);
+        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+    }
 
     @Test
     void canonicalCurrentEndpointShouldWork() throws Exception {
@@ -61,13 +61,16 @@ class CustomerLocationTransitionIT {
 
     @Test
     void deprecatedServiceabilityEndpointShouldReturnDeprecationHeader() throws Exception {
-        Mockito.when(serviceabilityService.isServiceable("452010")).thenReturn(true);
+        ServiceabilityCheckResponse response = new ServiceabilityCheckResponse();
+        response.setServiceable(true);
+        response.setMatchedPincode("452010");
+        Mockito.when(serviceabilityService.resolve("452010", null, null)).thenReturn(response);
 
         mockMvc.perform(post("/api/customer/location/serviceability/check")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"pincode\":\"452010\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.serviceAvailable").value(true));
+                .andExpect(jsonPath("$.data.serviceable").value(true));
     }
 }

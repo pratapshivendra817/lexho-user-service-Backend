@@ -1,5 +1,6 @@
 package com.lexho.user_service.customer.location.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.lexho.user_service.customer.location.entity.AddressType;
 import jakarta.validation.constraints.Pattern;
 
@@ -13,7 +14,9 @@ public class UpdateAddressRequest {
     public String addressLine;
     public String area;
     public String sector;
+    @JsonAlias({"lat"})
     public Double latitude;
+    @JsonAlias({"lng", "lon"})
     public Double longitude;
     @Pattern(regexp = "^[6-9]\\d{9}$", message = "invalid mobile")
     public String mobile;

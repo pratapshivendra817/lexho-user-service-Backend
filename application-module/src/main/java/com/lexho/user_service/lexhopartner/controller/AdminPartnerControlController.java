@@ -10,6 +10,7 @@ import com.lexho.user_service.lexhopartner.service.AdminPartnerGovernanceService
 import com.lexho.user_service.lexhopartner.service.PartnerBannerService;
 import com.lexho.user_service.lexhopartner.service.PartnerOrderService;
 import com.lexho.user_service.lexhopartner.service.PartnerProfileService;
+import com.lexho.user_service.lexhopartner.service.PartnerOperationsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -17,6 +18,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -36,15 +38,18 @@ public class AdminPartnerControlController {
     private final PartnerOrderService partnerOrderService;
     private final PartnerBannerService partnerBannerService;
     private final AdminPartnerGovernanceService adminPartnerGovernanceService;
+    private final PartnerOperationsService partnerOperationsService;
 
     public AdminPartnerControlController(PartnerProfileService partnerProfileService,
                                          PartnerOrderService partnerOrderService,
                                          PartnerBannerService partnerBannerService,
-                                         AdminPartnerGovernanceService adminPartnerGovernanceService) {
+                                         AdminPartnerGovernanceService adminPartnerGovernanceService,
+                                         PartnerOperationsService partnerOperationsService) {
         this.partnerProfileService = partnerProfileService;
         this.partnerOrderService = partnerOrderService;
         this.partnerBannerService = partnerBannerService;
         this.adminPartnerGovernanceService = adminPartnerGovernanceService;
+        this.partnerOperationsService = partnerOperationsService;
     }
 
     @GetMapping("/{partnerId}/dashboard/stats")
@@ -86,6 +91,21 @@ public class AdminPartnerControlController {
                 adminPartnerGovernanceService.updateSettlementStatus(payoutId, request.status, request.remarks));
     }
 
+    @GetMapping("/withdrawals")
+    @Operation(summary = "List partner withdrawal requests")
+    public ApiResponse<Map<String, Object>> withdrawals(@RequestParam(defaultValue = "0") int page,
+                                                        @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("Withdrawals fetched", adminPartnerGovernanceService.withdrawals(page, size));
+    }
+
+    @PatchMapping("/withdrawals/{withdrawalId}/status")
+    @Operation(summary = "Update partner withdrawal status")
+    public ApiResponse<Map<String, Object>> updateWithdrawalStatus(@PathVariable Long withdrawalId,
+                                                                   @RequestBody SettlementStatusRequest request) {
+        return ApiResponse.success("Withdrawal status updated",
+                adminPartnerGovernanceService.updateWithdrawalStatus(withdrawalId, request.status, request.remarks));
+    }
+
     @PatchMapping("/{partnerId}/kyc/documents/{documentId}/review")
     @Operation(summary = "Review partner KYC document")
     public ApiResponse<Map<String, Object>> reviewKycDocument(@PathVariable Long partnerId,
@@ -94,6 +114,22 @@ public class AdminPartnerControlController {
                                                                @RequestBody KycDecisionRequest request) {
         return ApiResponse.success("Document reviewed",
                 adminPartnerGovernanceService.reviewKycDocument(partnerId, documentId, request.decision, request.reason, adminId));
+    }
+
+    @PatchMapping("/{partnerId}/kyc/status")
+    @Operation(summary = "Review partner KYC status")
+    public ApiResponse<Map<String, Object>> reviewPartnerKyc(@PathVariable Long partnerId,
+                                                             @RequestBody VerificationDecisionRequest request) {
+        return ApiResponse.success("Partner KYC reviewed",
+                adminPartnerGovernanceService.reviewPartnerKyc(partnerId, request.status, request.reason));
+    }
+
+    @PatchMapping("/{partnerId}/bank/status")
+    @Operation(summary = "Review partner bank verification status")
+    public ApiResponse<Map<String, Object>> reviewBank(@PathVariable Long partnerId,
+                                                       @RequestBody VerificationDecisionRequest request) {
+        return ApiResponse.success("Partner bank reviewed",
+                adminPartnerGovernanceService.reviewBank(partnerId, request.status, request.reason));
     }
 
     @PatchMapping("/{partnerId}/availability/force")
@@ -120,6 +156,31 @@ public class AdminPartnerControlController {
                 adminPartnerGovernanceService.riskAction(partnerId, request.action, request.reason));
     }
 
+    @PatchMapping("/{partnerId}/penalties")
+    @Operation(summary = "Add partner warning, suspension, or block penalty")
+    public ApiResponse<Map<String, Object>> addPenalty(@PathVariable Long partnerId,
+                                                       @RequestAttribute(value = "userId", required = false) Long adminId,
+                                                       @RequestBody PenaltyRequest request) {
+        return ApiResponse.success("Partner penalty added",
+                partnerOperationsService.addPenalty(partnerId, request.status, request.reason, adminId));
+    }
+
+    @GetMapping("/{partnerId}/penalties")
+    @Operation(summary = "Get partner penalty history")
+    public ApiResponse<java.util.List<Map<String, Object>>> penalties(@PathVariable Long partnerId) {
+        return ApiResponse.success("Partner penalties fetched", partnerOperationsService.penalties(partnerId));
+    }
+
+    @PostMapping("/{partnerId}/warnings")
+    @Operation(summary = "Create partner warning")
+    public ApiResponse<Map<String, Object>> createWarning(@PathVariable Long partnerId,
+                                                          @RequestAttribute(value = "userId", required = false) Long adminId,
+                                                          @RequestBody WarningRequest request) {
+        boolean sendNotification = request.sendNotification == null || request.sendNotification;
+        return ApiResponse.success("Partner warning created",
+                partnerOperationsService.createWarning(partnerId, request.reason, adminId, sendNotification));
+    }
+
     public static class SettlementStatusRequest {
         public String status;
         public String remarks;
@@ -139,5 +200,20 @@ public class AdminPartnerControlController {
     public static class RiskActionRequest {
         public String action;
         public String reason;
+    }
+
+    public static class VerificationDecisionRequest {
+        public String status;
+        public String reason;
+    }
+
+    public static class PenaltyRequest {
+        public String status;
+        public String reason;
+    }
+
+    public static class WarningRequest {
+        public String reason;
+        public Boolean sendNotification;
     }
 }

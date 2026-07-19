@@ -11,6 +11,7 @@ import com.lexho.user_service.customer.location.mapper.CustomerAddressMapper;
 import com.lexho.user_service.customer.location.repository.CustomerAddressRepository;
 import com.lexho.user_service.customer.location.service.AddressService;
 import com.lexho.user_service.customer.location.service.ReverseGeocodeService;
+import com.lexho.user_service.customer.location.service.ReverseGeocodingService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -41,21 +42,21 @@ public class AddressServiceImpl implements AddressService {
         CustomerAddress address = new CustomerAddress();
         address.setCustomerId(customerId);
         address.setType(request.type);
-        address.setCustomLabel(request.customLabel);
-        address.setFlatNo(request.flatNo);
-        address.setFloor(request.floor);
-        address.setBuildingName(request.buildingName);
-        address.setLandmark(request.landmark);
-        address.setAddressLine(request.addressLine);
-        address.setArea(request.area);
-        address.setSector(request.sector);
-        address.setCity(reverse.city == null ? "Unknown" : reverse.city);
-        address.setState(reverse.state == null ? "Unknown" : reverse.state);
+        address.setCustomLabel(normalizeText(request.customLabel));
+        address.setFlatNo(normalizeText(request.flatNo));
+        address.setFloor(normalizeText(request.floor));
+        address.setBuildingName(normalizeText(request.buildingName));
+        address.setLandmark(normalizeText(request.landmark));
+        address.setAddressLine(normalizeAddressLine(request.addressLine));
+        address.setArea(ReverseGeocodingService.normalizeLocality(request.area));
+        address.setSector(normalizeText(request.sector));
+        address.setCity(reverse.city == null ? "Unknown" : ReverseGeocodingService.normalizeLocality(reverse.city));
+        address.setState(reverse.state == null ? "Unknown" : ReverseGeocodingService.normalizeAddressText(reverse.state));
         address.setCountry("India");
-        address.setPincode(reverse.pincode == null ? "" : reverse.pincode.trim());
+        address.setPincode(ReverseGeocodingService.normalizePincode(reverse.pincode));
         address.setLatitude(BigDecimal.valueOf(request.latitude));
         address.setLongitude(BigDecimal.valueOf(request.longitude));
-        address.setMobile(request.mobile);
+        address.setMobile(normalizeMobile(request.mobile));
         address.setDeleted(false);
         address.setDefault(!repository.existsByCustomerIdAndIsDeletedFalse(customerId));
         address.setCreatedBy("CUSTOMER:" + customerId);
@@ -69,22 +70,22 @@ public class AddressServiceImpl implements AddressService {
         CustomerAddress address = repository.findByIdAndCustomerIdAndIsDeletedFalse(addressId, customerId)
                 .orElseThrow(() -> new AddressNotFoundException("Address not found"));
         if (request.type != null) address.setType(request.type);
-        if (request.customLabel != null) address.setCustomLabel(request.customLabel);
-        if (request.flatNo != null) address.setFlatNo(request.flatNo);
-        if (request.floor != null) address.setFloor(request.floor);
-        if (request.buildingName != null) address.setBuildingName(request.buildingName);
-        if (request.landmark != null) address.setLandmark(request.landmark);
-        if (request.addressLine != null) address.setAddressLine(request.addressLine);
-        if (request.area != null) address.setArea(request.area);
-        if (request.sector != null) address.setSector(request.sector);
-        if (request.mobile != null) address.setMobile(request.mobile);
+        if (request.customLabel != null) address.setCustomLabel(normalizeText(request.customLabel));
+        if (request.flatNo != null) address.setFlatNo(normalizeText(request.flatNo));
+        if (request.floor != null) address.setFloor(normalizeText(request.floor));
+        if (request.buildingName != null) address.setBuildingName(normalizeText(request.buildingName));
+        if (request.landmark != null) address.setLandmark(normalizeText(request.landmark));
+        if (request.addressLine != null) address.setAddressLine(normalizeAddressLine(request.addressLine));
+        if (request.area != null) address.setArea(ReverseGeocodingService.normalizeLocality(request.area));
+        if (request.sector != null) address.setSector(normalizeText(request.sector));
+        if (request.mobile != null) address.setMobile(normalizeMobile(request.mobile));
         if (request.latitude != null) address.setLatitude(BigDecimal.valueOf(request.latitude));
         if (request.longitude != null) address.setLongitude(BigDecimal.valueOf(request.longitude));
         if (request.latitude != null && request.longitude != null) {
             ReverseGeocodeResponse reverse = reverseGeocodeService.reverse(request.latitude, request.longitude);
-            if (reverse.city != null && !reverse.city.isBlank()) address.setCity(reverse.city);
-            if (reverse.state != null && !reverse.state.isBlank()) address.setState(reverse.state);
-            if (reverse.pincode != null && !reverse.pincode.isBlank()) address.setPincode(reverse.pincode.trim());
+            if (reverse.city != null && !reverse.city.isBlank()) address.setCity(ReverseGeocodingService.normalizeLocality(reverse.city));
+            if (reverse.state != null && !reverse.state.isBlank()) address.setState(ReverseGeocodingService.normalizeAddressText(reverse.state));
+            if (reverse.pincode != null && !reverse.pincode.isBlank()) address.setPincode(ReverseGeocodingService.normalizePincode(reverse.pincode));
         }
         address.setUpdatedBy("CUSTOMER:" + customerId);
         return mapper.toResponse(repository.save(address));
@@ -131,5 +132,24 @@ public class AddressServiceImpl implements AddressService {
                 repository.save(next);
             });
         }
+    }
+
+    private String normalizeText(String raw) {
+        return ReverseGeocodingService.normalizeAddressText(raw);
+    }
+
+    private String normalizeAddressLine(String raw) {
+        String normalized = ReverseGeocodingService.normalizeAddressText(raw);
+        if (normalized == null) {
+            return null;
+        }
+        return normalized.replaceAll(",\\s*,+", ", ");
+    }
+
+    private String normalizeMobile(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        return raw.replaceAll("\\D", "");
     }
 }

@@ -22,6 +22,7 @@ public class CustomerCatalogService {
     private final CustomerCatalogRepository customerCatalogRepository;
     private final AdminCategoryRepository adminCategoryRepository;
     private final MediaUrlResolver mediaUrlResolver;
+    private final CustomerServiceBookingModeMapper bookingModeMapper;
 
     public List<CustomerServiceCardResponse> getServicesByCategory(Long categoryId, int page, int size) {
         if (categoryId == null) {
@@ -47,15 +48,32 @@ public class CustomerCatalogService {
 
     private CustomerServiceCardResponse toCardResponse(AdminServiceEntity service) {
         String imageUrl = mediaUrlResolver.toPublicUrl(service.getImageUrl());
+        List<String> bookingModes = bookingModeMapper.bookingModes(service);
+        java.math.BigDecimal effectivePrice = effectivePrice(service);
         return CustomerServiceCardResponse.builder()
                 .id(service.getId())
+                .serviceId(service.getId())
                 .name(service.getName())
+                .serviceName(service.getName())
+                .description(service.getDescription())
                 .imageUrl(imageUrl == null ? "" : imageUrl)
-                .price(service.getBasePrice())
-                .discountedPrice(service.getDiscountedPrice())
+                .price(effectivePrice)
+                .discountedPrice(effectivePrice)
                 .rating(service.getAvgRating())
                 .totalReviews(service.getTotalReviews())
                 .isNew(service.isNew())
+                .bookingModes(bookingModes)
+                .hourlyRate(bookingModeMapper.hourlyRate(service, bookingModes))
+                .minHours(bookingModeMapper.minHours(bookingModes))
+                .maxHours(bookingModeMapper.maxHours(bookingModes))
+                .hourStep(bookingModeMapper.hourStep(bookingModes))
                 .build();
+    }
+
+    private java.math.BigDecimal effectivePrice(AdminServiceEntity service) {
+        if (service.getDiscountedPrice() != null && service.getDiscountedPrice().signum() > 0) {
+            return service.getDiscountedPrice();
+        }
+        return service.getBasePrice();
     }
 }

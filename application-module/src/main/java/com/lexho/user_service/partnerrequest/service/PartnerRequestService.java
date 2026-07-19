@@ -1,7 +1,7 @@
 package com.lexho.user_service.partnerrequest.service;
 
-import com.lexho.partner.entity.Partner;
-import com.lexho.partner.repository.PartnerRepository;
+import com.lexho.provider.entity.Partner;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
@@ -21,6 +21,7 @@ import com.lexho.user_service.partnerrequest.dto.PartnerStatusUpdateRequest;
 import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.model.PartnerServiceRequestStatus;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -38,15 +39,18 @@ public class PartnerRequestService {
     private final PartnerServiceRequestRepository partnerServiceRequestRepository;
     private final DispatchOrchestrationService dispatchOrchestrationService;
     private final OrderRepository orderRepository;
+    private final PartnerLeaveRepository partnerLeaveRepository;
 
     public PartnerRequestService(PartnerRepository partnerRepository,
                                  PartnerServiceRequestRepository partnerServiceRequestRepository,
                                  DispatchOrchestrationService dispatchOrchestrationService,
-                                 OrderRepository orderRepository) {
+                                 OrderRepository orderRepository,
+                                 PartnerLeaveRepository partnerLeaveRepository) {
         this.partnerRepository = partnerRepository;
         this.partnerServiceRequestRepository = partnerServiceRequestRepository;
         this.dispatchOrchestrationService = dispatchOrchestrationService;
         this.orderRepository = orderRepository;
+        this.partnerLeaveRepository = partnerLeaveRepository;
     }
 
     @Transactional
@@ -68,11 +72,15 @@ public class PartnerRequestService {
                                                                               int size) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
+        if (partnerLeaveRepository.existsByPartnerIdAndFromDateLessThanEqualAndToDateGreaterThanEqual(
+                partnerId, LocalDateTime.now().toLocalDate(), LocalDateTime.now().toLocalDate())) {
+            return new PagedResponse<>(List.of(), 0, 0, safePage, safeSize);
+        }
         PageRequest pageable = PageRequest.of(safePage, safeSize);
         Page<PartnerServiceRequestEntity> rows = status == null
                 ? partnerServiceRequestRepository.findByPartnerIdOrderByCreatedAtDesc(partnerId, pageable)
                 : partnerServiceRequestRepository.findByPartnerIdAndStatusOrderByCreatedAtDesc(partnerId, status, pageable);
-        List<PartnerIncomingRequestResponse> content = rows.getContent().stream().map(this::mapIncoming).toList();
+        List<PartnerIncomingRequestResponse> content = rows.getContent().stream().map(this::expireIfNeeded).map(this::mapIncoming).toList();
         return new PagedResponse<>(content, rows.getTotalElements(), rows.getTotalPages(), safePage, safeSize);
     }
 
@@ -80,7 +88,7 @@ public class PartnerRequestService {
     public PartnerIncomingRequestResponse getRequestDetail(Long partnerId, Long requestId) {
         PartnerServiceRequestEntity request = partnerServiceRequestRepository.findByIdAndPartnerId(requestId, partnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("request not found"));
-        return mapIncoming(request);
+        return mapIncoming(expireIfNeeded(request));
     }
 
     @Transactional
@@ -91,8 +99,8 @@ public class PartnerRequestService {
             throw new BadRequestException("request is not pending");
         }
         if (request.getExpiresAt() != null && LocalDateTime.now().isAfter(request.getExpiresAt())) {
-            request.setStatus(PartnerServiceRequestStatus.REJECTED);
-            request.setRejectionReason("SLOT_EXPIRED");
+            request.setStatus(PartnerServiceRequestStatus.EXPIRED);
+            request.setRejectionReason("REQUEST_EXPIRED");
             partnerServiceRequestRepository.save(request);
             throw new InstantBookingUnavailableException(
                     InstantUnavailableCode.SLOT_EXPIRED.name(),
@@ -188,6 +196,29 @@ public class PartnerRequestService {
         response.setRequestId(request.getId());
         response.setStatus(request.getStatus());
         return response;
+    }
+
+    @Transactional
+    public int expirePendingRequests() {
+        List<PartnerServiceRequestEntity> expired = partnerServiceRequestRepository
+                .findByStatusAndExpiresAtBefore(PartnerServiceRequestStatus.PENDING, LocalDateTime.now());
+        for (PartnerServiceRequestEntity request : expired) {
+            request.setStatus(PartnerServiceRequestStatus.EXPIRED);
+            request.setRejectionReason("REQUEST_EXPIRED");
+        }
+        partnerServiceRequestRepository.saveAll(expired);
+        return expired.size();
+    }
+
+    private PartnerServiceRequestEntity expireIfNeeded(PartnerServiceRequestEntity request) {
+        if (request.getStatus() == PartnerServiceRequestStatus.PENDING
+                && request.getExpiresAt() != null
+                && LocalDateTime.now().isAfter(request.getExpiresAt())) {
+            request.setStatus(PartnerServiceRequestStatus.EXPIRED);
+            request.setRejectionReason("REQUEST_EXPIRED");
+            return partnerServiceRequestRepository.save(request);
+        }
+        return request;
     }
 
     private PartnerIncomingRequestResponse mapIncoming(PartnerServiceRequestEntity request) {

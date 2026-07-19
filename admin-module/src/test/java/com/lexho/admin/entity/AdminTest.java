@@ -4,10 +4,13 @@ import com.lexho.common.enums.Role;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.Month;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class AdminTest {
+
+    private static final LocalDateTime FIXED_NOW = LocalDateTime.of(2026, Month.JUNE, 10, 10, 30);
 
     @Test
     void onCreateShouldNormalizeEmailAndDefaultRole() {
@@ -39,9 +42,9 @@ class AdminTest {
         Admin admin = new Admin();
         admin.setAccountLocked(true);
         admin.setFailedAttempts(5);
-        admin.setLockUntil(LocalDateTime.now().minusMinutes(1));
+        admin.setLockUntil(FIXED_NOW.minusMinutes(1));
 
-        boolean unlocked = admin.unlockIfCooldownExpired(LocalDateTime.now());
+        boolean unlocked = admin.unlockIfCooldownExpired(FIXED_NOW);
 
         assertTrue(unlocked);
         assertFalse(admin.isAccountLocked());

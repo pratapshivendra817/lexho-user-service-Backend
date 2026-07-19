@@ -30,7 +30,7 @@ public class ApiRateLimiterService {
                 redisTemplate.expire(key, window);
             }
             if (current != null && current > maxRequests) {
-                throw new TooManyRequestsException(errorMessage);
+                throw new TooManyRequestsException(errorMessage, retryAfterSeconds(key, window));
             }
         } catch (RuntimeException ex) {
             if (ex instanceof TooManyRequestsException) {
@@ -51,8 +51,21 @@ public class ApiRateLimiterService {
             return current;
         });
         if (record != null && record.count > maxRequests) {
-            throw new TooManyRequestsException(errorMessage);
+            long retryAfterSeconds = Math.max(1, (record.expiresAtMs - now + 999) / 1000);
+            throw new TooManyRequestsException(errorMessage, retryAfterSeconds);
         }
+    }
+
+    private long retryAfterSeconds(String key, Duration defaultWindow) {
+        try {
+            Long ttl = redisTemplate.getExpire(key, java.util.concurrent.TimeUnit.SECONDS);
+            if (ttl != null && ttl > 0) {
+                return ttl;
+            }
+        } catch (RuntimeException ignored) {
+            // Fall back to the configured window if Redis cannot report TTL.
+        }
+        return Math.max(1, defaultWindow.toSeconds());
     }
 
     private static class LocalRecord {
@@ -65,4 +78,3 @@ public class ApiRateLimiterService {
         }
     }
 }
-

@@ -1,4 +1,4 @@
-package com.lexho.partner.dto;
+package com.lexho.provider.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.Email;
@@ -11,6 +11,8 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Getter
@@ -73,4 +75,20 @@ public class ProviderOnboardingRequest {
     @NotBlank(message = "IFSC code is required")
     @Pattern(regexp = "^[A-Z]{4}0[A-Z0-9]{6}$", message = "Invalid IFSC code")
     private String ifscCode;
+
+    public List<String> getServiceAreas() {
+        return serviceAreas == null ? Collections.emptyList() : new ArrayList<>(serviceAreas);
+    }
+
+    public void setServiceAreas(List<String> serviceAreas) {
+        this.serviceAreas = serviceAreas == null ? new ArrayList<>() : new ArrayList<>(serviceAreas);
+    }
+
+    public List<String> getServiceType() {
+        return serviceType == null ? Collections.emptyList() : new ArrayList<>(serviceType);
+    }
+
+    public void setServiceType(List<String> serviceType) {
+        this.serviceType = serviceType == null ? new ArrayList<>() : new ArrayList<>(serviceType);
+    }
 }

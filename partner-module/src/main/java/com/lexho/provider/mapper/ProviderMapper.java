@@ -1,10 +1,10 @@
-package com.lexho.partner.mapper;
+package com.lexho.provider.mapper;
 
-import com.lexho.partner.dto.ProviderDetailsResponse;
-import com.lexho.partner.dto.ProviderDocumentResponse;
-import com.lexho.partner.dto.ProviderListItemResponse;
-import com.lexho.partner.entity.Provider;
-import com.lexho.partner.entity.ProviderDocument;
+import com.lexho.provider.dto.ProviderDetailsResponse;
+import com.lexho.provider.dto.ProviderDocumentResponse;
+import com.lexho.provider.dto.ProviderListItemResponse;
+import com.lexho.provider.entity.Provider;
+import com.lexho.provider.entity.ProviderDocument;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;

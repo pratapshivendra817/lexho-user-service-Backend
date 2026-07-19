@@ -10,8 +10,7 @@ This repository contains admin backend APIs. Frontend project is not present her
   - phone and laptop must be on same Wi-Fi
 - Ensure admin seed user exists:
   - `admin.seed.enabled=true`
-  - default email/password from `application.properties`:
-    - `admin@lexho.com` / `Admin@12345`
+  - set `ADMIN_SEED_ENABLED=true` with `ADMIN_SEED_EMAIL` and a strong `ADMIN_SEED_PASSWORD`.
 - Allow your frontend origin:
   - env var `APP_ALLOWED_CORS_ORIGINS`
   - example:

@@ -3,32 +3,23 @@ package com.lexho.user_service.lexho.controller;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.lexho.dto.LexhoDtos;
 import com.lexho.user_service.lexho.service.LexhoAuthService;
-import com.lexho.user_service.service.ApiRateLimiterService;
 import jakarta.validation.Valid;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Duration;
 import java.util.Map;
 
 @RestController
 public class LexhoAuthController {
 
     private final LexhoAuthService authService;
-    private final ApiRateLimiterService apiRateLimiterService;
 
-    public LexhoAuthController(LexhoAuthService authService,
-                               ApiRateLimiterService apiRateLimiterService) {
+    public LexhoAuthController(LexhoAuthService authService) {
         this.authService = authService;
-        this.apiRateLimiterService = apiRateLimiterService;
     }
 
     @PostMapping("/otp/send")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> sendOtp(@Valid @RequestBody LexhoDtos.OtpSendRequest request,
-                                                                     HttpServletRequest servletRequest) {
-        apiRateLimiterService.check("otp_send", request.mobile() + ":" + servletRequest.getRemoteAddr(), 6, Duration.ofMinutes(10),
-                "Too many OTP requests. Please try later");
+    public ResponseEntity<ApiResponse<Map<String, Object>>> sendOtp(@Valid @RequestBody LexhoDtos.OtpSendRequest request) {
         String otp = authService.sendOtp(request.mobile(), request.role());
         return ResponseEntity.ok(ApiResponse.success("OTP sent successfully", Map.of(
                 "mobile", request.mobile(),
@@ -39,10 +30,7 @@ public class LexhoAuthController {
     }
 
     @PostMapping("/otp/verify")
-    public ResponseEntity<ApiResponse<LexhoDtos.AuthVerifyResponse>> verifyOtp(@Valid @RequestBody LexhoDtos.OtpVerifyRequest request,
-                                                                                HttpServletRequest servletRequest) {
-        apiRateLimiterService.check("otp_verify", request.mobile() + ":" + servletRequest.getRemoteAddr(), 10, Duration.ofMinutes(10),
-                "Too many OTP verification attempts. Please try later");
+    public ResponseEntity<ApiResponse<LexhoDtos.AuthVerifyResponse>> verifyOtp(@Valid @RequestBody LexhoDtos.OtpVerifyRequest request) {
         LexhoDtos.AuthVerifyResponse response = authService.verifyOtp(request.mobile(), request.otp(), request.role());
         return ResponseEntity.ok(ApiResponse.success("OTP verified successfully", response, response.token()));
     }

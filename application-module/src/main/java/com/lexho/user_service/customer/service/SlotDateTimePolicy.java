@@ -1,6 +1,7 @@
 package com.lexho.user_service.customer.service;
 
 import com.lexho.user_service.booking.exception.BookingValidationException;
+import com.lexho.user_service.cartconfig.service.CartConfigService;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -16,7 +17,11 @@ public class SlotDateTimePolicy {
     private static final DateTimeFormatter SLOT_TIME_FORMATTER = DateTimeFormatter.ofPattern("H:mm");
     private static final LocalTime DAY_START = LocalTime.of(6, 0);
     private static final LocalTime DAY_END = LocalTime.of(23, 0);
-    private static final int SLOT_MINUTES = 15;
+    private final CartConfigService cartConfigService;
+
+    public SlotDateTimePolicy(CartConfigService cartConfigService) {
+        this.cartConfigService = cartConfigService;
+    }
 
     public ZoneId zoneId() {
         return IST_ZONE;
@@ -53,7 +58,7 @@ public class SlotDateTimePolicy {
             throw new BookingValidationException("INVALID_SLOT_FORMAT", "Slot end time must be after start time");
         }
         if (!isAllowedSlotRange(startTime, endTime)) {
-            throw new BookingValidationException("INVALID_SLOT_RANGE", "Slot must be a 15-minute window between 06:00 and 23:00");
+            throw new BookingValidationException("INVALID_SLOT_RANGE", "Slot must match configured interval between 06:00 and 23:00");
         }
         return LocalDateTime.of(bookingDate, startTime);
     }
@@ -62,9 +67,10 @@ public class SlotDateTimePolicy {
         if (startTime.isBefore(DAY_START) || endTime.isAfter(DAY_END)) {
             return false;
         }
-        if (startTime.getMinute() % SLOT_MINUTES != 0 || endTime.getMinute() % SLOT_MINUTES != 0) {
+        int slotMinutes = cartConfigService.currentEntity().getSlotIntervalMinutes();
+        if (startTime.getMinute() % slotMinutes != 0 || endTime.getMinute() % slotMinutes != 0) {
             return false;
         }
-        return java.time.Duration.between(startTime, endTime).toMinutes() == SLOT_MINUTES;
+        return java.time.Duration.between(startTime, endTime).toMinutes() == slotMinutes;
     }
 }

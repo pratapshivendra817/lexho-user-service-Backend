@@ -1,5 +1,6 @@
 package com.lexho.user_service.lexho.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -101,7 +102,35 @@ public final class LexhoDtos {
             String bookingType,
             String date,
             String slot,
-            String note
+            String note,
+            @JsonAlias({"lat"})
+            Double latitude,
+            @JsonAlias({"lng", "lon"})
+            Double longitude,
+              Double addressLatitude,
+              Double addressLongitude,
+              CoordinatePair coordinates,
+              CoordinatePair addressCoordinates,
+              @JsonAlias({"totalAmount", "payableAmount", "expectedAmount"})
+              BigDecimal expectedTotal
+      ) {
+        public BookingCreateRequest(
+                  Long serviceId,
+                  Long addressId,
+                  String bookingType,
+                  String date,
+                  String slot,
+                  String note
+          ) {
+              this(serviceId, addressId, bookingType, date, slot, note, null, null, null, null, null, null, null);
+          }
+      }
+
+    public record CoordinatePair(
+            @JsonAlias({"lat"})
+            Double latitude,
+            @JsonAlias({"lng", "lon"})
+            Double longitude
     ) {
     }
 
@@ -135,9 +164,6 @@ public final class LexhoDtos {
     }
 
     public record ReferralApplyRequest(String code) {
-    }
-
-    public record SubscriptionCreateRequest(String planId) {
     }
 
     public record SupportCreateRequest(

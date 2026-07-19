@@ -6,12 +6,14 @@ import com.lexho.user_service.lexhopartner.dto.DashboardStatsDto;
 import com.lexho.user_service.lexhopartner.dto.PartnerEarningTransactionDto;
 import com.lexho.user_service.lexhopartner.dto.PartnerEarningsSummaryDto;
 import com.lexho.user_service.lexhopartner.dto.OrderResponseDto;
+import com.lexho.user_service.lexhopartner.dto.OrderTimelineDto;
 import com.lexho.user_service.lexhopartner.dto.PageResponseDto;
 import com.lexho.user_service.lexhopartner.entity.OrderStatus;
 import com.lexho.user_service.lexhopartner.entity.OrderStatusHistory;
 import com.lexho.user_service.lexhopartner.entity.PartnerOrder;
 import com.lexho.user_service.lexhopartner.repository.OrderStatusHistoryRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
+import com.lexho.user_service.observability.BusinessMetricsService;
 import com.lexho.user_service.lexhopartner.util.AuditLogUtil;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
@@ -36,17 +38,23 @@ public class PartnerOrderService {
     private final com.lexho.user_service.lexhopartner.util.FileStorageUtil fileStorageUtil;
     private final AuditLogUtil auditLogUtil;
     private final PartnerShiftRepository partnerShiftRepository;
+    private final PartnerSettlementService partnerSettlementService;
+    private final BusinessMetricsService businessMetricsService;
 
     public PartnerOrderService(PartnerOrderRepository partnerOrderRepository,
                                OrderStatusHistoryRepository orderStatusHistoryRepository,
                                com.lexho.user_service.lexhopartner.util.FileStorageUtil fileStorageUtil,
                                AuditLogUtil auditLogUtil,
-                               PartnerShiftRepository partnerShiftRepository) {
+                               PartnerShiftRepository partnerShiftRepository,
+                               PartnerSettlementService partnerSettlementService,
+                               BusinessMetricsService businessMetricsService) {
         this.partnerOrderRepository = partnerOrderRepository;
         this.orderStatusHistoryRepository = orderStatusHistoryRepository;
         this.fileStorageUtil = fileStorageUtil;
         this.auditLogUtil = auditLogUtil;
         this.partnerShiftRepository = partnerShiftRepository;
+        this.partnerSettlementService = partnerSettlementService;
+        this.businessMetricsService = businessMetricsService;
     }
 
     @Transactional(readOnly = true)
@@ -57,6 +65,16 @@ public class PartnerOrderService {
         return mapPage(result);
     }
 
+    @Transactional(readOnly = true)
+    public OrderResponseDto getOrder(Long partnerId, Long orderId) {
+        PartnerOrder order = partnerOrderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        if (order.getAssignedPartnerId() != null && !order.getAssignedPartnerId().equals(partnerId)) {
+            throw new BadRequestException("Order is assigned to another partner");
+        }
+        return toDto(order);
+    }
+
     @Transactional
     public OrderResponseDto acceptOrder(Long partnerId, Long orderId) {
         return transition(partnerId, orderId, List.of(OrderStatus.CREATED, OrderStatus.ASSIGNED), OrderStatus.ACCEPTED, "accepted");
@@ -64,14 +82,16 @@ public class PartnerOrderService {
 
     @Transactional
     public OrderResponseDto rejectOrder(Long partnerId, Long orderId) {
-        return transition(partnerId, orderId, List.of(OrderStatus.CREATED, OrderStatus.ASSIGNED), OrderStatus.CANCELLED, "rejected");
+        return transition(partnerId, orderId, List.of(OrderStatus.CREATED, OrderStatus.ASSIGNED), OrderStatus.REJECTED, "rejected");
     }
 
     @Transactional
     public OrderResponseDto startOrder(Long partnerId, Long orderId, MultipartFile beforeImage) {
         PartnerOrder order = getOwnedOrder(partnerId, orderId);
         assertAllowed(order.getStatus(), List.of(OrderStatus.ACCEPTED));
-        order.setBeforeImageUrls(fileStorageUtil.storeImage(beforeImage, "order-before"));
+        if (hasFile(beforeImage)) {
+            order.setBeforeImageUrls(fileStorageUtil.storeImage(beforeImage, "order-before"));
+        }
         return saveTransition(order, OrderStatus.STARTED, "service started");
     }
 
@@ -79,7 +99,9 @@ public class PartnerOrderService {
     public OrderResponseDto completeOrder(Long partnerId, Long orderId, MultipartFile afterImage) {
         PartnerOrder order = getOwnedOrder(partnerId, orderId);
         assertAllowed(order.getStatus(), List.of(OrderStatus.STARTED));
-        order.setAfterImageUrls(fileStorageUtil.storeImage(afterImage, "order-after"));
+        if (hasFile(afterImage)) {
+            order.setAfterImageUrls(fileStorageUtil.storeImage(afterImage, "order-after"));
+        }
         return saveTransition(order, OrderStatus.COMPLETED, "service completed");
     }
 
@@ -90,16 +112,34 @@ public class PartnerOrderService {
     }
 
     @Transactional(readOnly = true)
+    public List<OrderTimelineDto> timeline(Long partnerId, Long orderId) {
+        PartnerOrder order = partnerOrderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        if (order.getAssignedPartnerId() != null && !order.getAssignedPartnerId().equals(partnerId)) {
+            throw new BadRequestException("Order is assigned to another partner");
+        }
+        return orderStatusHistoryRepository.findByOrderIdOrderByCreatedAtAsc(orderId).stream()
+                .map(history -> new OrderTimelineDto(
+                        history.getId(),
+                        orderId,
+                        history.getFromStatus(),
+                        history.getToStatus(),
+                        history.getRemarks(),
+                        history.getActorType(),
+                        history.getActorId(),
+                        history.getCreatedAt()
+                ))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public DashboardStatsDto dashboard(Long partnerId) {
         LocalDateTime now = LocalDateTime.now();
         LocalDate today = now.toLocalDate();
         LocalDateTime startOfToday = today.atStartOfDay();
         LocalDateTime startOfWeek = today.minusDays(today.getDayOfWeek().getValue() - 1L).atStartOfDay();
 
-        Double earnings = partnerOrderRepository.sumAmountByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfToday, now);
-        Double weeklyEarnings = partnerOrderRepository.sumAmountByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfWeek, now);
+        PartnerEarningsSummaryDto settlementSummary = partnerSettlementService.earningsSummary(partnerId);
         Long completedOrders = partnerOrderRepository.countByAssignedPartnerIdAndStatus(partnerId, OrderStatus.COMPLETED);
         Long acceptedOrders = partnerOrderRepository.countByAssignedPartnerIdAndStatus(partnerId, OrderStatus.ACCEPTED);
         Long startedOrders = partnerOrderRepository.countByAssignedPartnerIdAndStatus(partnerId, OrderStatus.STARTED);
@@ -107,54 +147,18 @@ public class PartnerOrderService {
         Long activeDeliveries = startedOrders;
         Double totalOnlineHours = calculateTodayOnlineHours(partnerId, now);
         return new DashboardStatsDto(
-                earnings == null ? 0.0 : earnings,
+                settlementSummary.todayEarnings(),
                 completedOrders,
                 pendingOrders,
                 totalOnlineHours,
                 activeDeliveries,
-                weeklyEarnings == null ? 0.0 : weeklyEarnings
+                settlementSummary.weeklyEarnings()
         );
     }
 
     @Transactional(readOnly = true)
     public PartnerEarningsSummaryDto earningsSummary(Long partnerId) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDate today = now.toLocalDate();
-        LocalDateTime startOfToday = today.atStartOfDay();
-        LocalDateTime startOfWeek = today.minusDays(today.getDayOfWeek().getValue() - 1L).atStartOfDay();
-        LocalDateTime startOfMonth = today.withDayOfMonth(1).atStartOfDay();
-
-        Double todayEarnings = partnerOrderRepository.sumAmountByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfToday, now);
-        Double weeklyEarnings = partnerOrderRepository.sumAmountByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfWeek, now);
-        Double monthlyEarnings = partnerOrderRepository.sumAmountByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfMonth, now);
-        Double lifetimeEarnings = partnerOrderRepository.sumAmountByPartnerAndStatus(partnerId, OrderStatus.COMPLETED);
-
-        Long completedToday = partnerOrderRepository.countByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfToday, now);
-        Long completedWeek = partnerOrderRepository.countByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfWeek, now);
-        Long completedMonth = partnerOrderRepository.countByPartnerAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, startOfMonth, now);
-        Long completedLifetime = partnerOrderRepository.countByPartnerAndStatus(partnerId, OrderStatus.COMPLETED);
-
-        double safeLifetime = lifetimeEarnings == null ? 0d : lifetimeEarnings;
-        long safeCompleted = completedLifetime == null ? 0L : completedLifetime;
-        double aov = safeCompleted <= 0 ? 0d : round2(safeLifetime / safeCompleted);
-
-        return new PartnerEarningsSummaryDto(
-                todayEarnings == null ? 0d : todayEarnings,
-                weeklyEarnings == null ? 0d : weeklyEarnings,
-                monthlyEarnings == null ? 0d : monthlyEarnings,
-                safeLifetime,
-                completedToday == null ? 0L : completedToday,
-                completedWeek == null ? 0L : completedWeek,
-                completedMonth == null ? 0L : completedMonth,
-                safeCompleted,
-                aov
-        );
+        return partnerSettlementService.earningsSummary(partnerId);
     }
 
     @Transactional(readOnly = true)
@@ -165,21 +169,7 @@ public class PartnerOrderService {
                                                                               int size,
                                                                               String sortBy,
                                                                               String direction) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime start = fromDate == null ? LocalDate.of(1970, 1, 1).atStartOfDay() : fromDate.atStartOfDay();
-        LocalDateTime end = toDate == null ? now : toDate.plusDays(1).atStartOfDay().minusNanos(1);
-        if (end.isBefore(start)) {
-            throw new BadRequestException("toDate must be greater than or equal to fromDate");
-        }
-
-        Pageable pageable = pageable(page, size, sortBy == null || sortBy.isBlank() ? "updatedAt" : sortBy, direction);
-        Page<PartnerOrder> result = partnerOrderRepository.findByAssignedPartnerIdAndStatusAndUpdatedAtBetween(
-                partnerId, OrderStatus.COMPLETED, start, end, pageable);
-
-        List<PartnerEarningTransactionDto> rows = result.getContent().stream()
-                .map(this::toEarningTransaction)
-                .toList();
-        return new PageResponseDto<>(rows, result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
+        return partnerSettlementService.earningTransactions(partnerId, fromDate, toDate, page, size);
     }
 
     private Double calculateTodayOnlineHours(Long partnerId, LocalDateTime now) {
@@ -218,12 +208,30 @@ public class PartnerOrderService {
     private OrderResponseDto saveTransition(PartnerOrder order, OrderStatus to, String remarks) {
         OrderStatus from = order.getStatus();
         order.setStatus(to);
+        LocalDateTime now = LocalDateTime.now();
+        switch (to) {
+            case ACCEPTED -> order.setAcceptedAt(now);
+            case STARTED -> order.setStartedAt(now);
+            case COMPLETED -> order.setCompletedAt(now);
+            case REJECTED -> order.setRejectedAt(now);
+            default -> {
+            }
+        }
         PartnerOrder saved = partnerOrderRepository.save(order);
+        if (to == OrderStatus.ACCEPTED) {
+            businessMetricsService.incrementPartnerAcceptance();
+        }
+        if (to == OrderStatus.COMPLETED) {
+            businessMetricsService.incrementOrdersCompleted();
+            partnerSettlementService.ensurePayout(saved.getId());
+        }
         OrderStatusHistory history = new OrderStatusHistory();
         history.setOrder(saved);
         history.setFromStatus(from);
         history.setToStatus(to);
         history.setRemarks(remarks);
+        history.setActorType("PARTNER");
+        history.setActorId(saved.getAssignedPartnerId());
         orderStatusHistoryRepository.save(history);
         auditLogUtil.audit(saved.getAssignedPartnerId(), "ORDER_" + to.name(), "orderId=" + saved.getId());
         return toDto(saved);
@@ -242,6 +250,10 @@ public class PartnerOrderService {
         if (!allowed.contains(current)) {
             throw new BadRequestException("Invalid order status transition from " + current);
         }
+    }
+
+    private boolean hasFile(MultipartFile file) {
+        return file != null && !file.isEmpty();
     }
 
     private PageResponseDto<OrderResponseDto> mapPage(Page<PartnerOrder> page) {
@@ -268,25 +280,12 @@ public class PartnerOrderService {
                 .paymentMode(order.getPaymentMode())
                 .status(order.getStatus())
                 .assignedPartnerId(order.getAssignedPartnerId())
+                .acceptedAt(order.getAcceptedAt())
+                .startedAt(order.getStartedAt())
+                .completedAt(order.getCompletedAt())
+                .rejectedAt(order.getRejectedAt())
                 .createdAt(order.getCreatedAt())
                 .build();
     }
 
-    private PartnerEarningTransactionDto toEarningTransaction(PartnerOrder order) {
-        double gross = order.getAmount() == null ? 0d : order.getAmount();
-        double settlementAmount = round2(gross * 0.85d);
-        return new PartnerEarningTransactionDto(
-                order.getId(),
-                order.getCustomerName(),
-                order.getServiceType(),
-                round2(gross),
-                settlementAmount,
-                "SETTLED",
-                order.getUpdatedAt()
-        );
-    }
-
-    private double round2(double value) {
-        return Math.round(value * 100d) / 100d;
-    }
 }

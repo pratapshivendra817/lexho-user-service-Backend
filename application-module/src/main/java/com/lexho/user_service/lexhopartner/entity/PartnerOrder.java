@@ -1,5 +1,6 @@
 package com.lexho.user_service.lexhopartner.entity;
 
+import com.lexho.common.enums.PaymentStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -12,6 +13,8 @@ import jakarta.persistence.Lob;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "orders", indexes = {
@@ -53,6 +56,9 @@ public class PartnerOrder extends BaseEntity {
     private PaymentMode paymentMode;
 
     @Enumerated(EnumType.STRING)
+    private PaymentStatus paymentStatus;
+
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private OrderStatus status = OrderStatus.CREATED;
 
@@ -66,4 +72,16 @@ public class PartnerOrder extends BaseEntity {
     @Lob
     @Column(name = "after_image_urls")
     private String afterImageUrls;
+
+    @Column(name = "accepted_at")
+    private LocalDateTime acceptedAt;
+
+    @Column(name = "started_at")
+    private LocalDateTime startedAt;
+
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
+    @Column(name = "rejected_at")
+    private LocalDateTime rejectedAt;
 }

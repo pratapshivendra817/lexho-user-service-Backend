@@ -1,5 +1,6 @@
 package com.lexho.user_service.customer.location.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.lexho.user_service.customer.location.entity.AddressType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -18,8 +19,10 @@ public class SaveAddressRequest {
     public String area;
     public String sector;
     @NotNull
+    @JsonAlias({"lat"})
     public Double latitude;
     @NotNull
+    @JsonAlias({"lng", "lon"})
     public Double longitude;
     @NotBlank
     @Pattern(regexp = "^[6-9]\\d{9}$", message = "invalid mobile")

@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "admin_categories")
 public class AdminCategoryEntity {
+    public static final int DEFAULT_DISPLAY_ORDER = 999;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -23,6 +24,9 @@ public class AdminCategoryEntity {
 
     @Column(name = "is_deleted", nullable = false)
     private boolean deleted;
+
+    @Column(name = "display_order", nullable = false)
+    private Integer displayOrder = DEFAULT_DISPLAY_ORDER;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -84,5 +88,13 @@ public class AdminCategoryEntity {
 
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    public Integer getDisplayOrder() {
+        return displayOrder == null ? DEFAULT_DISPLAY_ORDER : displayOrder;
+    }
+
+    public void setDisplayOrder(Integer displayOrder) {
+        this.displayOrder = (displayOrder == null) ? DEFAULT_DISPLAY_ORDER : displayOrder;
     }
 }

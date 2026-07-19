@@ -18,6 +18,14 @@ public interface AdminCategoryRepository extends JpaRepository<AdminCategoryEnti
             """)
     Page<AdminCategoryEntity> search(@Param("search") String search, Pageable pageable);
 
+    @Query("""
+            SELECT c FROM AdminCategoryEntity c
+            WHERE c.active = true
+              AND c.deleted = false
+            ORDER BY COALESCE(c.displayOrder, 999) ASC, c.name ASC
+            """)
+    java.util.List<AdminCategoryEntity> findActiveForCustomer(Pageable pageable);
+
     Optional<AdminCategoryEntity> findByIdAndDeletedFalse(Long id);
 
     boolean existsByNameIgnoreCaseAndDeletedFalse(String name);

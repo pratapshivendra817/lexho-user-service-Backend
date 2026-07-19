@@ -35,6 +35,12 @@ public class NotificationLog {
     @Column(name = "error_message", length = 1000)
     private String errorMessage;
 
+    @Column(name = "provider_message_id", length = 160)
+    private String providerMessageId;
+
+    @Column(name = "failure_code", length = 80)
+    private String failureCode;
+
     @Column(name = "retry_count", nullable = false)
     private Integer retryCount;
 

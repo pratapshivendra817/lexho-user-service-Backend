@@ -32,6 +32,22 @@ public class AdminSettingsController {
         return ApiResponse.success("Setting fetched", adminSettingsService.get(key));
     }
 
+    @PutMapping
+    public ApiResponse<Map<String, Object>> updateDashboardSettings(
+            @RequestAttribute(value = "userId", required = false) Long adminId,
+            @Valid @RequestBody DashboardSettingsRequest request) {
+        return ApiResponse.success("Settings saved",
+                adminSettingsService.updateDashboardSettings(
+                        request.serviceRadiusKm,
+                        request.dispatchRetryCount,
+                        request.dispatchTimeoutSec,
+                        request.mapProvider,
+                        request.mapDefaultCity,
+                        request.mapDefaultLat,
+                        request.mapDefaultLng,
+                        adminId == null ? "ADMIN" : "ADMIN:" + adminId));
+    }
+
     @PutMapping("/{key}")
     public ApiResponse<Map<String, Object>> upsert(@PathVariable String key,
                                                     @RequestAttribute(value = "userId", required = false) Long adminId,
@@ -64,5 +80,21 @@ public class AdminSettingsController {
         @NotNull(message = "radiusKm is required")
         public Double radiusKm;
     }
-}
 
+    public static class DashboardSettingsRequest {
+        @NotNull(message = "serviceRadiusKm is required")
+        public Double serviceRadiusKm;
+        @NotNull(message = "dispatchRetryCount is required")
+        public Integer dispatchRetryCount;
+        @NotNull(message = "dispatchTimeoutSec is required")
+        public Integer dispatchTimeoutSec;
+        @NotBlank(message = "mapProvider is required")
+        public String mapProvider;
+        @NotBlank(message = "mapDefaultCity is required")
+        public String mapDefaultCity;
+        @NotNull(message = "mapDefaultLat is required")
+        public Double mapDefaultLat;
+        @NotNull(message = "mapDefaultLng is required")
+        public Double mapDefaultLng;
+    }
+}

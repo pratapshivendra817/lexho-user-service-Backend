@@ -1,6 +1,6 @@
-package com.lexho.partner.dto;
+package com.lexho.provider.dto;
 
-import com.lexho.partner.enums.ProviderDocumentType;
+import com.lexho.provider.enums.ProviderDocumentType;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 

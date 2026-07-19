@@ -33,4 +33,12 @@ public class SecurityUtils {
         }
         return Optional.empty();
     }
+
+    public Optional<String> getCurrentPrincipalName() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getName() == null || authentication.getName().isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(authentication.getName().trim());
+    }
 }

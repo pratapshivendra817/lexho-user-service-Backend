@@ -30,7 +30,7 @@ public class NotificationTemplate {
     private String templateName;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "notification_type", nullable = false, length = 20)
+    @Column(name = "notification_type", nullable = false, length = 40)
     private NotificationType notificationType;
 
     @Column(name = "title_template", nullable = false, length = 255)

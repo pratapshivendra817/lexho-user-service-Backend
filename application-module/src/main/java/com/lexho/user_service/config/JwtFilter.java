@@ -50,28 +50,10 @@ public class JwtFilter extends OncePerRequestFilter {
         if (HttpMethod.OPTIONS.matches(request.getMethod())) {
             return true;
         }
-        if (servletPath == null
+        if (isAlwaysPublicPath(servletPath)
+                || servletPath == null
                 || servletPath.isBlank()
-                || "/".equals(servletPath)
-                || "/error".equals(servletPath)
-                || "/favicon.ico".equals(servletPath)
-                || servletPath.startsWith("/ws-notifications")
-                || servletPath.startsWith("/ws/admin/notifications")
-                || servletPath.startsWith("/ws/customer/bookings")
-                || "/ping".equals(servletPath)
-                || "/api/health".equals(servletPath)
-                || "/api/health/".equals(servletPath)
-                || "/api/health/ping".equals(servletPath)) {
-            return true;
-        }
-        if (servletPath.startsWith("/otp/")
-                || servletPath.startsWith("/auth/")
-                || servletPath.startsWith("/api/otp/")
-                || servletPath.startsWith("/api/auth/")
-                || servletPath.startsWith("/uploads/")
-                || servletPath.startsWith("/images/")
-                || "/api/admin/login".equals(servletPath)
-                || "/api/admin/verify-otp".equals(servletPath)) {
+                || "/".equals(servletPath)) {
             return true;
         }
 
@@ -93,6 +75,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 && (servletPath.startsWith("/api/categories")
                 || servletPath.startsWith("/api/banners")
                 || "/api/customer/banners".equals(servletPath)
+                || servletPath.startsWith("/api/customer/home/banners")
                 || servletPath.startsWith("/api/customer/home/sections")
                 || servletPath.startsWith("/api/customer/services")
                 || "/api/customer/profile-content".equals(servletPath))) {
@@ -112,6 +95,11 @@ public class JwtFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        if (isAlwaysPublicPath(request.getServletPath())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         if (isAllowInternalOpen()
                 && request.getServletPath().startsWith("/api/admin/")
                 && !"/api/admin/login".equals(request.getServletPath())
@@ -247,6 +235,41 @@ public class JwtFilter extends OncePerRequestFilter {
 
     private boolean isExposeSwagger() {
         return environment.getProperty("app.security.exposure.expose-swagger", Boolean.class, true);
+    }
+
+    private boolean isAlwaysPublicPath(String servletPath) {
+        return servletPath == null
+                || servletPath.isBlank()
+                || "/error".equals(servletPath)
+                || "/favicon.ico".equals(servletPath)
+                || servletPath.startsWith("/ws-notifications")
+                || servletPath.startsWith("/ws/admin/notifications")
+                || servletPath.startsWith("/ws/customer/bookings")
+                || servletPath.startsWith("/ws-chat")
+                || "/ping".equals(servletPath)
+                || "/health".equals(servletPath)
+                || "/health/readiness".equals(servletPath)
+                || "/health/liveness".equals(servletPath)
+                || "/api/health".equals(servletPath)
+                || "/api/health/".equals(servletPath)
+                || "/api/health/ping".equals(servletPath)
+                || "/api/health/readiness".equals(servletPath)
+                || "/api/health/liveness".equals(servletPath)
+                || "/actuator/health".equals(servletPath)
+                || "/actuator/info".equals(servletPath)
+                || "/actuator/prometheus".equals(servletPath)
+                || "/actuator/metrics".equals(servletPath)
+                || "/api/payments/webhook".equals(servletPath)
+                || "/api/payments/webhook/razorpay".equals(servletPath)
+                || "/api/v1/webhooks/razorpay".equals(servletPath)
+                || servletPath.startsWith("/otp/")
+                || servletPath.startsWith("/auth/")
+                || servletPath.startsWith("/api/otp/")
+                || servletPath.startsWith("/api/auth/")
+                || servletPath.startsWith("/uploads/")
+                || servletPath.startsWith("/images/")
+                || "/api/admin/login".equals(servletPath)
+                || "/api/admin/verify-otp".equals(servletPath);
     }
 
     private boolean isAllowInternalOpen() {

@@ -1,6 +1,6 @@
-package com.lexho.partner.service.storage;
+package com.lexho.provider.service.storage;
 
-import com.lexho.partner.enums.ProviderDocumentType;
+import com.lexho.provider.enums.ProviderDocumentType;
 import org.springframework.core.io.Resource;
 import org.springframework.web.multipart.MultipartFile;
 

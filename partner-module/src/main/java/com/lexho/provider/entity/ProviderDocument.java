@@ -1,6 +1,6 @@
-package com.lexho.partner.entity;
+package com.lexho.provider.entity;
 
-import com.lexho.partner.enums.ProviderDocumentType;
+import com.lexho.provider.enums.ProviderDocumentType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;

@@ -1,5 +1,6 @@
 package com.lexho.user_service.admin.serviceablearea.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -24,6 +25,7 @@ public class ServiceableAreaUpsertRequest {
 
     private Long cityId;
     private Long zoneId;
+    @JsonAlias({"polygon_json", "polygon", "geoJson", "geo_json"})
     private String polygonJson;
 
     public String getName() {

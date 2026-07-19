@@ -1,0 +1,12 @@
+package com.lexho.user_service.geo.events;
+
+public enum GeoEventType {
+    LOCATION_UPDATED,
+    ADDRESS_CONFIRMED,
+    PARTNER_MOVED,
+    PARTNER_ONLINE,
+    PARTNER_OFFLINE,
+    SERVICEABILITY_CHANGED,
+    SPOOF_DETECTED,
+    NAVIGATION_ETA_UPDATED
+}

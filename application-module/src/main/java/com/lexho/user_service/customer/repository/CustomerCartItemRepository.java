@@ -8,7 +8,9 @@ import java.util.Optional;
 
 public interface CustomerCartItemRepository extends JpaRepository<CustomerCartItemEntity, Long> {
     Optional<CustomerCartItemEntity> findByUserIdAndServiceId(Long userId, Long serviceId);
+    Optional<CustomerCartItemEntity> findByUserIdAndServiceIdAndAddonSignature(Long userId, Long serviceId, String addonSignature);
     Optional<CustomerCartItemEntity> findByIdAndUserId(Long id, Long userId);
     List<CustomerCartItemEntity> findByUserId(Long userId);
+    long countByUserId(Long userId);
     void deleteByUserId(Long userId);
 }

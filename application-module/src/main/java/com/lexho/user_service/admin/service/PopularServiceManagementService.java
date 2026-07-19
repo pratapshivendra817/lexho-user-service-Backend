@@ -17,6 +17,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -56,25 +58,35 @@ public class PopularServiceManagementService {
             throw new BadRequestException("Only active services can be marked as popular");
         }
 
-        if (popularServiceRepository.existsByService_IdAndCategory_IdAndActiveTrue(service.getId(), category.getId())) {
-            throw new BadRequestException("Service is already configured as popular for this category");
+        PopularServiceEntity existingPair = popularServiceRepository
+                .findByServiceIdAndCategoryId(service.getId(), category.getId())
+                .orElse(null);
+
+        shiftPrioritiesForInsert(category.getId(), request.getPriority(), existingPair == null ? null : existingPair.getId());
+
+        PopularServiceEntity saved;
+        if (existingPair != null) {
+            if (existingPair.isActive()) {
+                throw new BadRequestException("Service is already configured as popular for this category");
+            }
+            saved = reactivateExisting(existingPair, request.getPriority(), "POPULAR_SERVICE_REACTIVATE");
+            log.info("Popular service reactivated from add flow: popularServiceId={}, serviceId={}, categoryId={}, priority={}",
+                    saved.getId(), service.getId(), category.getId(), saved.getPriority());
+        } else {
+            PopularServiceEntity entity = new PopularServiceEntity();
+            entity.setService(service);
+            entity.setCategory(category);
+            entity.setPriority(request.getPriority());
+            entity.setActive(true);
+            entity.setDeletedAt(null);
+            entity.setDeletedBy(null);
+            entity.setDeleteReason(null);
+            saved = popularServiceRepository.save(entity);
+            audit("POPULAR_SERVICE_CREATE", "popular_services", saved.getId(),
+                    "serviceId=" + service.getId() + ",categoryId=" + category.getId() + ",priority=" + request.getPriority());
+            log.info("Popular service added: popularServiceId={}, serviceId={}, categoryId={}, priority={}",
+                    saved.getId(), service.getId(), category.getId(), saved.getPriority());
         }
-
-        if (popularServiceRepository.existsByCategory_IdAndPriorityAndActiveTrue(category.getId(), request.getPriority())) {
-            throw new BadRequestException("Priority already exists for this category");
-        }
-
-        PopularServiceEntity entity = new PopularServiceEntity();
-        entity.setService(service);
-        entity.setCategory(category);
-        entity.setPriority(request.getPriority());
-        entity.setActive(true);
-
-        PopularServiceEntity saved = popularServiceRepository.save(entity);
-        audit("POPULAR_SERVICE_CREATE", "popular_services", saved.getId(),
-                "serviceId=" + service.getId() + ",categoryId=" + category.getId() + ",priority=" + request.getPriority());
-        log.info("Popular service added: popularServiceId={}, serviceId={}, categoryId={}, priority={}",
-                saved.getId(), service.getId(), category.getId(), saved.getPriority());
 
         return new DataResponse<>(toResponse(saved));
     }
@@ -91,15 +103,42 @@ public class PopularServiceManagementService {
     }
 
     @Transactional
-    public AdminMessageResponse deletePopularService(Long id) {
+    public AdminMessageResponse deletePopularService(Long id, String deleteReason) {
         PopularServiceEntity entity = popularServiceRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Popular service not found"));
 
+        if (!entity.isActive()) {
+            throw new BadRequestException("Popular service is already inactive");
+        }
+
+        Long actorId = securityUtils.getCurrentUserId().orElse(0L);
         entity.setActive(false);
+        entity.setDeletedAt(LocalDateTime.now());
+        entity.setDeletedBy(actorId);
+        entity.setDeleteReason(normalizeDeleteReason(deleteReason));
         popularServiceRepository.save(entity);
-        audit("POPULAR_SERVICE_DELETE", "popular_services", id, "softDeactivate=true");
-        log.info("Popular service deactivated: popularServiceId={}", id);
+        audit("POPULAR_SERVICE_DELETE", "popular_services", id,
+                "softDeactivate=true,deletedBy=" + actorId + ",deleteReason=" + normalizeDeleteReason(deleteReason));
+        log.info("Popular service deactivated: popularServiceId={}, deletedBy={}", id, actorId);
         return new AdminMessageResponse("Popular service deleted successfully");
+    }
+
+    @Transactional
+    public DataResponse<PopularServiceResponse> restorePopularService(Long id, Integer requestedPriority) {
+        PopularServiceEntity entity = popularServiceRepository.findByIdAndActiveFalse(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Inactive popular service not found"));
+
+        int priority = requestedPriority == null ? entity.getPriority() : requestedPriority;
+        if (priority < 1) {
+            throw new BadRequestException("priority must be at least 1");
+        }
+
+        shiftPrioritiesForInsert(entity.getCategory().getId(), priority, entity.getId());
+
+        PopularServiceEntity restored = reactivateExisting(entity, priority, "POPULAR_SERVICE_RESTORE");
+        log.info("Popular service restored via endpoint: popularServiceId={}, serviceId={}, categoryId={}, priority={}",
+                restored.getId(), restored.getService().getId(), restored.getCategory().getId(), restored.getPriority());
+        return new DataResponse<>(toResponse(restored));
     }
 
     private PopularServiceResponse toResponse(PopularServiceEntity entity) {
@@ -126,5 +165,56 @@ public class PopularServiceManagementService {
 
     private void audit(String action, String entity, Long entityId, String metadata) {
         adminAuditService.log(securityUtils.getCurrentUserId().orElse(0L), action, entity, entityId, metadata);
+    }
+
+    private PopularServiceEntity reactivateExisting(PopularServiceEntity existingPair, Integer priority, String auditAction) {
+        existingPair.setPriority(priority);
+        existingPair.setActive(true);
+        existingPair.setDeletedAt(null);
+        existingPair.setDeletedBy(null);
+        existingPair.setDeleteReason(null);
+        PopularServiceEntity saved = popularServiceRepository.save(existingPair);
+        audit(auditAction, "popular_services", saved.getId(),
+                "serviceId=" + saved.getService().getId() + ",categoryId=" + saved.getCategory().getId() + ",priority=" + saved.getPriority());
+        return saved;
+    }
+
+    private void shiftPrioritiesForInsert(Long categoryId, Integer requestedPriority, Long excludedPopularServiceId) {
+        if (requestedPriority == null || requestedPriority < 1) {
+            throw new BadRequestException("priority must be at least 1");
+        }
+
+        List<PopularServiceEntity> activeItems = popularServiceRepository
+                .findByCategory_IdAndActiveTrueOrderByPriorityAsc(categoryId);
+        if (activeItems.isEmpty()) {
+            return;
+        }
+
+        List<PopularServiceEntity> toShift = new ArrayList<>();
+        for (PopularServiceEntity item : activeItems) {
+            if (excludedPopularServiceId != null && excludedPopularServiceId.equals(item.getId())) {
+                continue;
+            }
+            if (item.getPriority() >= requestedPriority) {
+                toShift.add(item);
+            }
+        }
+
+        for (int i = toShift.size() - 1; i >= 0; i--) {
+            PopularServiceEntity item = toShift.get(i);
+            item.setPriority(item.getPriority() + 1);
+        }
+
+        if (!toShift.isEmpty()) {
+            popularServiceRepository.saveAll(toShift);
+        }
+    }
+
+    private String normalizeDeleteReason(String deleteReason) {
+        if (deleteReason == null) {
+            return null;
+        }
+        String trimmed = deleteReason.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

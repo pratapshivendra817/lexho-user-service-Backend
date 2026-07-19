@@ -15,12 +15,14 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -30,9 +32,12 @@ class ServiceableAreaServiceTest {
     @Mock
     private ServiceableAreaRepository serviceableAreaRepository;
 
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
     @Test
     void createShouldSaveNormalizedFields() {
-        ServiceableAreaService service = new ServiceableAreaService(serviceableAreaRepository);
+        ServiceableAreaService service = new ServiceableAreaService(serviceableAreaRepository, jdbcTemplate);
         ServiceableAreaUpsertRequest request = new ServiceableAreaUpsertRequest();
         request.setName("  Andheri West  ");
         request.setCity("  Mumbai ");
@@ -58,11 +63,12 @@ class ServiceableAreaServiceTest {
         assertEquals("400058", captor.getValue().getPincode());
         assertEquals(10L, response.getId());
         assertTrue(response.isActive());
+        verify(jdbcTemplate).update(anyString(), any(Object[].class));
     }
 
     @Test
     void listShouldMapPageMetadata() {
-        ServiceableAreaService service = new ServiceableAreaService(serviceableAreaRepository);
+        ServiceableAreaService service = new ServiceableAreaService(serviceableAreaRepository, jdbcTemplate);
         ServiceableAreaEntity entity = new ServiceableAreaEntity();
         entity.setId(1L);
         entity.setName("Area 1");
@@ -85,7 +91,7 @@ class ServiceableAreaServiceTest {
 
     @Test
     void updateStatusShouldThrowWhenAreaMissing() {
-        ServiceableAreaService service = new ServiceableAreaService(serviceableAreaRepository);
+        ServiceableAreaService service = new ServiceableAreaService(serviceableAreaRepository, jdbcTemplate);
         when(serviceableAreaRepository.findById(77L)).thenReturn(Optional.empty());
 
         ServiceableAreaStatusRequest request = new ServiceableAreaStatusRequest();

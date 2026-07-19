@@ -1,4 +1,4 @@
-package com.lexho.partner.exception;
+package com.lexho.provider.exception;
 
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.core.Ordered;
@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.util.Map;
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(basePackages = "com.lexho.partner")
+@RestControllerAdvice(basePackages = "com.lexho.provider")
 public class ProviderExceptionHandler {
 
     @ExceptionHandler(ProviderNotFoundException.class)
@@ -31,6 +31,12 @@ public class ProviderExceptionHandler {
     @ExceptionHandler({ProviderValidationException.class, ProviderOperationException.class})
     public ResponseEntity<Map<String, String>> handleProviderRuntime(RuntimeException ex) {
         return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ProviderFileUploadException.class)
+    public ResponseEntity<Map<String, Object>> handleProviderFileUpload(ProviderFileUploadException ex) {
+        HttpStatus status = "FILE_TOO_LARGE".equals(ex.getCode()) ? HttpStatus.PAYLOAD_TOO_LARGE : HttpStatus.BAD_REQUEST;
+        return ResponseEntity.status(status).body(Map.of("code", ex.getCode(), "message", ex.getMessage()));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

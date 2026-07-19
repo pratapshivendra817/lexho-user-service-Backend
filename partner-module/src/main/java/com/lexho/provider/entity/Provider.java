@@ -1,8 +1,8 @@
-package com.lexho.partner.entity;
+package com.lexho.provider.entity;
 
 import com.lexho.catalog.entity.ServiceCategory;
-import com.lexho.partner.enums.KycStatus;
-import com.lexho.partner.enums.OnboardingStatus;
+import com.lexho.provider.enums.KycStatus;
+import com.lexho.provider.enums.OnboardingStatus;
 import com.lexho.user.entity.User;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
@@ -27,6 +27,7 @@ import lombok.Setter;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -156,5 +157,21 @@ public class Provider {
     @PreUpdate
     public void onUpdate() {
         updatedAt = LocalDateTime.now();
+    }
+
+    public Set<String> getServiceAreas() {
+        return serviceAreas == null ? Collections.emptySet() : new HashSet<>(serviceAreas);
+    }
+
+    public void setServiceAreas(Set<String> serviceAreas) {
+        this.serviceAreas = serviceAreas == null ? new HashSet<>() : new HashSet<>(serviceAreas);
+    }
+
+    public List<ProviderDocument> getDocuments() {
+        return documents == null ? Collections.emptyList() : new ArrayList<>(documents);
+    }
+
+    public void setDocuments(List<ProviderDocument> documents) {
+        this.documents = documents == null ? new ArrayList<>() : new ArrayList<>(documents);
     }
 }

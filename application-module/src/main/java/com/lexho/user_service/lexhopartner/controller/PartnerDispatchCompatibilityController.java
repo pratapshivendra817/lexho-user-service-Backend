@@ -1,5 +1,7 @@
 package com.lexho.user_service.lexhopartner.controller;
 
+import com.lexho.user_service.chat.dto.ChatMessagePageResponse;
+import com.lexho.user_service.chat.service.ChatService;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.lexhopartner.dto.OrderResponseDto;
 import com.lexho.user_service.lexhopartner.dto.PageResponseDto;
@@ -23,11 +25,14 @@ import org.springframework.web.bind.annotation.RestController;
 @PreAuthorize("hasAnyRole('PARTNER','ADMIN')")
 public class PartnerDispatchCompatibilityController {
 
+    private final ChatService chatService;
     private final PartnerOrderService partnerOrderService;
     private final PartnerRequestService partnerRequestService;
 
-    public PartnerDispatchCompatibilityController(PartnerOrderService partnerOrderService,
+    public PartnerDispatchCompatibilityController(ChatService chatService,
+                                                  PartnerOrderService partnerOrderService,
                                                   PartnerRequestService partnerRequestService) {
+        this.chatService = chatService;
         this.partnerOrderService = partnerOrderService;
         this.partnerRequestService = partnerRequestService;
     }
@@ -39,6 +44,19 @@ public class PartnerDispatchCompatibilityController {
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String direction) {
         return ApiResponse.success("Orders fetched", partnerOrderService.getNewOrders(page, size, sortBy, direction));
+    }
+
+    @GetMapping("/orders/{id}")
+    public ApiResponse<OrderResponseDto> orderDetails(@RequestAttribute("userId") Long partnerId,
+                                                      @PathVariable Long id) {
+        return ApiResponse.success("Order fetched", partnerOrderService.getOrder(partnerId, id));
+    }
+
+    @GetMapping("/orders/{id}/chat/messages")
+    public ApiResponse<ChatMessagePageResponse> orderChatMessages(@PathVariable Long id,
+                                                                  @RequestParam(defaultValue = "0") int page,
+                                                                  @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("Chat messages fetched", chatService.listMessagesByOrderId(id, page, size));
     }
 
     @GetMapping("/dispatch/requests/new")

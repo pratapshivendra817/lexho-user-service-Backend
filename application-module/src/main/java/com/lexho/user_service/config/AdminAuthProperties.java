@@ -89,8 +89,8 @@ public class AdminAuthProperties {
     }
 
     public static class RateLimit {
-        private int maxRequests = 10;
-        private int windowSeconds = 60;
+        private int maxRequests = 5;
+        private int windowSeconds = 900;
         private String keyPrefix = "ADMIN_LOGIN_RL_";
 
         public int getMaxRequests() {

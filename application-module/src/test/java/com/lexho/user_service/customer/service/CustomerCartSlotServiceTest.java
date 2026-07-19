@@ -1,6 +1,8 @@
 package com.lexho.user_service.customer.service;
 
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
+import com.lexho.user_service.cartconfig.service.CartConfigService;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +30,8 @@ class CustomerCartSlotServiceTest {
     private PartnerShiftRepository partnerShiftRepository;
     @Mock
     private SlotDateTimePolicy slotDateTimePolicy;
+    @Mock
+    private CartConfigService cartConfigService;
 
     @InjectMocks
     private CustomerCartSlotService customerCartSlotService;
@@ -38,9 +42,9 @@ class CustomerCartSlotServiceTest {
         LocalDate d2 = LocalDate.of(2026, 5, 20);
 
         when(slotDateTimePolicy.today()).thenReturn(LocalDate.of(2026, 5, 18));
-        when(slotDateTimePolicy.now()).thenReturn(LocalDateTime.of(2026, 5, 18, 8, 0));
         when(slotDateTimePolicy.zoneId()).thenReturn(java.time.ZoneId.of("Asia/Kolkata"));
         when(slotDateTimePolicy.isExpired(any(LocalDateTime.class))).thenReturn(false);
+        when(cartConfigService.currentEntity()).thenReturn(new CartConfigEntity());
         when(orderRepository.countByScheduledAtGreaterThanEqualAndScheduledAtLessThanAndStatusIn(any(), any(), anySet())).thenReturn(0L);
         when(partnerShiftRepository.existsByOnlineTrue()).thenReturn(true);
 

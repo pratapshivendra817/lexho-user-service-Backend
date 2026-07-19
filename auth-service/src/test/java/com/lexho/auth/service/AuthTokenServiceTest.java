@@ -17,6 +17,9 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,5 +88,64 @@ class AuthTokenServiceTest {
         when(refreshTokenRepository.findByToken("expired")).thenReturn(Optional.of(token));
 
         assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("expired"));
+    }
+
+    @Test
+    void shouldRejectMissingUnknownRevokedAndInvalidRoleRefreshTokens() {
+        when(refreshTokenRepository.findByToken("missing")).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("missing"));
+        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("   "));
+
+        RefreshToken revoked = new RefreshToken();
+        revoked.setUserId(2L);
+        revoked.setRole(Role.ADMIN.name());
+        revoked.setToken("revoked");
+        revoked.setExpiresAt(LocalDateTime.now().plusDays(1));
+        revoked.setRevoked(true);
+        when(refreshTokenRepository.findByToken("revoked")).thenReturn(Optional.of(revoked));
+        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("revoked"));
+
+        RefreshToken badRole = new RefreshToken();
+        badRole.setUserId(3L);
+        badRole.setRole("bad-role");
+        badRole.setToken("bad-role");
+        badRole.setExpiresAt(LocalDateTime.now().plusDays(1));
+        badRole.setRevoked(false);
+        when(refreshTokenRepository.findByToken("bad-role")).thenReturn(Optional.of(badRole));
+        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("bad-role"));
+    }
+
+    @Test
+    void shouldRevokeWhenTokenExistsAndIgnoreMissingOnes() {
+        RefreshToken token = new RefreshToken();
+        token.setToken("refresh");
+        token.setRevoked(false);
+        when(refreshTokenRepository.findByToken("refresh")).thenReturn(Optional.of(token));
+        when(refreshTokenRepository.findByToken("missing")).thenReturn(Optional.empty());
+        when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        authTokenService.revokeRefreshToken(" refresh ");
+        authTokenService.revokeRefreshToken("missing");
+
+        assertTrue(token.isRevoked());
+        verify(refreshTokenRepository).save(token);
+    }
+
+    @Test
+    void shouldPropagateRepositorySaveFailures() {
+        when(refreshTokenRepository.save(any(RefreshToken.class))).thenThrow(new RuntimeException("db down"));
+
+        assertThrows(RuntimeException.class, () -> authTokenService.issueTokens(100L, Role.ADMIN));
+    }
+
+    @Test
+    void shouldNormalizeRefreshTokenBeforeRevocationLookup() {
+        when(refreshTokenRepository.findByToken("trimmed")).thenReturn(Optional.empty());
+
+        authTokenService.revokeRefreshToken(" trimmed ");
+
+        verify(refreshTokenRepository).findByToken(eq("trimmed"));
+        verify(refreshTokenRepository, never()).save(any(RefreshToken.class));
     }
 }

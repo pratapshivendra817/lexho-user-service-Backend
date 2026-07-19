@@ -1,7 +1,7 @@
 package com.lexho.user_service.dispatch.service;
 
-import com.lexho.partner.entity.Partner;
-import com.lexho.partner.repository.PartnerRepository;
+import com.lexho.provider.entity.Partner;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.dispatch.dto.PartnerSkillsUpdateRequest;

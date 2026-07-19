@@ -1,7 +1,7 @@
-package com.lexho.partner.dto;
+package com.lexho.provider.dto;
 
-import com.lexho.partner.enums.KycStatus;
-import com.lexho.partner.enums.OnboardingStatus;
+import com.lexho.provider.enums.KycStatus;
+import com.lexho.provider.enums.OnboardingStatus;
 import lombok.Getter;
 import lombok.Setter;
 

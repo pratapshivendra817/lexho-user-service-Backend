@@ -11,9 +11,14 @@ import com.lexho.user_service.admin.repository.SupportTicketRepository;
 import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.banner.repository.BannerPromotionRepository;
 import com.lexho.user_service.booking.exception.InstantBookingUnavailableException;
+import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
+import com.lexho.user_service.cartconfig.service.CartConfigService;
 import com.lexho.user_service.customer.service.CustomerCartSlotService;
+import com.lexho.user_service.customer.location.service.ServiceabilityService;
 import com.lexho.user_service.customer.service.SlotDateTimePolicy;
 import com.lexho.user_service.dispatch.service.DispatchOrchestrationService;
+import com.lexho.user_service.dispatch.repository.BookingEventRepository;
+import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dto.OrderResponseDTO;
 import com.lexho.user_service.lexho.dto.LexhoDtos;
 import com.lexho.user_service.lexho.entity.LexhoAddress;
@@ -21,17 +26,19 @@ import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.lexho.repository.LexhoFavoriteRepository;
 import com.lexho.user_service.lexho.repository.LexhoReferralCodeRepository;
 import com.lexho.user_service.lexho.repository.LexhoReferralUseRepository;
-import com.lexho.user_service.lexho.repository.LexhoSubscriptionRepository;
 import com.lexho.user_service.lexho.service.LexhoAddressService;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import com.lexho.user_service.service.ApiRateLimiterService;
 import com.lexho.user_service.service.CartService;
 import com.lexho.user_service.service.HomeService;
-import com.lexho.user_service.service.NotificationService;
+import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.service.OrderService;
 import com.lexho.user_service.util.MediaUrlResolver;
 import com.lexho.catalog.repository.CategoryRepository;
-import com.lexho.partner.repository.PartnerRepository;
+import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.user_service.subscription.repository.SubscriptionFrequencyRepository;
+import com.lexho.user_service.subscription.repository.SubscriptionMasterRepository;
+import com.lexho.user_service.subscription.repository.SubscriptionVisitRepository;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -54,7 +61,7 @@ class LexhoExperienceControllerInstantTest {
         CartService cartService = mock(CartService.class);
         OrderService orderService = mock(OrderService.class);
         OrderRepository orderRepository = mock(OrderRepository.class);
-        NotificationService notificationService = mock(NotificationService.class);
+        NotificationManagementService notificationManagementService = mock(NotificationManagementService.class);
         LexhoAddressService addressService = mock(LexhoAddressService.class);
         BannerPromotionRepository bannerPromotionRepository = mock(BannerPromotionRepository.class);
         CategoryRepository categoryRepository = mock(CategoryRepository.class);
@@ -65,7 +72,6 @@ class LexhoExperienceControllerInstantTest {
         LexhoFavoriteRepository favoriteRepository = mock(LexhoFavoriteRepository.class);
         LexhoReferralCodeRepository referralCodeRepository = mock(LexhoReferralCodeRepository.class);
         LexhoReferralUseRepository referralUseRepository = mock(LexhoReferralUseRepository.class);
-        LexhoSubscriptionRepository subscriptionRepository = mock(LexhoSubscriptionRepository.class);
         SupportTicketRepository supportTicketRepository = mock(SupportTicketRepository.class);
         SupportTicketReplyRepository supportTicketReplyRepository = mock(SupportTicketReplyRepository.class);
         SupportFaqCategoryRepository supportFaqCategoryRepository = mock(SupportFaqCategoryRepository.class);
@@ -76,17 +82,27 @@ class LexhoExperienceControllerInstantTest {
         SlotDateTimePolicy slotDateTimePolicy = mock(SlotDateTimePolicy.class);
         CustomerCartSlotService customerCartSlotService = mock(CustomerCartSlotService.class);
         GeoFenceValidationService geoFenceValidationService = mock(GeoFenceValidationService.class);
+        ServiceabilityService serviceabilityService = mock(ServiceabilityService.class);
+        CartConfigService cartConfigService = mock(CartConfigService.class);
+        SubscriptionMasterRepository subscriptionMasterRepository = mock(SubscriptionMasterRepository.class);
+        SubscriptionFrequencyRepository subscriptionFrequencyRepository = mock(SubscriptionFrequencyRepository.class);
+        SubscriptionVisitRepository subscriptionVisitRepository = mock(SubscriptionVisitRepository.class);
+        CurrentPartnerLocationRepository currentPartnerLocationRepository = mock(CurrentPartnerLocationRepository.class);
+        BookingEventRepository bookingEventRepository = mock(BookingEventRepository.class);
 
         LexhoExperienceController controller = new LexhoExperienceController(
-                homeService, cartService, orderService, orderRepository, notificationService, addressService,
+                homeService, cartService, orderService, orderRepository, notificationManagementService, addressService,
                 bannerPromotionRepository, categoryRepository, adminCategoryRepository, partnerRepository,
                 partnerProfileRepository,
                 reviewRepository, favoriteRepository, referralCodeRepository, referralUseRepository,
-                subscriptionRepository, supportTicketRepository, supportTicketReplyRepository,
+                supportTicketRepository, supportTicketReplyRepository,
                 supportFaqCategoryRepository, supportFaqRepository, mediaUrlResolver, dispatchOrchestrationService,
-                apiRateLimiterService, slotDateTimePolicy, customerCartSlotService, geoFenceValidationService
+                apiRateLimiterService, slotDateTimePolicy, customerCartSlotService, geoFenceValidationService,
+                serviceabilityService, cartConfigService, subscriptionMasterRepository, subscriptionFrequencyRepository,
+                subscriptionVisitRepository, currentPartnerLocationRepository, bookingEventRepository
         );
 
+        when(cartConfigService.currentEntity()).thenReturn(new CartConfigEntity());
         doNothing().when(apiRateLimiterService).check(any(), any(), anyInt(), any(), any());
         when(addressService.getById(5L, 20L)).thenReturn(new LexhoDtos.AddressResponse(20L, "H", "Line 1", "City", true));
         LexhoAddress rawAddress = new LexhoAddress();

@@ -15,6 +15,12 @@ public class AdminSettingsService {
 
     public static final String DISPATCH_RADIUS_KM = "dispatch.radius.km";
     public static final String PARTNER_SERVICE_RADIUS_KM = "partner.service.radius.km";
+    public static final String DISPATCH_RETRY_COUNT = "dispatch.retry.count";
+    public static final String DISPATCH_TIMEOUT_SEC = "dispatch.timeout.sec";
+    public static final String MAP_PROVIDER = "map.provider";
+    public static final String MAP_DEFAULT_CITY = "map.default.city";
+    public static final String MAP_DEFAULT_LAT = "map.default.lat";
+    public static final String MAP_DEFAULT_LNG = "map.default.lng";
 
     private final AppSettingRepository appSettingRepository;
 
@@ -66,6 +72,57 @@ public class AdminSettingsService {
         return upsert(PARTNER_SERVICE_RADIUS_KM, String.valueOf(radiusKm), "Partner service radius in km", updatedBy);
     }
 
+    @Transactional
+    public Map<String, Object> updateDashboardSettings(Double serviceRadiusKm,
+                                                        Integer dispatchRetryCount,
+                                                        Integer dispatchTimeoutSec,
+                                                        String mapProvider,
+                                                        String mapDefaultCity,
+                                                        Double mapDefaultLat,
+                                                        Double mapDefaultLng,
+                                                        String updatedBy) {
+        if (serviceRadiusKm == null || serviceRadiusKm <= 0d || serviceRadiusKm > 100d) {
+            throw new BadRequestException("serviceRadiusKm must be > 0 and <= 100");
+        }
+        if (dispatchRetryCount == null || dispatchRetryCount < 0 || dispatchRetryCount > 20) {
+            throw new BadRequestException("dispatchRetryCount must be >= 0 and <= 20");
+        }
+        if (dispatchTimeoutSec == null || dispatchTimeoutSec <= 0 || dispatchTimeoutSec > 3600) {
+            throw new BadRequestException("dispatchTimeoutSec must be > 0 and <= 3600");
+        }
+        if (mapProvider == null || mapProvider.isBlank()) {
+            throw new BadRequestException("mapProvider is required");
+        }
+        if (mapDefaultCity == null || mapDefaultCity.isBlank()) {
+            throw new BadRequestException("mapDefaultCity is required");
+        }
+        if (mapDefaultLat == null || mapDefaultLat < -90d || mapDefaultLat > 90d) {
+            throw new BadRequestException("mapDefaultLat must be >= -90 and <= 90");
+        }
+        if (mapDefaultLng == null || mapDefaultLng < -180d || mapDefaultLng > 180d) {
+            throw new BadRequestException("mapDefaultLng must be >= -180 and <= 180");
+        }
+
+        Map<String, Object> settings = new LinkedHashMap<>();
+        settings.put("serviceRadiusKm", value(upsert(PARTNER_SERVICE_RADIUS_KM, String.valueOf(serviceRadiusKm),
+                "Partner service radius in km", updatedBy)));
+        settings.put("dispatchRetryCount", value(upsert(DISPATCH_RETRY_COUNT, String.valueOf(dispatchRetryCount),
+                "Dispatch retry count", updatedBy)));
+        settings.put("dispatchTimeoutSec", value(upsert(DISPATCH_TIMEOUT_SEC, String.valueOf(dispatchTimeoutSec),
+                "Dispatch timeout in seconds", updatedBy)));
+        settings.put("mapProvider", value(upsert(MAP_PROVIDER, mapProvider, "Map provider", updatedBy)));
+        settings.put("mapDefaultCity", value(upsert(MAP_DEFAULT_CITY, mapDefaultCity, "Default map city", updatedBy)));
+        settings.put("mapDefaultLat", value(upsert(MAP_DEFAULT_LAT, String.valueOf(mapDefaultLat),
+                "Default map latitude", updatedBy)));
+        settings.put("mapDefaultLng", value(upsert(MAP_DEFAULT_LNG, String.valueOf(mapDefaultLng),
+                "Default map longitude", updatedBy)));
+        return settings;
+    }
+
+    private Object value(Map<String, Object> setting) {
+        return setting.get("value");
+    }
+
     private Map<String, Object> toMap(AppSettingEntity entity) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("key", entity.getSettingKey());
@@ -77,4 +134,3 @@ public class AdminSettingsService {
         return row;
     }
 }
-

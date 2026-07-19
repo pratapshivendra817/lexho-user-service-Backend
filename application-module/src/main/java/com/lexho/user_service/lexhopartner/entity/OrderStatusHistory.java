@@ -40,4 +40,10 @@ public class OrderStatusHistory extends BaseEntity {
 
     @Column(name = "remarks", length = 255)
     private String remarks;
+
+    @Column(name = "actor_type", length = 30)
+    private String actorType;
+
+    @Column(name = "actor_id")
+    private Long actorId;
 }

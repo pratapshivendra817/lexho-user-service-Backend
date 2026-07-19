@@ -29,6 +29,9 @@ public class SectionItem {
     private String title;
 
     @Column(length = 255)
+    private String subtitle;
+
+    @Column(length = 255)
     private String value;
 
     @Column(nullable = false, length = 255)

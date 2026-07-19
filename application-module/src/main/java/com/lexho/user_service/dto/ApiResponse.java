@@ -3,6 +3,7 @@ package com.lexho.user_service.dto;
 public class ApiResponse<T> {
 
     private boolean success;
+    private String code;
     private String message;
     private T data;
     private String token;
@@ -13,6 +14,14 @@ public class ApiResponse<T> {
 
     public ApiResponse(boolean success, String message, T data) {
         this.success = success;
+        this.message = message;
+        this.data = data;
+        this.timestamp = java.time.OffsetDateTime.now().toString();
+    }
+
+    public ApiResponse(boolean success, String code, String message, T data) {
+        this.success = success;
+        this.code = code;
         this.message = message;
         this.data = data;
         this.timestamp = java.time.OffsetDateTime.now().toString();
@@ -38,6 +47,15 @@ public class ApiResponse<T> {
         return new ApiResponse<>(false, message, null);
     }
 
+    public static <T> ApiResponse<T> failure(String code, String message) {
+        ApiResponse<T> response = new ApiResponse<>();
+        response.setSuccess(false);
+        response.setCode(code);
+        response.setMessage(message);
+        response.setTimestamp(java.time.OffsetDateTime.now().toString());
+        return response;
+    }
+
     public boolean isSuccess() {
         return success;
     }
@@ -48,6 +66,14 @@ public class ApiResponse<T> {
 
     public String getMessage() {
         return message;
+    }
+
+    public String getCode() {
+        return code;
+    }
+
+    public void setCode(String code) {
+        this.code = code;
     }
 
     public void setMessage(String message) {

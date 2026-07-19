@@ -21,9 +21,13 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
 
     List<Notification> findByUserIdAndDeletedFalseOrderByCreatedAtDesc(Long userId);
 
+    List<Notification> findByUserIdAndChannelTypeAndDeletedFalseOrderByCreatedAtDesc(Long userId, ChannelType channelType);
+
     List<Notification> findByUserIdAndStatusNotAndDeletedFalseOrderByCreatedAtDesc(Long userId, NotificationStatus status);
 
     long countByUserIdAndStatusNotAndDeletedFalse(Long userId, NotificationStatus status);
+
+    long countByUserIdAndChannelTypeAndStatusNotAndDeletedFalse(Long userId, ChannelType channelType, NotificationStatus status);
 
     long countByStatusAndDeletedFalse(NotificationStatus status);
 

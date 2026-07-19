@@ -1,10 +1,18 @@
 package com.lexho.user_service.review.service;
 
 import com.lexho.booking.entity.Booking;
+import com.lexho.booking.entity.Order;
 import com.lexho.booking.enums.BookingStatus;
 import com.lexho.booking.repository.BookingRepository;
+import com.lexho.booking.repository.OrderRepository;
+import com.lexho.common.enums.OrderStatus;
+import com.lexho.provider.entity.Partner;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user.entity.User;
 import com.lexho.user.repository.UserRepository;
+import com.lexho.user_service.audit.service.AuditLogService;
+import com.lexho.user_service.review.dto.CustomerReviewResponse;
+import com.lexho.user_service.review.dto.CustomerReviewSubmitResponse;
 import com.lexho.user_service.review.dto.ProviderRatingSummary;
 import com.lexho.user_service.review.dto.ReportReviewRequest;
 import com.lexho.user_service.review.dto.ReviewPageResponse;
@@ -24,6 +32,8 @@ import com.lexho.user_service.review.mapper.ReviewMapper;
 import com.lexho.user_service.review.repository.ReviewReportRepository;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import com.lexho.user_service.review.repository.ServiceCategoryLookupRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.security.SecurityUtils;
 import jakarta.transaction.Transactional;
 import org.slf4j.Logger;
@@ -46,30 +56,86 @@ public class ReviewManagementService {
     private final ReviewRepository reviewRepository;
     private final ReviewReportRepository reviewReportRepository;
     private final BookingRepository bookingRepository;
+    private final OrderRepository orderRepository;
     private final UserRepository userRepository;
+    private final PartnerRepository partnerRepository;
+    private final PartnerProfileRepository partnerProfileRepository;
     private final ServiceCategoryLookupRepository serviceCategoryLookupRepository;
     private final ReviewMapper reviewMapper;
     private final SecurityUtils securityUtils;
+    private final AuditLogService auditLogService;
 
     public ReviewManagementService(ReviewRepository reviewRepository,
                                    ReviewReportRepository reviewReportRepository,
                                    BookingRepository bookingRepository,
+                                   OrderRepository orderRepository,
                                    UserRepository userRepository,
+                                   PartnerRepository partnerRepository,
+                                   PartnerProfileRepository partnerProfileRepository,
                                    ServiceCategoryLookupRepository serviceCategoryLookupRepository,
                                    ReviewMapper reviewMapper,
-                                   SecurityUtils securityUtils) {
+                                   SecurityUtils securityUtils,
+                                   AuditLogService auditLogService) {
         this.reviewRepository = reviewRepository;
         this.reviewReportRepository = reviewReportRepository;
         this.bookingRepository = bookingRepository;
+        this.orderRepository = orderRepository;
         this.userRepository = userRepository;
+        this.partnerRepository = partnerRepository;
+        this.partnerProfileRepository = partnerProfileRepository;
         this.serviceCategoryLookupRepository = serviceCategoryLookupRepository;
         this.reviewMapper = reviewMapper;
         this.securityUtils = securityUtils;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
     public ReviewResponse submitReview(SubmitReviewRequest request) {
+        return reviewMapper.toResponse(createReview(request));
+    }
+
+    @Transactional
+    public CustomerReviewSubmitResponse submitCustomerReview(SubmitReviewRequest request) {
+        ReviewEntity saved = createReview(request);
+        return new CustomerReviewSubmitResponse(saved.getId(), saved.getBookingId(), saved.getRating(), true);
+    }
+
+    public CustomerReviewResponse getCustomerReviewByBookingId(Long bookingId) {
         Long customerId = currentUserId();
+        validateBookingOwnerForReviewLookup(bookingId, customerId);
+        ReviewEntity review = reviewRepository.findByBookingIdAndCustomerIdAndDeletedFalse(bookingId, customerId)
+                .orElseThrow(() -> new ReviewNotFoundException(bookingId));
+        return new CustomerReviewResponse(
+                review.getId(),
+                review.getRating(),
+                review.getReviewComment(),
+                review.getCreatedAt()
+        );
+    }
+
+    private ReviewEntity createReview(SubmitReviewRequest request) {
+        Long customerId = currentUserId();
+        ReviewEntity review = orderRepository.findById(request.getBookingId())
+                .map(order -> buildOrderReview(request, customerId, order))
+                .orElseGet(() -> buildLegacyBookingReview(request, customerId));
+
+        ReviewEntity saved = reviewRepository.save(review);
+        auditLogService.log(customerId, "CUSTOMER", "REVIEW_CREATED", "REVIEW", saved.getId().toString(),
+                null, "bookingId=" + saved.getBookingId() + ",rating=" + saved.getRating());
+        log.info("Review submitted. reviewId={}, bookingId={}, customerId={}", saved.getId(), saved.getBookingId(), customerId);
+        return saved;
+    }
+
+    private ReviewEntity buildOrderReview(SubmitReviewRequest request, Long customerId, Order order) {
+        validateOrderReviewEligibility(order, customerId);
+        ReviewEntity review = baseReview(request, customerId);
+        review.setBookingId(order.getId());
+        review.setProviderId(order.getAssignedPartnerId());
+        review.setServiceId(order.getItems() == null || order.getItems().isEmpty() ? null : order.getItems().get(0).getPartnerId());
+        return review;
+    }
+
+    private ReviewEntity buildLegacyBookingReview(SubmitReviewRequest request, Long customerId) {
         Booking booking = bookingRepository.findByIdAndDeletedFalse(request.getBookingId())
                 .orElseThrow(() -> new ReviewValidationException("Completed booking is required before review"));
 
@@ -81,21 +147,23 @@ public class ReviewManagementService {
             throw new ReviewValidationException("Only one review is allowed per booking");
         }
 
-        ReviewEntity review = new ReviewEntity();
+        ReviewEntity review = baseReview(request, customerId);
         review.setBookingId(booking.getId());
-        review.setCustomerId(customerId);
         review.setProviderId(booking.getPartner() != null ? booking.getPartner().getId() : null);
         review.setServiceId(booking.getService() != null ? booking.getService().getId() : null);
+        return review;
+    }
+
+    private ReviewEntity baseReview(SubmitReviewRequest request, Long customerId) {
+        ReviewEntity review = new ReviewEntity();
+        review.setCustomerId(customerId);
         review.setRating(request.getRating());
-        review.setReviewComment(normalizeComment(request.getReviewComment()));
+        review.setReviewComment(normalizeComment(reviewText(request)));
         review.setReviewImages(reviewMapper.serializeImages(request.getReviewImages()));
         review.setStatus(ReviewStatus.PENDING);
         review.setDeleted(false);
         review.setReportCount(0L);
-
-        ReviewEntity saved = reviewRepository.save(review);
-        log.info("Review submitted. reviewId={}, bookingId={}, customerId={}", saved.getId(), saved.getBookingId(), customerId);
-        return reviewMapper.toResponse(saved);
+        return review;
     }
 
     @Transactional
@@ -149,12 +217,16 @@ public class ReviewManagementService {
 
     @Transactional
     public ReviewResponse approveReview(Long reviewId) {
-        return updateStatus(reviewId, ReviewStatus.APPROVED);
+        ReviewResponse response = updateStatus(reviewId, ReviewStatus.APPROVED);
+        auditLogService.log(currentUserIdOrSystem(), "ADMIN", "REVIEW_APPROVED", "REVIEW", reviewId.toString(), null, "APPROVED");
+        return response;
     }
 
     @Transactional
     public ReviewResponse rejectReview(Long reviewId) {
-        return updateStatus(reviewId, ReviewStatus.REJECTED);
+        ReviewResponse response = updateStatus(reviewId, ReviewStatus.REJECTED);
+        auditLogService.log(currentUserIdOrSystem(), "ADMIN", "REVIEW_REJECTED", "REVIEW", reviewId.toString(), null, "REJECTED");
+        return response;
     }
 
     @Transactional
@@ -236,8 +308,12 @@ public class ReviewManagementService {
 
     private ReviewResponse updateStatus(Long reviewId, ReviewStatus status) {
         ReviewEntity review = findActiveReview(reviewId);
+        ReviewStatus oldStatus = review.getStatus();
         review.setStatus(status);
         ReviewEntity saved = reviewRepository.save(review);
+        if (status == ReviewStatus.APPROVED || oldStatus == ReviewStatus.APPROVED) {
+            recalculateProviderRating(saved.getProviderId());
+        }
         log.info("Review status updated. reviewId={}, status={}", reviewId, status);
         return reviewMapper.toResponse(saved);
     }
@@ -254,6 +330,36 @@ public class ReviewManagementService {
         if (!booking.getCustomer().getId().equals(customerId)) {
             throw new ReviewAccessDeniedException("You can review only your own booking");
         }
+    }
+
+    private void validateOrderReviewEligibility(Order order, Long customerId) {
+        if (order.getUserId() == null || !order.getUserId().equals(customerId)) {
+            throw new ReviewAccessDeniedException("You can review only your own booking");
+        }
+        if (!isCompletedStatus(order.getStatus())) {
+            throw new ReviewValidationException("Review is allowed only for completed bookings");
+        }
+        if (reviewRepository.existsByBookingIdAndDeletedFalse(order.getId())) {
+            throw new ReviewValidationException("Only one review is allowed per booking");
+        }
+    }
+
+    private void validateBookingOwnerForReviewLookup(Long bookingId, Long customerId) {
+        orderRepository.findById(bookingId).ifPresentOrElse(order -> {
+            if (order.getUserId() == null || !order.getUserId().equals(customerId)) {
+                throw new ReviewAccessDeniedException("You can view only your own review");
+            }
+        }, () -> {
+            Booking booking = bookingRepository.findByIdAndDeletedFalse(bookingId)
+                    .orElseThrow(() -> new ReviewNotFoundException(bookingId));
+            validateBookingOwnership(booking, customerId);
+        });
+    }
+
+    private boolean isCompletedStatus(OrderStatus status) {
+        return status == OrderStatus.SERVICE_COMPLETED
+                || status == OrderStatus.PAYMENT_COMPLETED
+                || status == OrderStatus.DELIVERED;
     }
 
     private void validateReviewOwnership(ReviewEntity review, Long customerId) {
@@ -276,6 +382,10 @@ public class ReviewManagementService {
                 .orElseThrow(() -> new ReviewAccessDeniedException("Authenticated user not found"));
     }
 
+    private Long currentUserIdOrSystem() {
+        return securityUtils.getCurrentUserId().orElse(0L);
+    }
+
     private String normalizeSearch(String value) {
         if (value == null) {
             return null;
@@ -290,6 +400,31 @@ public class ReviewManagementService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String reviewText(SubmitReviewRequest request) {
+        if (request.getReviewText() != null) {
+            return request.getReviewText();
+        }
+        return request.getReviewComment();
+    }
+
+    private void recalculateProviderRating(Long providerId) {
+        if (providerId == null) {
+            return;
+        }
+        double average = round(reviewRepository.averageRatingByProviderIdAndStatus(providerId, ReviewStatus.APPROVED));
+        long total = reviewRepository.countByProviderIdAndStatusAndDeletedFalse(providerId, ReviewStatus.APPROVED);
+        partnerRepository.findById(providerId).ifPresent(partner -> {
+            partner.setRating(average);
+            partner.setTotalReviews(total);
+            partnerRepository.save(partner);
+        });
+        partnerProfileRepository.findById(providerId).ifPresent(profile -> {
+            profile.setRating(average);
+            profile.setTotalReviews(total);
+            partnerProfileRepository.save(profile);
+        });
     }
 
     private ProviderRatingSummary toProviderSummary(Object[] row) {

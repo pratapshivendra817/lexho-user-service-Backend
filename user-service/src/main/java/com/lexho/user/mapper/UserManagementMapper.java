@@ -12,6 +12,16 @@ public class UserManagementMapper {
 
     public AdminUserResponse toResponse(User user) {
         AdminUserResponse response = new AdminUserResponse();
+        return populateBaseResponse(response, user);
+    }
+
+    public AdminUserDetailResponse toDetailResponse(User user, BookingSummaryDto bookingSummary) {
+        AdminUserDetailResponse response = populateBaseResponse(new AdminUserDetailResponse(), user);
+        response.setBookingSummary(bookingSummary);
+        return response;
+    }
+
+    private <T extends AdminUserResponse> T populateBaseResponse(T response, User user) {
         response.setId(user.getId());
         response.setFullName(user.getFullName());
         response.setEmail(user.getEmail());
@@ -25,26 +35,6 @@ public class UserManagementMapper {
         response.setTotalBookings(user.getTotalBookings() == null ? 0L : user.getTotalBookings());
         response.setCreatedAt(user.getCreatedAt());
         response.setUpdatedAt(user.getUpdatedAt());
-        return response;
-    }
-
-    public AdminUserDetailResponse toDetailResponse(User user, BookingSummaryDto bookingSummary) {
-        AdminUserDetailResponse response = new AdminUserDetailResponse();
-        AdminUserResponse base = toResponse(user);
-        response.setId(base.getId());
-        response.setFullName(base.getFullName());
-        response.setEmail(base.getEmail());
-        response.setPhoneNumber(base.getPhoneNumber());
-        response.setRole(base.getRole());
-        response.setProfileImage(base.getProfileImage());
-        response.setCity(base.getCity());
-        response.setState(base.getState());
-        response.setAddress(base.getAddress());
-        response.setStatus(base.getStatus());
-        response.setTotalBookings(base.getTotalBookings());
-        response.setCreatedAt(base.getCreatedAt());
-        response.setUpdatedAt(base.getUpdatedAt());
-        response.setBookingSummary(bookingSummary);
         return response;
     }
 

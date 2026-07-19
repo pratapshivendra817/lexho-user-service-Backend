@@ -11,8 +11,10 @@ public enum OrderStatus {
     PARTNER_SEARCH,
     PARTNER_ASSIGNED,
     PARTNER_ACCEPTED,
+    ARRIVED,
     PARTNER_REACHED,
     SERVICE_STARTED,
+    SERVICE_IN_PROGRESS,
     SERVICE_COMPLETED,
     PAYMENT_COMPLETED,
     CREATED,
@@ -30,9 +32,11 @@ public enum OrderStatus {
             case BOOKING_CREATED -> Set.of(PARTNER_SEARCH, CANCELLED);
             case PARTNER_SEARCH -> Set.of(PARTNER_ASSIGNED, CANCELLED);
             case PARTNER_ASSIGNED -> Set.of(PARTNER_ACCEPTED, CANCELLED);
-            case PARTNER_ACCEPTED -> Set.of(PARTNER_REACHED, CANCELLED);
+            case PARTNER_ACCEPTED -> Set.of(ARRIVED, PARTNER_REACHED, CANCELLED);
+            case ARRIVED -> Set.of(SERVICE_STARTED, CANCELLED);
             case PARTNER_REACHED -> Set.of(SERVICE_STARTED, CANCELLED);
-            case SERVICE_STARTED -> Set.of(SERVICE_COMPLETED, CANCELLED);
+            case SERVICE_STARTED -> Set.of(SERVICE_IN_PROGRESS, SERVICE_COMPLETED, CANCELLED);
+            case SERVICE_IN_PROGRESS -> Set.of(SERVICE_COMPLETED, CANCELLED);
             case SERVICE_COMPLETED -> Set.of(PAYMENT_COMPLETED);
             case PAYMENT_COMPLETED -> Set.of();
             case CREATED -> Set.of(CONFIRMED, CANCELLED);
@@ -55,6 +59,7 @@ public enum OrderStatus {
                 || this == PARTNER_SEARCH
                 || this == PARTNER_ASSIGNED
                 || this == PARTNER_ACCEPTED
+                || this == ARRIVED
                 || this == PARTNER_REACHED;
     }
 }

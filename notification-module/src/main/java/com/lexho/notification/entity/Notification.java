@@ -54,7 +54,7 @@ public class Notification {
     private String message;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "notification_type", nullable = false, length = 20)
+    @Column(name = "notification_type", nullable = false, length = 40)
     private NotificationType notificationType;
 
     @Enumerated(EnumType.STRING)
@@ -89,6 +89,9 @@ public class Notification {
 
     @Column(name = "sent_at")
     private LocalDateTime sentAt;
+
+    @Column(name = "delivered_at")
+    private LocalDateTime deliveredAt;
 
     @Column(name = "read_at")
     private LocalDateTime readAt;
@@ -126,7 +129,7 @@ public class Notification {
             priority = NotificationPriority.MEDIUM;
         }
         if (status == null) {
-            status = NotificationStatus.PENDING;
+            status = NotificationStatus.QUEUED;
         }
         if (retryCount == null) {
             retryCount = 0;

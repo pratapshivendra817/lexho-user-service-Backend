@@ -2,7 +2,9 @@ package com.lexho.user_service.admin.controller;
 
 import com.lexho.user_service.admin.dto.AdminMessageResponse;
 import com.lexho.user_service.admin.dto.DataResponse;
+import com.lexho.user_service.admin.dto.PopularServiceDeleteRequest;
 import com.lexho.user_service.admin.dto.PopularServiceResponse;
+import com.lexho.user_service.admin.dto.PopularServiceRestoreRequest;
 import com.lexho.user_service.admin.dto.PopularServiceUpsertRequest;
 import com.lexho.user_service.admin.service.PopularServiceManagementService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,7 +41,17 @@ public class AdminPopularServiceController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete popular service")
-    public AdminMessageResponse deletePopularService(@PathVariable Long id) {
-        return popularServiceManagementService.deletePopularService(id);
+    public AdminMessageResponse deletePopularService(@PathVariable Long id,
+                                                     @Valid @RequestBody(required = false) PopularServiceDeleteRequest request) {
+        String deleteReason = request == null ? null : request.getDeleteReason();
+        return popularServiceManagementService.deletePopularService(id, deleteReason);
+    }
+
+    @PatchMapping("/{id}/restore")
+    @Operation(summary = "Restore soft-deleted popular service")
+    public DataResponse<PopularServiceResponse> restorePopularService(@PathVariable Long id,
+                                                                      @Valid @RequestBody(required = false) PopularServiceRestoreRequest request) {
+        Integer requestedPriority = request == null ? null : request.getPriority();
+        return popularServiceManagementService.restorePopularService(id, requestedPriority);
     }
 }

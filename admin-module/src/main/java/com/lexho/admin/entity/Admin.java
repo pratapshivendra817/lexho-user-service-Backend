@@ -13,11 +13,14 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Locale;
 
 @Entity
 @Table(name = "admins")
 public class Admin {
+
+    private static final ZoneId APPLICATION_ZONE = ZoneId.systemDefault();
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -53,7 +56,7 @@ public class Admin {
 
     @PrePersist
     public void onCreate() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = now();
         this.createdAt = now;
         this.updatedAt = now;
         normalizeEmail();
@@ -64,7 +67,7 @@ public class Admin {
 
     @PreUpdate
     public void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
+        this.updatedAt = now();
         normalizeEmail();
     }
 
@@ -73,7 +76,7 @@ public class Admin {
         if (this.failedAttempts >= maxFailedAttempts) {
             this.accountLocked = true;
             this.lockUntil = lockDurationMinutes > 0
-                    ? LocalDateTime.now().plusMinutes(lockDurationMinutes)
+                    ? now().plusMinutes(lockDurationMinutes)
                     : null;
         }
     }
@@ -99,6 +102,10 @@ public class Admin {
         if (this.email != null) {
             this.email = this.email.trim().toLowerCase(Locale.ROOT);
         }
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(APPLICATION_ZONE);
     }
 
     public Long getId() {

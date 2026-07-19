@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
-import com.lexho.partner.entity.Partner;
-import com.lexho.partner.repository.PartnerRepository;
+import com.lexho.provider.entity.Partner;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.entity.AdminCategoryEntity;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
@@ -23,8 +23,8 @@ import com.lexho.user_service.partnerrequest.model.PartnerServiceRequestStatus;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -69,9 +69,31 @@ class DispatchOrchestrationSkillFilterTest {
     private DispatchScoringPolicy dispatchScoringPolicy;
     @Mock
     private ObjectMapper objectMapper;
+    @Mock
+    private TrackingLifecycleService trackingLifecycleService;
 
-    @InjectMocks
     private DispatchOrchestrationService dispatchOrchestrationService;
+
+    @BeforeEach
+    void setUp() {
+        dispatchOrchestrationService = new DispatchOrchestrationService(
+                orderRepository,
+                lexhoAddressRepository,
+                serviceableAreaRepository,
+                partnerShiftRepository,
+                currentPartnerLocationRepository,
+                pincodeAdjacencyRepository,
+                partnerRepository,
+                partnerServiceRequestRepository,
+                partnerServiceSkillRepository,
+                adminServiceEntityRepository,
+                bookingEventRepository,
+                dispatchScoringPolicy,
+                objectMapper,
+                trackingLifecycleService,
+                30
+        );
+    }
 
     @Test
     void cookRequestShouldDispatchOnlyToCookSkilledPartner() {

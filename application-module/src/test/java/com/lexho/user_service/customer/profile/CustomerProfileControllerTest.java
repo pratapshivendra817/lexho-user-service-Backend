@@ -1,6 +1,6 @@
 package com.lexho.user_service.customer.profile;
 
-import com.lexho.user_service.TestWebSliceApp;
+import com.lexho.testconfig.WebSliceBootTestConfig;
 import com.lexho.user_service.config.JwtFilter;
 import com.lexho.user_service.customer.profile.controller.CustomerProfileController;
 import com.lexho.user_service.customer.profile.dto.CustomerProfileResponse;
@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
-        classes = TestWebSliceApp.class,
+        classes = WebSliceBootTestConfig.class,
         properties = "spring.cloud.compatibility-verifier.enabled=false"
 )
 @AutoConfigureMockMvc(addFilters = false)

@@ -61,6 +61,7 @@ public class AdminCatalogService {
         category.setName(normalizedName);
         category.setIconUrl(mediaUrlResolver.toStorablePath(normalize(request.getIconUrl())));
         category.setActive(request.getActive() == null || request.getActive());
+        category.setDisplayOrder(request.getDisplayOrder());
         category.setDeleted(false);
 
         AdminCategoryEntity saved = adminCategoryRepository.save(category);
@@ -78,6 +79,7 @@ public class AdminCatalogService {
 
         category.setName(normalizedName);
         category.setIconUrl(mediaUrlResolver.toStorablePath(normalize(request.getIconUrl())));
+        category.setDisplayOrder(request.getDisplayOrder());
         if (request.getActive() != null) {
             category.setActive(request.getActive());
         }
@@ -114,7 +116,7 @@ public class AdminCatalogService {
     }
 
     public PagedDataResponse<AdminCategoryResponse> listCategories(int page, int limit, String search) {
-        Pageable pageable = page(page, limit, Sort.by(Sort.Direction.ASC, "name"));
+        Pageable pageable = page(page, limit, Sort.by(Sort.Direction.ASC, "displayOrder").and(Sort.by(Sort.Direction.ASC, "name")));
         Page<AdminCategoryEntity> result = adminCategoryRepository.search(normalize(search), pageable);
         return new PagedDataResponse<>(
                 result.getContent().stream().map(this::mapCategory).collect(Collectors.toList()),
@@ -148,11 +150,10 @@ public class AdminCatalogService {
     }
 
     @Transactional
-    public DataResponse<List<AdminServiceDetailResponse>> addServiceDetails(Long serviceId, AdminServiceDetailBulkRequest request) {
+    public AdminServiceDetailBulkCreateResponse addServiceDetails(Long serviceId, AdminServiceDetailBulkRequest request) {
         AdminServiceEntity service = getService(serviceId);
         List<ServiceDetailEntity> entities = request.getItems().stream()
-                .map(String::trim)
-                .filter(item -> !item.isBlank())
+                .map(this::normalizeDetailItem)
                 .distinct()
                 .map(item -> {
                     ServiceDetailEntity detail = new ServiceDetailEntity();
@@ -169,7 +170,10 @@ public class AdminCatalogService {
 
         List<ServiceDetailEntity> saved = serviceDetailRepository.saveAll(entities);
         audit("SERVICE_DETAIL_CREATE_BULK", "service_details", serviceId, "count=" + saved.size());
-        return new DataResponse<>(saved.stream().map(this::mapDetail).toList());
+        return new AdminServiceDetailBulkCreateResponse(
+                "Details added successfully",
+                saved.stream().map(this::mapDetail).toList()
+        );
     }
 
     @Transactional
@@ -180,7 +184,7 @@ public class AdminCatalogService {
         ServiceDetailEntity detail = serviceDetailRepository.findByIdAndService_Id(detailId, serviceId)
                 .orElseThrow(() -> new ResourceNotFoundException("Service detail not found"));
         detail.setType(request.getType());
-        detail.setItemName(request.getItemName().trim());
+        detail.setItemName(normalizeDetailItem(request.getItemName()));
         ServiceDetailEntity saved = serviceDetailRepository.save(detail);
         audit("SERVICE_DETAIL_UPDATE", "service_details", detailId, "serviceId=" + serviceId);
         return new DataResponse<>(mapDetail(saved));
@@ -357,6 +361,7 @@ public class AdminCatalogService {
             throw new BadRequestException("Price is required and must be greater than 0");
         }
         service.setBasePrice(effectivePrice);
+        service.setDiscountedPrice(effectivePrice);
         service.setDurationMinutes(request.getDurationMinutes() == null ? 60 : request.getDurationMinutes());
         service.setAvgRating(request.getRating() == null ? 0.0 : request.getRating());
         service.setImageUrl(mediaUrlResolver.toStorablePath(normalize(request.getImageUrl())));
@@ -403,6 +408,7 @@ public class AdminCatalogService {
         String imageUrl = mediaUrlResolver.toPublicUrl(category.getIconUrl());
         response.setIconUrl(imageUrl);
         response.setImageUrl(imageUrl);
+        response.setDisplayOrder(category.getDisplayOrder());
         response.setActive(category.isActive());
         response.setCreatedAt(category.getCreatedAt());
         response.setUpdatedAt(category.getUpdatedAt());
@@ -439,9 +445,21 @@ public class AdminCatalogService {
     private AdminServiceDetailResponse mapDetail(ServiceDetailEntity detail) {
         AdminServiceDetailResponse response = new AdminServiceDetailResponse();
         response.setId(detail.getId());
+        response.setServiceId(detail.getService() == null ? null : detail.getService().getId());
         response.setType(detail.getType());
         response.setItemName(detail.getItemName());
         return response;
+    }
+
+    private String normalizeDetailItem(String item) {
+        if (item == null) {
+            throw new BadRequestException("item must be between 1 and 255 characters");
+        }
+        String trimmed = item.trim();
+        if (trimmed.isEmpty() || trimmed.length() > 255) {
+            throw new BadRequestException("item must be between 1 and 255 characters");
+        }
+        return trimmed;
     }
 
     private Pageable page(int page, int limit, Sort sort) {

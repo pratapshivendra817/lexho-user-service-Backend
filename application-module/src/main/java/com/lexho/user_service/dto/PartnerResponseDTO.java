@@ -1,5 +1,7 @@
 package com.lexho.user_service.dto;
 
+import com.lexho.provider.entity.Partner;
+
 public class PartnerResponseDTO {
     private Long id;
     private String name;
@@ -9,26 +11,27 @@ public class PartnerResponseDTO {
     private String image;
     private Long categoryId;
     private Long subCategoryId;
+    private Boolean available;
+    private Long totalReviews;
+    private String verificationStatus;
 
     public PartnerResponseDTO() {
     }
 
-    public PartnerResponseDTO(Long id,
-                              String name,
-                              Double rating,
-                              Double price,
-                              Integer experience,
-                              String image,
-                              Long categoryId,
-                              Long subCategoryId) {
-        this.id = id;
-        this.name = name;
-        this.rating = rating;
-        this.price = price;
-        this.experience = experience;
-        this.image = image;
-        this.categoryId = categoryId;
-        this.subCategoryId = subCategoryId;
+    public static PartnerResponseDTO from(Partner partner) {
+        PartnerResponseDTO dto = new PartnerResponseDTO();
+        dto.setId(partner.getId());
+        dto.setName(partner.getName());
+        dto.setRating(partner.getRating());
+        dto.setPrice(partner.getPrice());
+        dto.setExperience(partner.getExperience());
+        dto.setImage(partner.getImage());
+        dto.setCategoryId(partner.getCategoryId());
+        dto.setSubCategoryId(partner.getSubCategoryId());
+        dto.setAvailable(partner.getAvailable());
+        dto.setTotalReviews(partner.getTotalReviews());
+        dto.setVerificationStatus(partner.getVerificationStatus());
+        return dto;
     }
 
     public Long getId() {
@@ -94,5 +97,28 @@ public class PartnerResponseDTO {
     public void setSubCategoryId(Long subCategoryId) {
         this.subCategoryId = subCategoryId;
     }
-}
 
+    public Boolean getAvailable() {
+        return available;
+    }
+
+    public void setAvailable(Boolean available) {
+        this.available = available;
+    }
+
+    public Long getTotalReviews() {
+        return totalReviews;
+    }
+
+    public void setTotalReviews(Long totalReviews) {
+        this.totalReviews = totalReviews;
+    }
+
+    public String getVerificationStatus() {
+        return verificationStatus;
+    }
+
+    public void setVerificationStatus(String verificationStatus) {
+        this.verificationStatus = verificationStatus;
+    }
+}

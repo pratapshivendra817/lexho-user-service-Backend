@@ -1,6 +1,6 @@
-package com.lexho.partner.repository;
+package com.lexho.provider.repository;
 
-import com.lexho.partner.entity.Partner;
+import com.lexho.provider.entity.Partner;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;

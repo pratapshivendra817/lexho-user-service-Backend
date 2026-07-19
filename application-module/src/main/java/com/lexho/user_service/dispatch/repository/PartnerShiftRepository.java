@@ -13,7 +13,9 @@ public interface PartnerShiftRepository extends JpaRepository<PartnerShiftEntity
     List<PartnerShiftEntity> findByPartnerIdAndDeletedFalseOrderByUpdatedAtDesc(Long partnerId);
 
     List<PartnerShiftEntity> findByCurrentPincodeInAndOnlineTrueAndDeletedFalse(Collection<String> pincodes);
+    List<PartnerShiftEntity> findByPartnerIdInAndDeletedFalse(Collection<Long> partnerIds);
     List<PartnerShiftEntity> findByOnlineTrueAndDeletedFalseAndUpdatedAtBefore(LocalDateTime cutoff);
+    List<PartnerShiftEntity> findByOnlineTrueAndDeletedFalseAndShiftEndBefore(LocalDateTime cutoff);
     boolean existsByOnlineTrueAndDeletedFalse();
 
     default Optional<PartnerShiftEntity> findByPartnerId(Long partnerId) {

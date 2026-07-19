@@ -1,8 +1,10 @@
 package com.lexho.user_service.customer.controller;
 
+import com.lexho.user_service.cartconfig.dto.CartConfigResponse;
 import com.lexho.user_service.customer.dto.CustomerAddToCartRequest;
 import com.lexho.user_service.customer.dto.CustomerCartResponse;
 import com.lexho.user_service.customer.dto.CustomerCartItemResponse;
+import com.lexho.user_service.customer.dto.CookFamilySizeResponse;
 import com.lexho.user_service.customer.dto.CustomerPopularServiceResponse;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogPageResponse;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogResponse;
@@ -35,17 +37,21 @@ public class CustomerServiceController {
     private final CustomerServiceCatalogService customerServiceCatalogService;
 
     @GetMapping("/services")
-    public List<CustomerServiceCardResponse> getServicesByCategory(
+    public ApiResponse<List<CustomerServiceCardResponse>> getServicesByCategory(
             @RequestParam Long categoryId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return customerCatalogService.getServicesByCategory(categoryId, page, size);
+        return ApiResponse.success("Services fetched",
+                customerCatalogService.getServicesByCategory(categoryId, page, size));
     }
 
     @GetMapping("/services/popular")
     @Operation(summary = "Get popular services by category")
-    public ApiResponse<List<CustomerPopularServiceResponse>> getPopularServicesByCategory(@RequestParam Long categoryId) {
-        return ApiResponse.success("Popular services fetched", customerPopularServiceService.getPopularServices(categoryId));
+    public ApiResponse<List<CustomerPopularServiceResponse>> getPopularServicesByCategory(@RequestParam Long categoryId,
+                                                                                           @RequestParam(defaultValue = "0") int page,
+                                                                                           @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("Popular services fetched",
+                customerPopularServiceService.getPopularServices(categoryId, page, size));
     }
 
     @GetMapping("/services/popular/{category}")
@@ -87,6 +93,16 @@ public class CustomerServiceController {
     @GetMapping({"/cart", "/cart/"})
     public ApiResponse<CustomerCartResponse> getCart(@RequestAttribute("userId") Long userId) {
         return ApiResponse.success("Cart fetched", customerCartService.getCart(userId));
+    }
+
+    @GetMapping("/cart/config")
+    public ApiResponse<CartConfigResponse> cartConfig() {
+        return ApiResponse.success("Cart config fetched", customerCartService.config());
+    }
+
+    @GetMapping("/cook-family-sizes")
+    public ApiResponse<List<CookFamilySizeResponse>> cookFamilySizes() {
+        return ApiResponse.success("Cook family sizes fetched", customerCartService.cookFamilySizes());
     }
 
     @PutMapping("/cart/item")

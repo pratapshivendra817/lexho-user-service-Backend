@@ -7,7 +7,7 @@ import com.lexho.user_service.dto.AdminLoginResponse;
 import com.lexho.user_service.dto.AdminTokenResponse;
 import com.lexho.user_service.dto.AdminVerifyOtpRequest;
 import com.lexho.user_service.service.AdminAuthService;
-import com.lexho.user_service.TestWebSliceApp;
+import com.lexho.testconfig.WebSliceBootTestConfig;
 import com.lexho.user_service.config.JwtFilter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
-        classes = TestWebSliceApp.class,
+        classes = WebSliceBootTestConfig.class,
         properties = "spring.cloud.compatibility-verifier.enabled=false"
 )
 @AutoConfigureMockMvc(addFilters = false)

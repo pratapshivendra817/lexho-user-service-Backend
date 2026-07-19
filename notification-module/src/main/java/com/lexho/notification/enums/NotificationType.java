@@ -2,9 +2,17 @@ package com.lexho.notification.enums;
 
 public enum NotificationType {
     BOOKING,
+    BOOKING_CONFIRMED,
+    PROFESSIONAL_ASSIGNED,
+    PROFESSIONAL_ON_THE_WAY,
+    SERVICE_STARTED,
+    SERVICE_COMPLETED,
     PAYMENT,
+    PAYMENT_SUCCESSFUL,
     PROMOTION,
+    PROMOTIONAL_OFFER,
     SYSTEM,
     REVIEW,
-    REMINDER
+    REMINDER,
+    SUBSCRIPTION_REMINDER
 }

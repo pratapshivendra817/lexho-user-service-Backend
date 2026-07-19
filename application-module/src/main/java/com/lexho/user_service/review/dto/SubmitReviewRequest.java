@@ -21,7 +21,10 @@ public class SubmitReviewRequest {
     @Max(value = 5, message = "rating must be between 1 and 5")
     private Integer rating;
 
-    @Size(max = 1000, message = "reviewComment must be at most 1000 characters")
+    @Size(max = 500, message = "reviewText must be at most 500 characters")
+    private String reviewText;
+
+    @Size(max = 500, message = "reviewText must be at most 500 characters")
     private String reviewComment;
 
     private List<String> reviewImages;

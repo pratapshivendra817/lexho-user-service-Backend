@@ -4,6 +4,7 @@ import com.lexho.user_service.admin.entity.DetailType;
 
 public class AdminServiceDetailResponse {
     private Long id;
+    private Long serviceId;
     private DetailType type;
     private String itemName;
 
@@ -13,6 +14,14 @@ public class AdminServiceDetailResponse {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getServiceId() {
+        return serviceId;
+    }
+
+    public void setServiceId(Long serviceId) {
+        this.serviceId = serviceId;
     }
 
     public DetailType getType() {

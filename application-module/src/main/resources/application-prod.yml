@@ -15,6 +15,53 @@ spring:
 
 server:
   forward-headers-strategy: framework
+  error:
+    include-message: never
+    include-binding-errors: never
+
+security:
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+    issuer: ${JWT_ISSUER:lexho-user-service}
+    audience: ${JWT_AUDIENCE:lexho-clients}
+
+lexho:
+  auth:
+    otp:
+      log-to-console: false
+
+admin:
+  auth:
+    infrastructure:
+      allow-in-memory-otp-fallback: false
+      allow-in-memory-rate-limit-fallback: false
+      allow-console-otp-delivery-fallback: false
+  seed:
+    enabled: ${ADMIN_SEED_ENABLED:false}
+    email: ${ADMIN_SEED_EMAIL:}
+    password: ${ADMIN_SEED_PASSWORD:}
+
+app:
+  security:
+    cors:
+      allowed-origins: ${APP_ALLOWED_CORS_ORIGINS}
+    exposure:
+      expose-swagger: false
+      allow-internal-open: false
+      allow-public-customer-read: false
+      allow-public-partner-onboarding: false
+      allow-public-admin-profile-content: false
+  push:
+    fcm:
+      enabled: ${APP_PUSH_FCM_ENABLED:false}
+      service-account-path: ${APP_PUSH_FCM_SERVICE_ACCOUNT_PATH:}
+  payment:
+    razorpay:
+      key-id: ${RAZORPAY_KEY_ID:}
+      key-secret: ${RAZORPAY_KEY_SECRET:}
+      webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+      currency: ${RAZORPAY_CURRENCY:INR}
 
 logging:
   level:

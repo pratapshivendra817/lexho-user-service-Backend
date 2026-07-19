@@ -4,7 +4,9 @@ public enum PaymentStatus {
 
     PENDING,
     SUCCESS,
-    FAILED;
+    FAILED,
+    EXPIRED,
+    REFUNDED;
 
     // 🔥 Helper methods (production level clarity)
     public boolean isSuccess() {
@@ -12,6 +14,6 @@ public enum PaymentStatus {
     }
 
     public boolean isFailed() {
-        return this == FAILED;
+        return this == FAILED || this == EXPIRED;
     }
 }

@@ -28,6 +28,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 
@@ -35,6 +36,11 @@ import java.util.Locale;
 public class UserManagementService {
 
     private static final Logger LOG = LoggerFactory.getLogger(UserManagementService.class);
+    private static final String DEFAULT_SORT_BY = "createdAt";
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final Collection<String> SORTABLE_FIELDS = List.of(
+            "fullName", "email", "phoneNumber", "city", "role", "status", "totalBookings", "createdAt", "updatedAt"
+    );
 
     private final UserRepository userRepository;
     private final UserManagementMapper mapper;
@@ -64,7 +70,7 @@ public class UserManagementService {
                                                        String city) {
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
-                Math.min(Math.max(size, 1), 100),
+                Math.min(Math.max(size, 1), MAX_PAGE_SIZE),
                 Sort.by("asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC, normalizeSortBy(sortBy))
         );
 
@@ -81,40 +87,33 @@ public class UserManagementService {
             predicates.add(cb.isFalse(root.get("deleted")));
 
             if (normalizedSearch != null) {
-                String like = "%" + normalizedSearch.toLowerCase(Locale.ROOT) + "%";
+                String like = likePattern(normalizedSearch);
                 predicates.add(cb.or(
                         cb.like(cb.lower(root.get("fullName")), like),
                         cb.like(cb.lower(root.get("phoneNumber")), like),
                         cb.like(cb.lower(root.get("email")), like)
                 ));
             }
-            if (normalizedName != null) {
-                predicates.add(cb.like(cb.lower(root.get("fullName")), "%" + normalizedName.toLowerCase(Locale.ROOT) + "%"));
-            }
-            if (normalizedPhone != null) {
-                predicates.add(cb.like(cb.lower(root.get("phoneNumber")), "%" + normalizedPhone.toLowerCase(Locale.ROOT) + "%"));
-            }
-            if (normalizedEmail != null) {
-                predicates.add(cb.like(cb.lower(root.get("email")), "%" + normalizedEmail.toLowerCase(Locale.ROOT) + "%"));
-            }
+            addLikePredicate(predicates, normalizedName, value -> cb.like(cb.lower(root.get("fullName")), value));
+            addLikePredicate(predicates, normalizedPhone, value -> cb.like(cb.lower(root.get("phoneNumber")), value));
+            addLikePredicate(predicates, normalizedEmail, value -> cb.like(cb.lower(root.get("email")), value));
             if (roleFilter != null) {
                 predicates.add(cb.equal(root.get("role"), roleFilter));
             }
             if (statusFilter != null) {
                 predicates.add(cb.equal(root.get("status"), statusFilter));
             }
-            if (normalizedCity != null) {
-                predicates.add(cb.like(cb.lower(root.get("city")), "%" + normalizedCity.toLowerCase(Locale.ROOT) + "%"));
-            }
+            addLikePredicate(predicates, normalizedCity, value -> cb.like(cb.lower(root.get("city")), value));
 
             return cb.and(predicates.toArray(new Predicate[0]));
         }, pageable);
 
-        List<AdminUserResponse> responseData = users.getContent().stream()
-                .map(this::toUserListResponse)
-                .toList();
-
-        return new PageResponse<>(responseData, users.getTotalElements(), users.getNumber(), users.getSize());
+        return new PageResponse<>(
+                users.getContent().stream().map(this::toUserListResponse).toList(),
+                users.getTotalElements(),
+                users.getNumber(),
+                users.getSize()
+        );
     }
 
     @Transactional
@@ -123,15 +122,18 @@ public class UserManagementService {
         validateCreateRequest(request);
 
         User user = new User();
-        user.setFullName(request.getFullName().trim());
+        applyCommonUserFields(
+                user,
+                request.getFullName(),
+                request.getPhoneNumber(),
+                request.getRole(),
+                request.getProfileImage(),
+                request.getCity(),
+                request.getState(),
+                request.getAddress()
+        );
         user.setEmail(normalize(request.getEmail()));
-        user.setPhoneNumber(request.getPhoneNumber().trim());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
-        user.setRole(parseRoleForCreateOrUpdate(request.getRole()));
-        user.setProfileImage(normalize(request.getProfileImage()));
-        user.setCity(normalize(request.getCity()));
-        user.setState(normalize(request.getState()));
-        user.setAddress(normalize(request.getAddress()));
         user.setStatus(UserStatus.ACTIVE);
         user.setTotalBookings(0L);
         user.setDeleted(false);
@@ -146,13 +148,16 @@ public class UserManagementService {
 
         validateUpdateRequest(id, request);
 
-        user.setFullName(request.getFullName().trim());
-        user.setPhoneNumber(request.getPhoneNumber().trim());
-        user.setAddress(normalize(request.getAddress()));
-        user.setRole(parseRoleForCreateOrUpdate(request.getRole()));
-        user.setCity(normalize(request.getCity()));
-        user.setState(normalize(request.getState()));
-        user.setProfileImage(normalize(request.getProfileImage()));
+        applyCommonUserFields(
+                user,
+                request.getFullName(),
+                request.getPhoneNumber(),
+                request.getRole(),
+                request.getProfileImage(),
+                request.getCity(),
+                request.getState(),
+                request.getAddress()
+        );
 
         return mapper.toResponse(userRepository.save(user));
     }
@@ -160,22 +165,18 @@ public class UserManagementService {
     @Transactional
     public AdminUserResponse blockUser(Long id) {
         LOG.info("Admin blocking user id={}", id);
-        User user = getActiveUser(id);
-        user.setStatus(UserStatus.BLOCKED);
-        return mapper.toResponse(userRepository.save(user));
+        return updateUserStatus(id, UserStatus.BLOCKED);
     }
 
     @Transactional
     public AdminUserResponse unblockUser(Long id) {
         LOG.info("Admin unblocking user id={}", id);
-        User user = getActiveUser(id);
-        user.setStatus(UserStatus.ACTIVE);
-        return mapper.toResponse(userRepository.save(user));
+        return updateUserStatus(id, UserStatus.ACTIVE);
     }
 
     public AdminUserDetailResponse getUserDetails(Long id) {
         User user = getActiveUser(id);
-        BookingSummaryDto summary = fetchBookingSummary(id, user.getTotalBookings() == null ? 0L : user.getTotalBookings());
+        BookingSummaryDto summary = fetchBookingSummary(id, totalBookingsOf(user));
         return mapper.toDetailResponse(user, summary);
     }
 
@@ -189,8 +190,8 @@ public class UserManagementService {
     }
 
     private AdminUserResponse toUserListResponse(User user) {
-        BookingSummaryDto summary = fetchBookingSummary(user.getId(), user.getTotalBookings() == null ? 0L : user.getTotalBookings());
-        if (summary.getTotalBookings() != user.getTotalBookings()) {
+        BookingSummaryDto summary = fetchBookingSummary(user.getId(), totalBookingsOf(user));
+        if (summary.getTotalBookings() != totalBookingsOf(user)) {
             user.setTotalBookings(summary.getTotalBookings());
             userRepository.save(user);
         }
@@ -200,19 +201,12 @@ public class UserManagementService {
     }
 
     private BookingSummaryDto fetchBookingSummary(Long userId, long fallbackTotal) {
-        BookingSummaryDto summary = new BookingSummaryDto();
         try {
             BookingSummaryClientResponse response = bookingServiceClient.getUserBookingSummary(userId);
-            summary.setTotalBookings(response.getTotalBookings());
-            summary.setCompletedBookings(response.getCompletedBookings());
-            summary.setCancelledBookings(response.getCancelledBookings());
-            return summary;
+            return toBookingSummary(response.getTotalBookings(), response.getCompletedBookings(), response.getCancelledBookings());
         } catch (Exception ex) {
             LOG.warn("Failed to fetch booking summary from booking-service for userId={}. Using fallback.", userId);
-            summary.setTotalBookings(fallbackTotal);
-            summary.setCompletedBookings(0L);
-            summary.setCancelledBookings(0L);
-            return summary;
+            return toBookingSummary(fallbackTotal, 0L, 0L);
         }
     }
 
@@ -221,51 +215,31 @@ public class UserManagementService {
     }
 
     private void validateCreateRequest(AdminUserCreateRequest request) {
-        if (userRepository.existsByPhoneNumberAndDeletedFalse(request.getPhoneNumber().trim())) {
-            throw new UserAlreadyExistsException("User already exists with phone number: " + request.getPhoneNumber());
-        }
+        String phoneNumber = request.getPhoneNumber().trim();
+        assertUnique(
+                userRepository.existsByPhoneNumberAndDeletedFalse(phoneNumber),
+                "User already exists with phone number: " + request.getPhoneNumber()
+        );
         String email = normalize(request.getEmail());
-        if (email != null && userRepository.existsByEmailIgnoreCaseAndDeletedFalse(email)) {
-            throw new UserAlreadyExistsException("User already exists with email: " + email);
-        }
+        assertUnique(email != null && userRepository.existsByEmailIgnoreCaseAndDeletedFalse(email),
+                "User already exists with email: " + email);
         parseRoleForCreateOrUpdate(request.getRole());
     }
 
     private void validateUpdateRequest(Long id, AdminUserUpdateRequest request) {
-        if (userRepository.existsByPhoneNumberAndDeletedFalseAndIdNot(request.getPhoneNumber().trim(), id)) {
-            throw new UserAlreadyExistsException("Another user already exists with phone number: " + request.getPhoneNumber());
-        }
+        assertUnique(
+                userRepository.existsByPhoneNumberAndDeletedFalseAndIdNot(request.getPhoneNumber().trim(), id),
+                "Another user already exists with phone number: " + request.getPhoneNumber()
+        );
         parseRoleForCreateOrUpdate(request.getRole());
     }
 
     private Role parseRoleForCreateOrUpdate(String roleText) {
-        String normalized = normalize(roleText);
-        if (normalized == null) {
-            throw new InvalidRoleException(String.valueOf(roleText));
-        }
-        String upper = normalized.toUpperCase(Locale.ROOT);
-        if ("CUSTOMER".equals(upper)) {
-            return Role.CUSTOMER;
-        }
-        if ("PARTNER".equals(upper) || "PROVIDER".equals(upper)) {
-            return Role.PARTNER;
-        }
-        throw new InvalidRoleException(roleText);
+        return parseRole(roleText, false);
     }
 
     private Role parseRoleFilter(String roleText) {
-        String normalized = normalize(roleText);
-        if (normalized == null) {
-            return null;
-        }
-        String upper = normalized.toUpperCase(Locale.ROOT);
-        return switch (upper) {
-            case "CUSTOMER" -> Role.CUSTOMER;
-            case "PARTNER", "PROVIDER" -> Role.PARTNER;
-            case "ADMIN" -> Role.ADMIN;
-            case "SUPER_ADMIN" -> Role.ADMIN;
-            default -> throw new InvalidRoleException(roleText);
-        };
+        return parseRole(roleText, true);
     }
 
     private UserStatus parseStatus(String statusText) {
@@ -290,12 +264,83 @@ public class UserManagementService {
 
     private String normalizeSortBy(String sortBy) {
         String normalized = normalize(sortBy);
-        if (normalized == null) {
-            return "createdAt";
+        return normalized != null && SORTABLE_FIELDS.contains(normalized) ? normalized : DEFAULT_SORT_BY;
+    }
+
+    private void applyCommonUserFields(User user,
+                                       String fullName,
+                                       String phoneNumber,
+                                       String role,
+                                       String profileImage,
+                                       String city,
+                                       String state,
+                                       String address) {
+        user.setFullName(fullName.trim());
+        user.setPhoneNumber(phoneNumber.trim());
+        user.setRole(parseRoleForCreateOrUpdate(role));
+        user.setProfileImage(normalize(profileImage));
+        user.setCity(normalize(city));
+        user.setState(normalize(state));
+        user.setAddress(normalize(address));
+    }
+
+    private AdminUserResponse updateUserStatus(Long id, UserStatus status) {
+        User user = getActiveUser(id);
+        user.setStatus(status);
+        return mapper.toResponse(userRepository.save(user));
+    }
+
+    private BookingSummaryDto toBookingSummary(long totalBookings, long completedBookings, long cancelledBookings) {
+        BookingSummaryDto summary = new BookingSummaryDto();
+        summary.setTotalBookings(totalBookings);
+        summary.setCompletedBookings(completedBookings);
+        summary.setCancelledBookings(cancelledBookings);
+        return summary;
+    }
+
+    private long totalBookingsOf(User user) {
+        return user.getTotalBookings() == null ? 0L : user.getTotalBookings();
+    }
+
+    private void assertUnique(boolean exists, String message) {
+        if (exists) {
+            throw new UserAlreadyExistsException(message);
         }
-        return switch (normalized) {
-            case "fullName", "email", "phoneNumber", "city", "role", "status", "totalBookings", "createdAt", "updatedAt" -> normalized;
-            default -> "createdAt";
+    }
+
+    private void addLikePredicate(List<Predicate> predicates,
+                                  String normalizedValue,
+                                  java.util.function.Function<String, Predicate> predicateFactory) {
+        if (normalizedValue != null) {
+            predicates.add(predicateFactory.apply(likePattern(normalizedValue)));
+        }
+    }
+
+    private String likePattern(String value) {
+        return "%" + value.toLowerCase(Locale.ROOT) + "%";
+    }
+
+    private Role parseRole(String roleText, boolean allowAdmin) {
+        String normalized = normalize(roleText);
+        if (normalized == null) {
+            return nullIfAllowed(roleText, allowAdmin);
+        }
+        return switch (normalized.toUpperCase(Locale.ROOT)) {
+            case "CUSTOMER" -> Role.CUSTOMER;
+            case "PARTNER", "PROVIDER" -> Role.PARTNER;
+            case "ADMIN", "SUPER_ADMIN" -> allowAdmin ? Role.ADMIN : invalidRole(roleText);
+            default -> invalidRole(roleText);
         };
+    }
+
+    private Role nullIfAllowed(String roleText, boolean allowNull) {
+        if (allowNull) {
+            return null;
+        }
+        throw new InvalidRoleException(String.valueOf(roleText));
+    }
+
+    private Role invalidRole(String roleText) {
+        throw new InvalidRoleException(roleText);
     }
 }

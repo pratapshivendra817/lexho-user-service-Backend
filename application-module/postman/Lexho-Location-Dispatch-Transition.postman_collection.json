@@ -336,7 +336,7 @@
     { "key": "customerMobile", "value": "9876543210" },
     { "key": "partnerMobile", "value": "9876543211" },
     { "key": "adminEmail", "value": "admin@lexho.com" },
-    { "key": "adminPassword", "value": "Admin@123" },
+    { "key": "adminPassword", "value": "<admin-password>" },
     { "key": "customerOtp", "value": "" },
     { "key": "partnerOtp", "value": "" },
     { "key": "adminOtp", "value": "" }

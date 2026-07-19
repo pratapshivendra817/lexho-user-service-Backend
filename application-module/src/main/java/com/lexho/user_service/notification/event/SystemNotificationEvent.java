@@ -16,6 +16,8 @@ public class SystemNotificationEvent {
     private final String message;
     private final Long referenceId;
     private final String referenceType;
+    private final String redirectType;
+    private final String redirectValue;
 
     public SystemNotificationEvent(Long userId,
                                    NotificationUserType userType,
@@ -25,6 +27,20 @@ public class SystemNotificationEvent {
                                    String message,
                                    Long referenceId,
                                    String referenceType) {
+        this(userId, userType, notificationType, priority, title, message, referenceId, referenceType,
+                referenceType, referenceId == null ? null : String.valueOf(referenceId));
+    }
+
+    public SystemNotificationEvent(Long userId,
+                                   NotificationUserType userType,
+                                   NotificationType notificationType,
+                                   NotificationPriority priority,
+                                   String title,
+                                   String message,
+                                   Long referenceId,
+                                   String referenceType,
+                                   String redirectType,
+                                   String redirectValue) {
         this.userId = userId;
         this.userType = userType;
         this.notificationType = notificationType;
@@ -33,5 +49,7 @@ public class SystemNotificationEvent {
         this.message = message;
         this.referenceId = referenceId;
         this.referenceType = referenceType;
+        this.redirectType = redirectType;
+        this.redirectValue = redirectValue;
     }
 }

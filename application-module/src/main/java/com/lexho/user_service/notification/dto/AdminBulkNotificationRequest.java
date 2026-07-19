@@ -84,14 +84,12 @@ public class AdminBulkNotificationRequest {
 
     @JsonSetter("notificationType")
     public void setNotificationTypeFromString(String notificationType) {
-        if (notificationType == null || notificationType.isBlank()) {
-            return;
-        }
-        String normalized = notificationType.trim().toUpperCase(Locale.ROOT);
-        if ("OFFER".equals(normalized)) {
-            normalized = "PROMOTION";
-        }
-        this.notificationType = NotificationType.valueOf(normalized);
+        this.notificationType = parseNotificationType(notificationType);
+    }
+
+    @JsonSetter("type")
+    public void setLegacyType(String type) {
+        this.notificationType = parseNotificationType(type);
     }
 
     private NotificationUserType parseUserType(String userType) {
@@ -107,5 +105,22 @@ public class AdminBulkNotificationRequest {
             normalized = "ADMIN";
         }
         return NotificationUserType.valueOf(normalized);
+    }
+
+    private NotificationType parseNotificationType(String value) {
+        if (value == null || value.isBlank()) {
+            return this.notificationType;
+        }
+        String normalized = value.trim()
+                .replace('-', '_')
+                .replace(' ', '_')
+                .toUpperCase(Locale.ROOT);
+        normalized = switch (normalized) {
+            case "OFFER", "OFFERS", "PROMOTIONAL_OFFERS" -> "PROMOTIONAL_OFFER";
+            case "PAYMENT_SUCCESS" -> "PAYMENT_SUCCESSFUL";
+            case "SUBSCRIPTION_PURCHASED" -> "REMINDER";
+            default -> normalized;
+        };
+        return NotificationType.valueOf(normalized);
     }
 }

@@ -1,5 +1,6 @@
 package com.lexho.user_service.customer.controller;
 
+import com.lexho.user_service.cartconfig.dto.CartConfigResponse;
 import com.lexho.user_service.customer.dto.CustomerCartResponse;
 import com.lexho.user_service.customer.dto.CustomerUpdateCartItemRequest;
 import com.lexho.user_service.customer.service.CustomerCartService;
@@ -23,6 +24,11 @@ public class CustomerCartFallbackController {
     @GetMapping
     public ApiResponse<CustomerCartResponse> getCart(@RequestAttribute("userId") Long userId) {
         return ApiResponse.success("Cart fetched", customerCartService.getCart(userId));
+    }
+
+    @GetMapping("/config")
+    public ApiResponse<CartConfigResponse> cartConfig() {
+        return ApiResponse.success("Cart config fetched", customerCartService.config());
     }
 
     @PutMapping("/item")

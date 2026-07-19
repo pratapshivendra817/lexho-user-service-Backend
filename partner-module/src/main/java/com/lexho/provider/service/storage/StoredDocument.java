@@ -1,4 +1,4 @@
-package com.lexho.partner.service.storage;
+package com.lexho.provider.service.storage;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

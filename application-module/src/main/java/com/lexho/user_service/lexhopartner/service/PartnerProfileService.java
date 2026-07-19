@@ -6,10 +6,12 @@ import com.lexho.user_service.lexhopartner.dto.PartnerProfileDto;
 import com.lexho.user_service.lexhopartner.dto.PartnerAvailabilityResponse;
 import com.lexho.user_service.lexhopartner.dto.UpdateAvailabilityRequest;
 import com.lexho.user_service.lexhopartner.dto.UpdatePartnerProfileRequest;
+import com.lexho.user_service.lexhopartner.dto.PartnerBankDetailsDto;
+import com.lexho.user_service.lexhopartner.dto.UpdatePartnerBankDetailsRequest;
 import com.lexho.user_service.lexhopartner.entity.DocumentType;
 import com.lexho.catalog.entity.ServiceCategory;
-import com.lexho.partner.enums.KycStatus;
-import com.lexho.partner.enums.OnboardingStatus;
+import com.lexho.provider.enums.KycStatus;
+import com.lexho.provider.enums.OnboardingStatus;
 import com.lexho.user_service.lexhopartner.entity.PartnerAvailability;
 import com.lexho.user_service.lexhopartner.entity.PartnerDocument;
 import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
@@ -59,14 +61,37 @@ public class PartnerProfileService {
     @Transactional
     public PartnerProfileDto updateProfile(Long partnerId, UpdatePartnerProfileRequest request) {
         PartnerProfile profile = getOrCreateProfile(partnerId);
-        profile.setName(request.name());
-        profile.setEmail(request.email());
-        profile.setCity(request.city());
-        profile.setAddress(request.address());
+        String fullName = normalizeRequired(request.fullName(), "Full name is required");
+        String phone = normalizeRequired(request.phone(), "Phone is required");
+        profile.setName(fullName);
+        profile.setFullName(fullName);
+        profile.setMobileNumber(phone);
+        profile.setPhoneNumber(phone);
+        profile.setEmail(normalize(request.email()));
+        profile.setCity(normalize(request.city()));
+        profile.setPincode(normalize(request.pincode()));
+        profile.setAddress(normalize(request.address()));
         profile.setServiceCategory(request.serviceCategory());
         partnerProfileRepository.save(profile);
         auditLogUtil.audit(partnerId, "PARTNER_PROFILE_UPDATED", "profile core fields updated");
         return toDto(profile);
+    }
+
+    @Transactional
+    public PartnerBankDetailsDto bankDetails(Long partnerId) {
+        return toBankDetails(getOrCreateProfile(partnerId));
+    }
+
+    @Transactional
+    public PartnerBankDetailsDto updateBankDetails(Long partnerId, UpdatePartnerBankDetailsRequest request) {
+        PartnerProfile profile = getOrCreateProfile(partnerId);
+        profile.setAccountNumber(request.accountNumber().trim());
+        profile.setIfscCode(request.ifscCode().trim().toUpperCase());
+        profile.setBankVerificationStatus("PENDING");
+        profile.setBankRejectionReason(null);
+        partnerProfileRepository.save(profile);
+        auditLogUtil.audit(partnerId, "PARTNER_BANK_DETAILS_UPDATED", "bank details updated");
+        return toBankDetails(profile);
     }
 
     @Transactional
@@ -91,6 +116,9 @@ public class PartnerProfileService {
         if (certificate != null && !certificate.isEmpty()) {
             uploadDocument(partner, DocumentType.CERTIFICATE, certificate);
         }
+        partner.setKycWorkflowStatus("UNDER_REVIEW");
+        partner.setKycRejectionReason(null);
+        partnerProfileRepository.save(partner);
         auditLogUtil.audit(partnerId, "PARTNER_KYC_UPLOADED", "documents uploaded");
         return partnerDocumentRepository.findByPartnerId(partnerId).stream()
                 .map(doc -> PartnerDocumentDto.builder()
@@ -148,6 +176,8 @@ public class PartnerProfileService {
             profile.setDeleted(false);
             profile.setExperienceYears(0);
             profile.setKycStatus(KycStatus.PENDING);
+            profile.setKycWorkflowStatus("PENDING");
+            profile.setBankVerificationStatus("PENDING");
             profile.setOnboardingStatus(OnboardingStatus.PENDING);
             profile.setServiceCategoryId(resolveDefaultServiceCategoryId());
             return partnerProfileRepository.save(profile);
@@ -169,17 +199,59 @@ public class PartnerProfileService {
     private PartnerProfileDto toDto(PartnerProfile profile) {
         return PartnerProfileDto.builder()
                 .id(profile.getId())
+                .fullName(firstNonBlank(profile.getFullName(), profile.getName()))
+                .phone(firstNonBlank(profile.getPhoneNumber(), profile.getMobileNumber()))
                 .name(profile.getName())
                 .mobileNumber(profile.getMobileNumber())
                 .email(profile.getEmail())
                 .city(profile.getCity())
+                .pincode(profile.getPincode())
                 .address(profile.getAddress())
                 .serviceCategory(profile.getServiceCategory())
                 .rating(profile.getRating())
                 .profileImage(profile.getProfileImage())
                 .isOnline(profile.isOnline())
                 .isVerified(profile.isVerified())
+                .kycStatus(profile.getKycWorkflowStatus())
+                .kycRejectionReason(profile.getKycRejectionReason())
+                .penaltyStatus(profile.getRiskStatus())
                 .createdAt(profile.getCreatedAt())
                 .build();
+    }
+
+    private PartnerBankDetailsDto toBankDetails(PartnerProfile profile) {
+        String account = profile.getAccountNumber();
+        boolean configured = account != null && !account.isBlank()
+                && profile.getIfscCode() != null && !profile.getIfscCode().isBlank();
+        String masked = configured ? "*".repeat(Math.max(account.length() - 4, 0))
+                + account.substring(Math.max(account.length() - 4, 0)) : null;
+        return new PartnerBankDetailsDto(masked, configured ? profile.getIfscCode() : null, configured,
+                profile.getBankVerificationStatus(), profile.getBankRejectionReason());
+    }
+
+    private String normalize(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeRequired(String value, String message) {
+        String normalized = normalize(value);
+        if (normalized == null) {
+            throw new BadRequestException(message);
+        }
+        return normalized;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            String normalized = normalize(value);
+            if (normalized != null) {
+                return normalized;
+            }
+        }
+        return null;
     }
 }

@@ -1,7 +1,7 @@
 package com.lexho.user_service.admin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.lexho.user_service.TestWebSliceApp;
+import com.lexho.testconfig.WebSliceBootTestConfig;
 import com.lexho.user_service.admin.controller.AdminServiceableAreaController;
 import com.lexho.user_service.admin.serviceablearea.dto.ServiceableAreaPageResponse;
 import com.lexho.user_service.admin.serviceablearea.dto.ServiceableAreaResponse;
@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
-        classes = TestWebSliceApp.class,
+        classes = WebSliceBootTestConfig.class,
         properties = "spring.cloud.compatibility-verifier.enabled=false"
 )
 @AutoConfigureMockMvc(addFilters = false)

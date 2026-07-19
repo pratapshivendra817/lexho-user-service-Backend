@@ -6,7 +6,9 @@ import com.lexho.user_service.section.dto.SectionCreateRequest;
 import com.lexho.user_service.section.dto.SectionItemReorderRequest;
 import com.lexho.user_service.section.dto.SectionItemRequest;
 import com.lexho.user_service.section.dto.SectionItemResponse;
+import com.lexho.user_service.section.dto.SectionItemStatusRequest;
 import com.lexho.user_service.section.dto.SectionPageResponse;
+import com.lexho.user_service.section.dto.SectionReorderRequest;
 import com.lexho.user_service.section.dto.SectionResponse;
 import com.lexho.user_service.section.dto.SectionStatusRequest;
 import com.lexho.user_service.section.dto.SectionUpdateRequest;
@@ -42,7 +44,9 @@ public class SectionManagementServiceImpl implements SectionManagementService {
         Section section = new Section();
         section.setType(request.getType());
         section.setTitle(request.getTitle());
+        section.setSubtitle(request.getSubtitle());
         section.setIcon(request.getIcon());
+        section.setPriority(resolvePriority(request.getPriority(), request.getType()));
         section.setActive(Boolean.TRUE.equals(request.getIsActive()));
         Section saved = sectionRepository.save(section);
         return toSectionResponse(saved, List.of());
@@ -61,14 +65,74 @@ public class SectionManagementServiceImpl implements SectionManagementService {
 
     @Override
     @Transactional
+    public SectionItemResponse updateSectionItem(Long sectionId, Long itemId, SectionItemRequest request) {
+        findSection(sectionId);
+        SectionItem item = findSectionItem(sectionId, itemId);
+        item.setTitle(request.getTitle());
+        item.setSubtitle(request.getSubtitle());
+        item.setValue(request.getValue());
+        item.setIcon(request.getIcon());
+        item.setPriority(request.getPriority());
+        item.setActive(Boolean.TRUE.equals(request.getIsActive()));
+        return toItemResponse(sectionItemRepository.save(item));
+    }
+
+    @Override
+    @Transactional
+    public void deleteSectionItem(Long sectionId, Long itemId) {
+        findSection(sectionId);
+        SectionItem item = findSectionItem(sectionId, itemId);
+        sectionItemRepository.delete(item);
+    }
+
+    @Override
+    @Transactional
+    public SectionItemResponse updateSectionItemStatus(Long sectionId, Long itemId, SectionItemStatusRequest request) {
+        findSection(sectionId);
+        SectionItem item = findSectionItem(sectionId, itemId);
+        item.setActive(Boolean.TRUE.equals(request.getIsActive()));
+        return toItemResponse(sectionItemRepository.save(item));
+    }
+
+    @Override
+    @Transactional
     public SectionResponse updateSection(Long sectionId, SectionUpdateRequest request) {
         Section section = findSection(sectionId);
         section.setType(request.getType());
         section.setTitle(request.getTitle());
+        section.setSubtitle(request.getSubtitle());
         section.setIcon(request.getIcon());
+        section.setPriority(resolvePriority(request.getPriority(), request.getType()));
         section.setActive(Boolean.TRUE.equals(request.getIsActive()));
         Section saved = sectionRepository.save(section);
         return toSectionResponse(saved, getItems(sectionId));
+    }
+
+    @Override
+    @Transactional
+    public List<SectionResponse> reorderSections(List<SectionReorderRequest> request) {
+        if (request == null || request.isEmpty()) {
+            throw new BadRequestException("At least one reorder row is required");
+        }
+        Set<Long> ids = new HashSet<>();
+        for (SectionReorderRequest row : request) {
+            if (!ids.add(row.getId())) {
+                throw new BadRequestException("Duplicate section id in reorder request: " + row.getId());
+            }
+        }
+        Map<Long, Section> sectionMap = sectionRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Section::getId, Function.identity()));
+        for (SectionReorderRequest row : request) {
+            Section section = sectionMap.get(row.getId());
+            if (section == null) {
+                throw new ResourceNotFoundException("Section not found: " + row.getId());
+            }
+            section.setPriority(row.getPriority());
+        }
+        sectionRepository.saveAll(sectionMap.values());
+        return sectionRepository.findAll(sectionSort()).stream()
+                .map(section -> toSectionResponse(section, getItems(section.getId())))
+                .toList();
     }
 
     @Override
@@ -111,7 +175,7 @@ public class SectionManagementServiceImpl implements SectionManagementService {
     public SectionPageResponse getSections(int page, int size) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
-        PageRequest pageable = PageRequest.of(safePage, safeSize, Sort.by("createdAt").descending());
+        PageRequest pageable = PageRequest.of(safePage, safeSize, sectionSort());
         Page<Section> sectionPage = sectionRepository.findAll(pageable);
         List<SectionResponse> content = sectionPage.getContent().stream()
                 .map(section -> toSectionResponse(section, getItems(section.getId())))
@@ -122,8 +186,7 @@ public class SectionManagementServiceImpl implements SectionManagementService {
     @Override
     @Transactional(readOnly = true)
     public List<SectionResponse> getActiveCustomerSections() {
-        return sectionRepository.findByActiveTrue().stream()
-                .sorted((a, b) -> Integer.compare(sectionTypeOrder(a.getType()), sectionTypeOrder(b.getType())))
+        return sectionRepository.findByActiveTrueOrderByPriorityAscCreatedAtDescIdAsc().stream()
                 .map(section -> toSectionResponse(section, getActiveItems(section.getId())))
                 .toList();
     }
@@ -145,9 +208,19 @@ public class SectionManagementServiceImpl implements SectionManagementService {
                 .toList();
     }
 
+    private SectionItem findSectionItem(Long sectionId, Long itemId) {
+        SectionItem item = sectionItemRepository.findById(itemId)
+                .orElseThrow(() -> new ResourceNotFoundException("Section item not found: " + itemId));
+        if (!item.getSection().getId().equals(sectionId)) {
+            throw new BadRequestException("Item does not belong to section: " + itemId);
+        }
+        return item;
+    }
+
     private SectionItem mapItemRequest(Section section, SectionItemRequest request) {
         SectionItem item = new SectionItem();
         item.setTitle(request.getTitle());
+        item.setSubtitle(request.getSubtitle());
         item.setValue(request.getValue());
         item.setIcon(request.getIcon());
         item.setPriority(request.getPriority());
@@ -160,6 +233,7 @@ public class SectionManagementServiceImpl implements SectionManagementService {
         SectionItemResponse response = new SectionItemResponse();
         response.setId(item.getId());
         response.setTitle(item.getTitle());
+        response.setSubtitle(item.getSubtitle());
         response.setValue(item.getValue());
         response.setIcon(item.getIcon());
         response.setPriority(item.getPriority());
@@ -173,11 +247,21 @@ public class SectionManagementServiceImpl implements SectionManagementService {
         response.setId(section.getId());
         response.setType(section.getType());
         response.setTitle(section.getTitle());
+        response.setSubtitle(section.getSubtitle());
         response.setIcon(section.getIcon());
+        response.setPriority(section.getPriority());
         response.setCreatedAt(section.getCreatedAt());
         response.setActive(section.isActive());
         response.setItems(items);
         return response;
+    }
+
+    private int resolvePriority(Integer priority, SectionType type) {
+        return priority != null ? priority : sectionTypeOrder(type);
+    }
+
+    private Sort sectionSort() {
+        return Sort.by(Sort.Order.asc("priority"), Sort.Order.desc("createdAt"), Sort.Order.asc("id"));
     }
 
     private int sectionTypeOrder(SectionType type) {

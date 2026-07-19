@@ -41,7 +41,8 @@ public class AdminLoginRateLimiterService {
             }
 
             if (current != null && current > maxRequests) {
-                throw new TooManyRequestsException("Too many login attempts. Please try again later");
+                throw new TooManyRequestsException("Too many login attempts. Please try again later",
+                        retryAfterSeconds(key, window));
             }
         } catch (RuntimeException ex) {
             if (ex instanceof TooManyRequestsException) {
@@ -66,8 +67,21 @@ public class AdminLoginRateLimiterService {
         });
 
         if (updated != null && updated.count > maxRequests) {
-            throw new TooManyRequestsException("Too many login attempts. Please try again later");
+            long retryAfterSeconds = Math.max(1, (updated.expiresAtEpochMs - now + 999) / 1000);
+            throw new TooManyRequestsException("Too many login attempts. Please try again later", retryAfterSeconds);
         }
+    }
+
+    private long retryAfterSeconds(String key, Duration defaultWindow) {
+        try {
+            Long ttl = stringRedisTemplate.getExpire(key, java.util.concurrent.TimeUnit.SECONDS);
+            if (ttl != null && ttl > 0) {
+                return ttl;
+            }
+        } catch (RuntimeException ignored) {
+            // Fall back to configured window if Redis cannot report TTL.
+        }
+        return Math.max(1, defaultWindow.toSeconds());
     }
 
     private static class LocalRateLimitRecord {

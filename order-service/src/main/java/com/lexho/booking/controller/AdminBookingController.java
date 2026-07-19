@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/admin/bookings")
+@RequestMapping({"/api/admin/bookings", "/api/v1/admin/bookings"})
 @PreAuthorize("hasRole('ADMIN')")
 @Tag(name = "Booking Management", description = "Admin APIs for booking management")
 public class AdminBookingController {

@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,14 +31,19 @@ public class CustomerPopularServiceService {
     private final MediaUrlResolver mediaUrlResolver;
 
     @Transactional(readOnly = true)
-    @Cacheable(value = "customerPopularServices", key = "'popular_services_' + #categoryId")
-    public List<CustomerPopularServiceResponse> getPopularServices(Long categoryId) {
+    @Cacheable(value = "customerPopularServices", key = "'popular_services_' + #categoryId + '_' + #page + '_' + #size")
+    public List<CustomerPopularServiceResponse> getPopularServices(Long categoryId, int page, int size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        Pageable pageable = PageRequest.of(safePage, safeSize);
+
         if (categoryId == null) {
             throw new BadRequestException("categoryId is required");
         }
 
+        log.info("Fetching popular services: categoryId={}, page={}, size={}", categoryId, safePage, safeSize);
         List<CustomerPopularServiceResponse> response = customerPopularServiceRepository
-                .findActivePopularServicesByCategory(categoryId)
+                .findActivePopularServicesByCategory(categoryId, pageable)
                 .stream()
                 .map(row -> CustomerPopularServiceResponse.builder()
                         .id(row.getId())
@@ -48,8 +55,14 @@ public class CustomerPopularServiceService {
                         .build())
                 .toList();
 
-        log.info("Fetched {} popular services for categoryId={}", response.size(), categoryId);
+        log.info("Fetched {} popular services for categoryId={}, page={}, size={}",
+                response.size(), categoryId, safePage, safeSize);
         return response;
+    }
+
+    @Transactional(readOnly = true)
+    public List<CustomerPopularServiceResponse> getPopularServices(Long categoryId) {
+        return getPopularServices(categoryId, 0, 20);
     }
 
     @Transactional(readOnly = true)

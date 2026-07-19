@@ -4,6 +4,7 @@ import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.entity.DetailType;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.admin.repository.ServiceDetailRepository;
+import com.lexho.user_service.addon.service.AddonManagementService;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogPageResponse;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogResponse;
 import com.lexho.user_service.exception.ResourceNotFoundException;
@@ -18,6 +19,7 @@ public class CustomerServiceCatalogService {
 
     private final AdminServiceEntityRepository adminServiceEntityRepository;
     private final ServiceDetailRepository serviceDetailRepository;
+    private final AddonManagementService addonManagementService;
 
     public CustomerServiceCatalogPageResponse listServices(int page, int size, String search) {
         int safePage = Math.max(0, page);
@@ -47,11 +49,14 @@ public class CustomerServiceCatalogService {
     private CustomerServiceCatalogResponse map(AdminServiceEntity service) {
         CustomerServiceCatalogResponse response = new CustomerServiceCatalogResponse();
         response.setId(service.getId());
+        response.setServiceId(service.getId());
         response.setName(service.getName());
+        response.setServiceName(service.getName());
         response.setDescription(service.getDescription());
         response.setImageUrl(toAbsoluteImageUrl(service.getImageUrl()));
-        response.setPrice(service.getBasePrice());
+        response.setPrice(effectivePrice(service));
         response.setServiceType(service.getServiceType());
+        response.setAddons(addonManagementService.availableAddonsForService(service));
         response.setIncluded(serviceDetailRepository.findByService_IdAndType(service.getId(), DetailType.INCLUDED)
                 .stream()
                 .map(detail -> detail.getItemName())
@@ -69,6 +74,13 @@ public class CustomerServiceCatalogService {
                 .map(detail -> detail.getItemName())
                 .toList());
         return response;
+    }
+
+    private java.math.BigDecimal effectivePrice(AdminServiceEntity service) {
+        if (service.getDiscountedPrice() != null && service.getDiscountedPrice().signum() > 0) {
+            return service.getDiscountedPrice();
+        }
+        return service.getBasePrice();
     }
 
     private String toAbsoluteImageUrl(String raw) {

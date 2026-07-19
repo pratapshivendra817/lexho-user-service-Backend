@@ -8,6 +8,12 @@ public class MapboxProperties {
     private String accessToken;
     private String geocodingUrl = "https://api.mapbox.com/geocoding/v5/mapbox.places";
     private String directionsUrl = "https://api.mapbox.com/directions/v5/mapbox";
+    private String navigationProfile = "driving-traffic";
+    private long routeCacheTtlSeconds = 30L;
+    private double routeDeviationThresholdMeters = 250.0d;
+    private double routeRecalculationMovementMeters = 75.0d;
+    private int etaWorseningThresholdMinutes = 3;
+    private long liveEtaTrackingTtlSeconds = 300L;
 
     public boolean isEnabled() {
         return enabled;
@@ -39,5 +45,53 @@ public class MapboxProperties {
 
     public void setDirectionsUrl(String directionsUrl) {
         this.directionsUrl = directionsUrl;
+    }
+
+    public String getNavigationProfile() {
+        return navigationProfile;
+    }
+
+    public void setNavigationProfile(String navigationProfile) {
+        this.navigationProfile = navigationProfile;
+    }
+
+    public long getRouteCacheTtlSeconds() {
+        return routeCacheTtlSeconds;
+    }
+
+    public void setRouteCacheTtlSeconds(long routeCacheTtlSeconds) {
+        this.routeCacheTtlSeconds = routeCacheTtlSeconds;
+    }
+
+    public double getRouteDeviationThresholdMeters() {
+        return routeDeviationThresholdMeters;
+    }
+
+    public void setRouteDeviationThresholdMeters(double routeDeviationThresholdMeters) {
+        this.routeDeviationThresholdMeters = routeDeviationThresholdMeters;
+    }
+
+    public double getRouteRecalculationMovementMeters() {
+        return routeRecalculationMovementMeters;
+    }
+
+    public void setRouteRecalculationMovementMeters(double routeRecalculationMovementMeters) {
+        this.routeRecalculationMovementMeters = routeRecalculationMovementMeters;
+    }
+
+    public int getEtaWorseningThresholdMinutes() {
+        return etaWorseningThresholdMinutes;
+    }
+
+    public void setEtaWorseningThresholdMinutes(int etaWorseningThresholdMinutes) {
+        this.etaWorseningThresholdMinutes = etaWorseningThresholdMinutes;
+    }
+
+    public long getLiveEtaTrackingTtlSeconds() {
+        return liveEtaTrackingTtlSeconds;
+    }
+
+    public void setLiveEtaTrackingTtlSeconds(long liveEtaTrackingTtlSeconds) {
+        this.liveEtaTrackingTtlSeconds = liveEtaTrackingTtlSeconds;
     }
 }

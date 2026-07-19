@@ -6,7 +6,7 @@ import lombok.Setter;
 
 @Entity
 @Table(name = "cart_items", uniqueConstraints = {
-        @UniqueConstraint(name = "uk_cart_items_user_service", columnNames = {"user_id", "service_id"})
+        @UniqueConstraint(name = "uk_cart_items_user_service_addons", columnNames = {"user_id", "service_id", "addon_signature"})
 }, indexes = {
         @Index(name = "idx_cart_items_user_id", columnList = "user_id"),
         @Index(name = "idx_cart_items_service_id", columnList = "service_id")
@@ -23,6 +23,18 @@ public class CustomerCartItemEntity {
 
     @Column(name = "service_id", nullable = false)
     private Long serviceId;
+
+    @Column(name = "addon_signature", nullable = false, length = 500)
+    private String addonSignature = "NONE";
+
+    @Column(name = "family_size_id")
+    private Long familySizeId;
+
+    @Column(name = "family_size", length = 30)
+    private String familySize;
+
+    @Column(name = "family_size_label", length = 100)
+    private String familySizeLabel;
 
     @Column(nullable = false)
     private Integer quantity;

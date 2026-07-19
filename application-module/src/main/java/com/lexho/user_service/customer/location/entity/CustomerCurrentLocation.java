@@ -36,6 +36,28 @@ public class CustomerCurrentLocation {
     private String pincode;
     @Column(name = "service_available", nullable = false)
     private boolean serviceAvailable;
+    @Column(name = "manual_confirmed", nullable = false)
+    private boolean manualConfirmed;
+    @Column(name = "accuracy_meters", precision = 8, scale = 2)
+    private BigDecimal accuracyMeters;
+    @Column(name = "confidence_score", precision = 5, scale = 4)
+    private BigDecimal confidenceScore;
+    @Column(name = "location_age_seconds")
+    private Integer locationAgeSeconds;
+    @Column(name = "detection_source", length = 32)
+    private String detectionSource;
+    @Column(name = "mock_location", nullable = false)
+    private boolean mockLocation;
+    @Column(name = "suspicious_jump", nullable = false)
+    private boolean suspiciousJump;
+    @Column(name = "spoof_attempt_count", nullable = false)
+    private Integer spoofAttemptCount;
+    @Column(name = "risk_score", precision = 5, scale = 2, nullable = false)
+    private BigDecimal riskScore;
+    @Column(name = "last_idempotency_key", length = 128)
+    private String lastIdempotencyKey;
+    @Column(name = "last_location_fingerprint", length = 128)
+    private String lastLocationFingerprint;
 
     public UUID getId() { return id; }
     public Long getCustomerId() { return customerId; }
@@ -54,4 +76,26 @@ public class CustomerCurrentLocation {
     public void setPincode(String pincode) { this.pincode = pincode; }
     public boolean isServiceAvailable() { return serviceAvailable; }
     public void setServiceAvailable(boolean serviceAvailable) { this.serviceAvailable = serviceAvailable; }
+    public boolean isManualConfirmed() { return manualConfirmed; }
+    public void setManualConfirmed(boolean manualConfirmed) { this.manualConfirmed = manualConfirmed; }
+    public BigDecimal getAccuracyMeters() { return accuracyMeters; }
+    public void setAccuracyMeters(BigDecimal accuracyMeters) { this.accuracyMeters = accuracyMeters; }
+    public BigDecimal getConfidenceScore() { return confidenceScore; }
+    public void setConfidenceScore(BigDecimal confidenceScore) { this.confidenceScore = confidenceScore; }
+    public Integer getLocationAgeSeconds() { return locationAgeSeconds; }
+    public void setLocationAgeSeconds(Integer locationAgeSeconds) { this.locationAgeSeconds = locationAgeSeconds; }
+    public String getDetectionSource() { return detectionSource; }
+    public void setDetectionSource(String detectionSource) { this.detectionSource = detectionSource; }
+    public boolean isMockLocation() { return mockLocation; }
+    public void setMockLocation(boolean mockLocation) { this.mockLocation = mockLocation; }
+    public boolean isSuspiciousJump() { return suspiciousJump; }
+    public void setSuspiciousJump(boolean suspiciousJump) { this.suspiciousJump = suspiciousJump; }
+    public Integer getSpoofAttemptCount() { return spoofAttemptCount; }
+    public void setSpoofAttemptCount(Integer spoofAttemptCount) { this.spoofAttemptCount = spoofAttemptCount; }
+    public BigDecimal getRiskScore() { return riskScore; }
+    public void setRiskScore(BigDecimal riskScore) { this.riskScore = riskScore; }
+    public String getLastIdempotencyKey() { return lastIdempotencyKey; }
+    public void setLastIdempotencyKey(String lastIdempotencyKey) { this.lastIdempotencyKey = lastIdempotencyKey; }
+    public String getLastLocationFingerprint() { return lastLocationFingerprint; }
+    public void setLastLocationFingerprint(String lastLocationFingerprint) { this.lastLocationFingerprint = lastLocationFingerprint; }
 }

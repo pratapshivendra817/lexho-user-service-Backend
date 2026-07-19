@@ -9,6 +9,10 @@
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
     <Match>
+        <Class name="com.lexho.user.service.UserManagementService"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+    <Match>
         <Class name="com.lexho.user.dto.AdminUserDetailResponse"/>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
@@ -41,32 +45,32 @@
         <Bug pattern="EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="com.lexho.partner.dto.ProviderDetailsResponse"/>
+        <Class name="com.lexho.payment.service.PaymentService"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+    <Match>
+        <Class name="com.lexho.payment.service.RazorpayGateway"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+    <Match>
+        <Class name="com.lexho.provider.dto.ProviderDetailsResponse"/>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="com.lexho.partner.dto.ProviderOnboardingRequest"/>
+        <Class name="com.lexho.provider.dto.ProviderOnboardingRequest"/>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="com.lexho.partner.dto.ProviderPageResponse"/>
+        <Class name="com.lexho.provider.dto.ProviderPageResponse"/>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="com.lexho.partner.entity.Partner"/>
+        <Class name="com.lexho.provider.entity.Provider"/>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="com.lexho.partner.entity.ProviderDocument"/>
+        <Class name="com.lexho.provider.entity.ProviderDocument"/>
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
-    </Match>
-    <Match>
-        <Class name="com.lexho.partner.service.ProviderOnboardingService"/>
-        <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE"/>
-    </Match>
-    <Match>
-        <Class name="com.lexho.partner.service.storage.HybridDocumentStorageService"/>
-        <Bug pattern="NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE"/>
     </Match>
     <Match>
         <Class name="~com\\.lexho\\.user_service\\..*"/>

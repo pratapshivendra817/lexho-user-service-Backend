@@ -60,7 +60,7 @@ public class PartnerRequestController {
     @PatchMapping("/requests/{requestId}/accept")
     public ApiResponse<PartnerRequestActionResponse> accept(@RequestAttribute("userId") Long partnerId,
                                                             @PathVariable Long requestId) {
-        apiRateLimiterService.check("partner_accept", String.valueOf(partnerId), 30, Duration.ofMinutes(5),
+        apiRateLimiterService.check("partner_accept", String.valueOf(partnerId), 20, Duration.ofMinutes(1),
                 "Too many accept attempts. Please slow down");
         return ApiResponse.success("Request accepted", partnerRequestService.accept(partnerId, requestId));
     }
@@ -69,7 +69,7 @@ public class PartnerRequestController {
     public ApiResponse<PartnerRequestActionResponse> reject(@RequestAttribute("userId") Long partnerId,
                                                             @PathVariable Long requestId,
                                                             @Valid @RequestBody(required = false) PartnerRejectRequest request) {
-        apiRateLimiterService.check("partner_reject", String.valueOf(partnerId), 30, Duration.ofMinutes(5),
+        apiRateLimiterService.check("partner_reject", String.valueOf(partnerId), 20, Duration.ofMinutes(1),
                 "Too many reject attempts. Please slow down");
         return ApiResponse.success("Request rejected", partnerRequestService.reject(partnerId, requestId, request));
     }

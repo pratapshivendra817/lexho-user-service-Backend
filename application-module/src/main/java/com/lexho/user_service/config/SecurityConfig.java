@@ -9,13 +9,17 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.StringTokenizer;
 
 @Configuration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
@@ -34,16 +38,38 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable())
+                // These endpoints are safe to exempt from CSRF because the service is fully stateless:
+                // JWTs are accepted only from the Authorization header, no HttpSession is used, and
+                // CORS credentials remain disabled so browsers do not attach ambient cookies.
+                .csrf(csrf -> csrf.ignoringRequestMatchers(csrfExemptPaths()))
                 .cors(Customizer.withDefaults())
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.deny())
+                        .contentTypeOptions(Customizer.withDefaults())
+                        .referrerPolicy(referrer -> referrer.policy(
+                                ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                        .contentSecurityPolicy(csp -> csp.policyDirectives(
+                                "default-src 'self'; frame-ancestors 'none'; object-src 'none'"))
+                        .httpStrictTransportSecurity(hsts -> hsts
+                                .includeSubDomains(true)
+                                .preload(true)
+                                .maxAgeInSeconds(31536000))
+                )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
                     auth.requestMatchers("/", "/error").permitAll();
-                    auth.requestMatchers("/api/health", "/api/health/ping", "/ping").permitAll();
-                    auth.requestMatchers("/ws-notifications/**", "/ws/admin/notifications/**", "/ws/customer/bookings/**").permitAll();
+                    auth.requestMatchers(
+                            "/health", "/health/readiness", "/health/liveness",
+                            "/api/health", "/api/health/ping", "/api/health/readiness", "/api/health/liveness",
+                            "/ping",
+                            "/actuator/health", "/actuator/info", "/actuator/prometheus", "/actuator/metrics"
+                    ).permitAll();
+                    auth.requestMatchers("/ws-notifications/**", "/ws/admin/notifications/**", "/ws/customer/bookings/**", "/ws-chat/**").permitAll();
                     auth.requestMatchers("/uploads/**", "/images/**").permitAll();
                     auth.requestMatchers("/otp/**", "/auth/**", "/api/otp/**", "/api/auth/**").permitAll();
+                    auth.requestMatchers(HttpMethod.POST, "/api/payments/webhook", "/api/payments/webhook/razorpay",
+                            "/api/v1/webhooks/razorpay").permitAll();
                     auth.requestMatchers("/api/admin/login", "/api/admin/verify-otp").permitAll();
 
                     if (isExposeSwagger()) {
@@ -71,6 +97,7 @@ public class SecurityConfig {
                     if (isAllowPublicCustomerRead()) {
                         auth.requestMatchers("/api/banners", "/api/banners/**", "/api/categories", "/api/categories/**").permitAll();
                         auth.requestMatchers(HttpMethod.GET, "/api/customer/banners").permitAll();
+                        auth.requestMatchers(HttpMethod.GET, "/api/customer/home/banners", "/api/customer/home/banners/**").permitAll();
                         auth.requestMatchers(HttpMethod.GET, "/api/customer/home/sections", "/api/customer/home/sections/**").permitAll();
                         auth.requestMatchers(HttpMethod.GET, "/api/customer/services", "/api/customer/services/**").permitAll();
                         auth.requestMatchers(HttpMethod.GET, "/api/customer/profile-content").permitAll();
@@ -79,6 +106,7 @@ public class SecurityConfig {
                     auth.requestMatchers("/api/customer/**").hasRole("CUSTOMER");
                     auth.requestMatchers("/api/partner/**").hasRole("PARTNER");
                     auth.requestMatchers("/api/admin/**").hasRole("ADMIN");
+                    auth.requestMatchers("/api/v1/chat/**").hasAnyRole("CUSTOMER", "PARTNER");
                     auth.requestMatchers("/api/v1/customer/**").hasRole("CUSTOMER");
                     auth.requestMatchers("/api/v1/partner/**").hasRole("PARTNER");
                     auth.requestMatchers("/api/v1/admin/**").hasRole("ADMIN");
@@ -96,7 +124,7 @@ public class SecurityConfig {
                 "app.security.cors.allowed-origins",
                 "http://localhost:3000,http://localhost:5173,http://localhost:4200"
         );
-        configuration.setAllowedOrigins(List.of(rawOrigins.split("\\s*,\\s*")));
+        configuration.setAllowedOrigins(parseAllowedOrigins(rawOrigins));
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(false);
@@ -104,6 +132,31 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    static String[] csrfExemptPaths() {
+        return new String[]{
+                "/api/**",
+                "/internal/**",
+                "/otp/**",
+                "/auth/**"
+        };
+    }
+
+    static List<String> parseAllowedOrigins(String rawOrigins) {
+        if (rawOrigins == null || rawOrigins.isBlank()) {
+            return List.of();
+        }
+
+        LinkedHashSet<String> origins = new LinkedHashSet<>();
+        StringTokenizer tokenizer = new StringTokenizer(rawOrigins, ",");
+        while (tokenizer.hasMoreTokens()) {
+            String origin = tokenizer.nextToken().trim();
+            if (!origin.isEmpty()) {
+                origins.add(origin);
+            }
+        }
+        return new ArrayList<>(origins);
     }
 
     private boolean isExposeSwagger() {

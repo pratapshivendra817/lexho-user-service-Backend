@@ -32,4 +32,25 @@ build/
 ### VS Code ###
 .vscode/
 # Local secrets
+.env
+.env.*
+!.env.example
 application-module/.secrets/
+
+# Repository hygiene
+target/
+build/
+out/
+logs/
+*.log
+*.out.log
+*.err.log
+.idea/
+*.iml
+uploads/
+resp_*.json
+b_*.json
+t_*.json
+*_body.txt
+temp_*
+debug_*

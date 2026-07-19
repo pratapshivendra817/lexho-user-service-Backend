@@ -7,8 +7,8 @@ import com.lexho.booking.repository.OrderRepository;
 import com.lexho.catalog.repository.CategoryRepository;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
-import com.lexho.partner.repository.PartnerRepository;
-import com.lexho.user_service.TestWebSliceApp;
+import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.testconfig.WebSliceBootTestConfig;
 import com.lexho.user_service.admin.repository.AdminCategoryRepository;
 import com.lexho.user_service.admin.repository.SupportFaqCategoryRepository;
 import com.lexho.user_service.admin.repository.SupportFaqRepository;
@@ -17,7 +17,10 @@ import com.lexho.user_service.admin.repository.SupportTicketReplyRepository;
 import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.banner.repository.BannerPromotionRepository;
 import com.lexho.user_service.config.JwtFilter;
+import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
+import com.lexho.user_service.cartconfig.service.CartConfigService;
 import com.lexho.user_service.customer.controller.CustomerServiceController;
+import com.lexho.user_service.customer.location.service.ServiceabilityService;
 import com.lexho.user_service.customer.service.CustomerCartService;
 import com.lexho.user_service.customer.service.CustomerCartSlotService;
 import com.lexho.user_service.customer.service.CustomerCatalogService;
@@ -25,6 +28,8 @@ import com.lexho.user_service.customer.service.CustomerPopularServiceService;
 import com.lexho.user_service.customer.service.CustomerServiceCatalogService;
 import com.lexho.user_service.customer.service.SlotDateTimePolicy;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
+import com.lexho.user_service.dispatch.repository.BookingEventRepository;
+import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dispatch.service.DispatchOrchestrationService;
 import com.lexho.user_service.dto.OrderResponseDTO;
 import com.lexho.user_service.lexho.controller.LexhoExperienceController;
@@ -33,14 +38,17 @@ import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.lexho.repository.LexhoFavoriteRepository;
 import com.lexho.user_service.lexho.repository.LexhoReferralCodeRepository;
 import com.lexho.user_service.lexho.repository.LexhoReferralUseRepository;
-import com.lexho.user_service.lexho.repository.LexhoSubscriptionRepository;
 import com.lexho.user_service.lexho.service.LexhoAddressService;
+import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import com.lexho.user_service.service.ApiRateLimiterService;
 import com.lexho.user_service.service.CartService;
 import com.lexho.user_service.service.HomeService;
 import com.lexho.user_service.service.NotificationService;
 import com.lexho.user_service.service.OrderService;
+import com.lexho.user_service.subscription.repository.SubscriptionFrequencyRepository;
+import com.lexho.user_service.subscription.repository.SubscriptionMasterRepository;
+import com.lexho.user_service.subscription.repository.SubscriptionVisitRepository;
 import com.lexho.user_service.util.MediaUrlResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,7 +85,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
-        classes = TestWebSliceApp.class,
+        classes = WebSliceBootTestConfig.class,
         properties = "spring.cloud.compatibility-verifier.enabled=false"
 )
 @AutoConfigureMockMvc(addFilters = false)
@@ -114,6 +122,8 @@ class SlotBookingPaymentContractTest {
     @MockBean
     private NotificationService notificationService;
     @MockBean
+    private NotificationManagementService notificationManagementService;
+    @MockBean
     private LexhoAddressService addressService;
     @MockBean
     private BannerPromotionRepository bannerPromotionRepository;
@@ -132,8 +142,6 @@ class SlotBookingPaymentContractTest {
     @MockBean
     private LexhoReferralUseRepository referralUseRepository;
     @MockBean
-    private LexhoSubscriptionRepository subscriptionRepository;
-    @MockBean
     private SupportTicketRepository supportTicketRepository;
     @MockBean
     private SupportTicketReplyRepository supportTicketReplyRepository;
@@ -151,14 +159,28 @@ class SlotBookingPaymentContractTest {
     private PartnerProfileRepository partnerProfileRepository;
     @MockBean
     private GeoFenceValidationService geoFenceValidationService;
-
+    @MockBean
+    private ServiceabilityService serviceabilityService;
+    @MockBean
+    private CartConfigService cartConfigService;
+    @MockBean
+    private SubscriptionMasterRepository subscriptionMasterRepository;
+    @MockBean
+    private SubscriptionFrequencyRepository subscriptionFrequencyRepository;
+    @MockBean
+    private SubscriptionVisitRepository subscriptionVisitRepository;
+    @MockBean
+    private CurrentPartnerLocationRepository currentPartnerLocationRepository;
+    @MockBean
+    private BookingEventRepository bookingEventRepository;
     private final Map<Long, Order> orders = new HashMap<>();
     private final AtomicLong orderSeq = new AtomicLong(2000L);
 
     @BeforeEach
     void setup() {
         orders.clear();
-        SlotDateTimePolicy realPolicy = new SlotDateTimePolicy();
+        when(cartConfigService.currentEntity()).thenReturn(new CartConfigEntity());
+        SlotDateTimePolicy realPolicy = new SlotDateTimePolicy(cartConfigService);
         ZoneId ist = ZoneId.of("Asia/Kolkata");
         LocalDateTime fixedNow = LocalDateTime.of(2026, 5, 19, 12, 0);
 
@@ -250,6 +272,15 @@ class SlotBookingPaymentContractTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.success").value(true))
                     .andExpect(jsonPath("$.data.id").isNotEmpty())
+                    .andExpect(jsonPath("$.data.contractVersion").value(1))
+                    .andExpect(jsonPath("$.data.statusHistory").isArray())
+                    .andExpect(jsonPath("$.data.meta.trackingScreen").value("SCHEDULED_STATUS"))
+                    .andExpect(jsonPath("$.data.meta.showMap").value(false))
+                    .andExpect(jsonPath("$.data.meta.trackingRefreshSeconds").isNumber())
+                    .andExpect(jsonPath("$.data.trackingScreen").doesNotExist())
+                    .andExpect(jsonPath("$.data.showMap").doesNotExist())
+                    .andExpect(jsonPath("$.data.partnerLatitude").doesNotExist())
+                    .andExpect(jsonPath("$.data.partnerLongitude").doesNotExist())
                     .andReturn();
 
             String bookingId = objectMapper.readTree(bookingResult.getResponse().getContentAsString()).path("data").path("id").asText();
@@ -288,12 +319,18 @@ class SlotBookingPaymentContractTest {
         createBooking("2026-05-19", "09:00-09:15")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.id").isNotEmpty());
+                .andExpect(jsonPath("$.data.id").isNotEmpty())
+                .andExpect(jsonPath("$.data.contractVersion").value(1))
+                .andExpect(jsonPath("$.data.meta.trackingScreen").value("SCHEDULED_STATUS"))
+                .andExpect(jsonPath("$.data.trackingScreen").doesNotExist());
 
         createBooking("2026-05-19", "22:45-23:00")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.id").isNotEmpty());
+                .andExpect(jsonPath("$.data.id").isNotEmpty())
+                .andExpect(jsonPath("$.data.contractVersion").value(1))
+                .andExpect(jsonPath("$.data.meta.trackingScreen").value("SCHEDULED_STATUS"))
+                .andExpect(jsonPath("$.data.showMap").doesNotExist());
 
         when(slotDateTimePolicy.now()).thenReturn(LocalDateTime.of(2026, 5, 19, 12, 0));
         when(slotDateTimePolicy.isExpired(any(LocalDateTime.class)))

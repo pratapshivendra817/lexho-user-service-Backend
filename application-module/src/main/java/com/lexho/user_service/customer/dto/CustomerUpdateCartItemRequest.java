@@ -1,7 +1,7 @@
 package com.lexho.user_service.customer.dto;
 
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
@@ -10,7 +10,10 @@ public class CustomerUpdateCartItemRequest {
     @Positive
     private Long itemId;
 
-    @NotNull
     @Positive
     private Integer quantity;
+
+    private Long familySizeId;
+    private String familySize;
+    private String familySizeLabel;
 }

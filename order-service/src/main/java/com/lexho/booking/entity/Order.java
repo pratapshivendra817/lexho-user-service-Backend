@@ -4,6 +4,7 @@ import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -38,7 +39,7 @@ public class Order {
     private Long userId;
     private Double totalAmount;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = OrderStatusConverter.class)
     private OrderStatus status;
 
     @Enumerated(EnumType.STRING)
@@ -59,6 +60,21 @@ public class Order {
 
     @Column(name = "unavailable_reason", length = 50)
     private String unavailableReason;
+
+    @Column(name = "assigned_partner_id")
+    private Long assignedPartnerId;
+
+    @Column(name = "arrived_at")
+    private LocalDateTime arrivedAt;
+
+    @Column(name = "started_at")
+    private LocalDateTime startedAt;
+
+    @Column(name = "in_progress_at")
+    private LocalDateTime inProgressAt;
+
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

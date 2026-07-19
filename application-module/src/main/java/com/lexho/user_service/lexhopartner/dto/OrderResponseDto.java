@@ -19,6 +19,10 @@ public record OrderResponseDto(
         PaymentMode paymentMode,
         OrderStatus status,
         Long assignedPartnerId,
+        LocalDateTime acceptedAt,
+        LocalDateTime startedAt,
+        LocalDateTime completedAt,
+        LocalDateTime rejectedAt,
         LocalDateTime createdAt
 ) {
 }

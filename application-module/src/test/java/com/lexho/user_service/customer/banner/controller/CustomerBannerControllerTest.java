@@ -1,6 +1,6 @@
 package com.lexho.user_service.customer.banner.controller;
 
-import com.lexho.user_service.TestWebSliceApp;
+import com.lexho.testconfig.WebSliceBootTestConfig;
 import com.lexho.user_service.config.JwtFilter;
 import com.lexho.user_service.customer.banner.dto.CustomerBannerResponse;
 import com.lexho.user_service.customer.banner.entity.BannerRedirectType;
@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(
-        classes = TestWebSliceApp.class,
+        classes = WebSliceBootTestConfig.class,
         properties = "spring.cloud.compatibility-verifier.enabled=false"
 )
 @AutoConfigureMockMvc(addFilters = false)

@@ -28,7 +28,7 @@ jobs:
       JWT_SECRET: this-is-a-ci-only-jwt-secret-with-min-32-bytes
       ADMIN_SEED_ENABLED: "true"
       ADMIN_SEED_EMAIL: admin@lexho.com
-      ADMIN_SEED_PASSWORD: Admin@12345
+      ADMIN_SEED_PASSWORD: ci-only-admin-seed-password-min-32-bytes
       ADMIN_ALLOW_CONSOLE_OTP_DELIVERY_FALLBACK: "true"
       APP_SECURITY_EXPOSE_SWAGGER: "false"
       APP_SECURITY_ALLOW_INTERNAL_OPEN: "false"
@@ -69,7 +69,7 @@ jobs:
 
       - name: Run base critical smoke
         shell: pwsh
-        run: ./scripts/critical-smoke.ps1 -BaseUrl "http://127.0.0.1:8082" -AdminEmail "admin@lexho.com" -AdminPassword "Admin@12345" -SkipAdminOtpPrompt
+        run: ./scripts/critical-smoke.ps1 -BaseUrl "http://127.0.0.1:8082" -AdminEmail "$env:ADMIN_SEED_EMAIL" -AdminPassword "$env:ADMIN_SEED_PASSWORD" -SkipAdminOtpPrompt
 
       - name: Verify internal API is blocked without token
         run: |

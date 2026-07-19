@@ -9,6 +9,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 @Entity
 @Table(name = "auth_refresh_tokens")
@@ -87,5 +88,40 @@ public class RefreshToken {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    @Override
+    public boolean equals(Object object) {
+        if (this == object) {
+            return true;
+        }
+        if (!(object instanceof RefreshToken that)) {
+            return false;
+        }
+        return revoked == that.revoked
+                && Objects.equals(id, that.id)
+                && Objects.equals(userId, that.userId)
+                && Objects.equals(token, that.token)
+                && Objects.equals(role, that.role)
+                && Objects.equals(expiresAt, that.expiresAt)
+                && Objects.equals(createdAt, that.createdAt);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, userId, token, role, expiresAt, revoked, createdAt);
+    }
+
+    @Override
+    public String toString() {
+        return "RefreshToken{"
+                + "id=" + id
+                + ", userId=" + userId
+                + ", token='" + token + '\''
+                + ", role='" + role + '\''
+                + ", expiresAt=" + expiresAt
+                + ", revoked=" + revoked
+                + ", createdAt=" + createdAt
+                + '}';
     }
 }

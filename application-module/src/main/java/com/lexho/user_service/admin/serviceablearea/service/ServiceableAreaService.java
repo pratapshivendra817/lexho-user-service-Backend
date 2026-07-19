@@ -7,6 +7,7 @@ import com.lexho.user_service.admin.serviceablearea.dto.ServiceableAreaUpsertReq
 import com.lexho.user_service.admin.serviceablearea.entity.ServiceableAreaEntity;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -27,9 +28,12 @@ public class ServiceableAreaService {
     );
 
     private final ServiceableAreaRepository serviceableAreaRepository;
+    private final JdbcTemplate jdbcTemplate;
 
-    public ServiceableAreaService(ServiceableAreaRepository serviceableAreaRepository) {
+    public ServiceableAreaService(ServiceableAreaRepository serviceableAreaRepository,
+                                  JdbcTemplate jdbcTemplate) {
         this.serviceableAreaRepository = serviceableAreaRepository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional(readOnly = true)
@@ -56,28 +60,35 @@ public class ServiceableAreaService {
         ServiceableAreaEntity entity = new ServiceableAreaEntity();
         applyUpsert(entity, request);
         entity.setActive(true);
-        return toResponse(serviceableAreaRepository.save(entity));
+        ServiceableAreaEntity saved = serviceableAreaRepository.save(entity);
+        syncServiceabilityRule(saved);
+        return toResponse(saved);
     }
 
     @Transactional
     public ServiceableAreaResponse update(Long id, ServiceableAreaUpsertRequest request) {
         ServiceableAreaEntity entity = findActiveRow(id);
         applyUpsert(entity, request);
-        return toResponse(serviceableAreaRepository.save(entity));
+        ServiceableAreaEntity saved = serviceableAreaRepository.save(entity);
+        syncServiceabilityRule(saved);
+        return toResponse(saved);
     }
 
     @Transactional
     public void delete(Long id) {
         ServiceableAreaEntity entity = findActiveRow(id);
         entity.setDeleted(true);
-        serviceableAreaRepository.save(entity);
+        ServiceableAreaEntity saved = serviceableAreaRepository.save(entity);
+        syncServiceabilityRule(saved);
     }
 
     @Transactional
     public ServiceableAreaResponse updateStatus(Long id, ServiceableAreaStatusRequest request) {
         ServiceableAreaEntity entity = findActiveRow(id);
         entity.setActive(Boolean.TRUE.equals(request.getActive()));
-        return toResponse(serviceableAreaRepository.save(entity));
+        ServiceableAreaEntity saved = serviceableAreaRepository.save(entity);
+        syncServiceabilityRule(saved);
+        return toResponse(saved);
     }
 
     private ServiceableAreaEntity findActiveRow(Long id) {
@@ -98,6 +109,38 @@ public class ServiceableAreaService {
 
     private String clean(String value) {
         return value == null ? null : value.trim();
+    }
+
+    private void syncServiceabilityRule(ServiceableAreaEntity entity) {
+        jdbcTemplate.update("""
+                INSERT INTO serviceability_rules
+                    (id, name, city, state, pincode, city_id, zone_id, polygon_json, active, deleted, created_at, updated_at)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    city = VALUES(city),
+                    state = VALUES(state),
+                    pincode = VALUES(pincode),
+                    city_id = VALUES(city_id),
+                    zone_id = VALUES(zone_id),
+                    polygon_json = VALUES(polygon_json),
+                    active = VALUES(active),
+                    deleted = VALUES(deleted),
+                    updated_at = VALUES(updated_at)
+                """,
+                entity.getId(),
+                entity.getName(),
+                entity.getCity(),
+                entity.getState(),
+                entity.getPincode(),
+                entity.getCityId(),
+                entity.getZoneId(),
+                entity.getPolygonJson(),
+                entity.isActive(),
+                entity.isDeleted(),
+                entity.getCreatedAt(),
+                entity.getUpdatedAt());
     }
 
     private Pageable pageable(int page, int size, String sortBy, String sortDir) {

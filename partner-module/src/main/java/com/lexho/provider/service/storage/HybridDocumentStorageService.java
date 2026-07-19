@@ -1,12 +1,12 @@
-package com.lexho.partner.service.storage;
+package com.lexho.provider.service.storage;
 
-import com.lexho.partner.enums.ProviderDocumentType;
-import com.lexho.partner.exception.ProviderOperationException;
+import com.lexho.provider.enums.ProviderDocumentType;
+import com.lexho.provider.exception.ProviderOperationException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -24,12 +24,20 @@ public class HybridDocumentStorageService implements DocumentStorageService {
     private final String storageProvider;
     private final Path uploadRootPath;
     private final Path localBasePath;
+    private final ProviderUploadSecurityService uploadSecurityService;
 
+    @Autowired
     public HybridDocumentStorageService(@Value("${app.partner.documents.storage-partner:local}") String storageProvider,
-                                        @Value("${app.upload.base-dir:uploads}") String uploadBaseDir) {
+                                        @Value("${app.upload.base-dir:uploads}") String uploadBaseDir,
+                                        ProviderUploadSecurityService uploadSecurityService) {
         this.storageProvider = storageProvider.toLowerCase(Locale.ROOT);
         this.uploadRootPath = Paths.get(uploadBaseDir).toAbsolutePath().normalize();
         this.localBasePath = Paths.get(uploadBaseDir, "partner-documents").toAbsolutePath().normalize();
+        this.uploadSecurityService = uploadSecurityService;
+    }
+
+    HybridDocumentStorageService(String storageProvider, String uploadBaseDir) {
+        this(storageProvider, uploadBaseDir, new ProviderUploadSecurityService());
     }
 
     @Override
@@ -64,18 +72,17 @@ public class HybridDocumentStorageService implements DocumentStorageService {
 
     private StoredDocument storeLocally(Long providerId, ProviderDocumentType documentType, MultipartFile file) {
         try {
-            String originalName = StringUtils.hasText(file.getOriginalFilename()) ? file.getOriginalFilename() : "document";
-            String extension = "";
-            int dotIndex = originalName.lastIndexOf('.');
-            if (dotIndex > -1) {
-                extension = originalName.substring(dotIndex);
-            }
+            String extension = "." + uploadSecurityService.validate(file);
+            String originalName = uploadSecurityService.sanitizedOriginalName(file);
 
             Path providerDir = localBasePath.resolve("partner-" + providerId);
             Files.createDirectories(providerDir);
 
             String storedName = documentType.name().toLowerCase(Locale.ROOT) + "-" + UUID.randomUUID() + extension;
             Path destination = providerDir.resolve(storedName).normalize();
+            if (!destination.startsWith(providerDir)) {
+                throw new ProviderOperationException("Invalid document path");
+            }
 
             Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
 

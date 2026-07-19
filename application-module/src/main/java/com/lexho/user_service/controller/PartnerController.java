@@ -1,8 +1,9 @@
 package com.lexho.user_service.controller;
 
-import com.lexho.partner.entity.Partner;
-import com.lexho.partner.repository.PartnerRepository;
+import com.lexho.provider.entity.Partner;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.dto.ApiResponse;
+import com.lexho.user_service.dto.PartnerCreateRequestDTO;
 import com.lexho.user_service.dto.PartnerResponseDTO;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -28,12 +29,16 @@ public class PartnerController {
 
     @PostMapping
     @PreAuthorize("hasRole('PARTNER')")
-    public ApiResponse<Partner> create(@RequestBody Partner partner) {
+    public ApiResponse<PartnerResponseDTO> create(@RequestBody PartnerCreateRequestDTO request) {
+        if (request == null) {
+            return ApiResponse.failure("Partner request is required");
+        }
+        Partner partner = toEntity(request);
         List<Partner> existing = repo.findByNameAndSubCategoryId(partner.getName(), partner.getSubCategoryId());
         if (!existing.isEmpty()) {
             return ApiResponse.failure("Partner already exists");
         }
-        return ApiResponse.success("Partner created", repo.save(partner));
+        return ApiResponse.success("Partner created", toDto(repo.save(partner)));
     }
 
     @GetMapping
@@ -50,16 +55,7 @@ public class PartnerController {
         }
 
         List<PartnerResponseDTO> response = partners.stream()
-                .map(p -> new PartnerResponseDTO(
-                        p.getId(),
-                        p.getName(),
-                        p.getRating(),
-                        p.getPrice(),
-                        p.getExperience(),
-                        p.getImage(),
-                        p.getCategoryId(),
-                        p.getSubCategoryId()
-                ))
+                .map(this::toDto)
                 .toList();
 
         return ApiResponse.success("Partners fetched successfully", response);
@@ -72,17 +68,7 @@ public class PartnerController {
         if (p == null) {
             return ApiResponse.failure("Partner not found");
         }
-        PartnerResponseDTO dto = new PartnerResponseDTO(
-                p.getId(),
-                p.getName(),
-                p.getRating(),
-                p.getPrice(),
-                p.getExperience(),
-                p.getImage(),
-                p.getCategoryId(),
-                p.getSubCategoryId()
-        );
-        return ApiResponse.success("Partner fetched", dto);
+        return ApiResponse.success("Partner fetched", toDto(p));
     }
 
     @DeleteMapping("/{id}")
@@ -93,5 +79,24 @@ public class PartnerController {
         }
         repo.deleteById(id);
         return ApiResponse.success("Partner deleted", null);
+    }
+
+    private Partner toEntity(PartnerCreateRequestDTO request) {
+        Partner partner = new Partner();
+        partner.setName(request.getName());
+        partner.setCategoryId(request.getCategoryId());
+        partner.setSubCategoryId(request.getSubCategoryId());
+        partner.setRating(request.getRating());
+        partner.setTotalReviews(request.getTotalReviews());
+        partner.setPrice(request.getPrice());
+        partner.setAvailable(request.getAvailable());
+        partner.setExperience(request.getExperience());
+        partner.setImage(request.getImage());
+        partner.setVerificationStatus(request.getVerificationStatus());
+        return partner;
+    }
+
+    private PartnerResponseDTO toDto(Partner partner) {
+        return PartnerResponseDTO.from(partner);
     }
 }

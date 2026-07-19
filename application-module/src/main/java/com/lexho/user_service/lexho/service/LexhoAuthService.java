@@ -8,6 +8,8 @@ import com.lexho.user_service.lexho.entity.LexhoUserProfile;
 import com.lexho.user_service.lexho.repository.LexhoRefreshTokenRepository;
 import com.lexho.user_service.lexho.repository.LexhoUserProfileRepository;
 import com.lexho.user_service.util.JwtUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +22,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class LexhoAuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(LexhoAuthService.class);
 
     private final Map<String, OtpRecord> otpStore = new ConcurrentHashMap<>();
     private final Map<String, Long> throttleStore = new ConcurrentHashMap<>();
@@ -35,6 +39,9 @@ public class LexhoAuthService {
 
     @Value("${lexho.auth.refresh-token.expiry-days:30}")
     private long refreshTokenExpiryDays;
+
+    @Value("${lexho.auth.otp.log-to-console:true}")
+    private boolean logOtpToConsole;
 
     public LexhoAuthService(
             JwtUtil jwtUtil,
@@ -60,7 +67,9 @@ public class LexhoAuthService {
         String otp = String.valueOf(ThreadLocalRandom.current().nextInt(100000, 1000000));
         otpStore.put(otpScope, new OtpRecord(otp, now + (otpExpirySeconds * 1000)));
         throttleStore.put(otpScope, now + (resendAfterSeconds * 1000));
-        System.out.println("Lexho OTP for " + mobile + " is: " + otp);
+        if (logOtpToConsole) {
+            log.info("Lexho OTP for mobile={} role={} otp={}", mobile, role.name(), otp);
+        }
         return otp;
     }
 

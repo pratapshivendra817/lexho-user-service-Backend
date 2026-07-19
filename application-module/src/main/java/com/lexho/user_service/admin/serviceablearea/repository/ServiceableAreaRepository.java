@@ -12,4 +12,5 @@ public interface ServiceableAreaRepository extends JpaRepository<ServiceableArea
     Optional<ServiceableAreaEntity> findFirstByPincodeAndActiveTrueAndDeletedFalse(String pincode);
     List<ServiceableAreaEntity> findByPincodeAndActiveTrueAndDeletedFalse(String pincode);
     List<ServiceableAreaEntity> findByCityIgnoreCaseAndActiveTrueAndDeletedFalse(String city);
+    List<ServiceableAreaEntity> findByActiveTrueAndDeletedFalse();
 }

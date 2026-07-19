@@ -16,4 +16,14 @@ public class PartnerLocationUpdateRequest {
     public Double longitude;
 
     public String source;
+    public String trackingState;
+    public Long bookingId;
+    public Double customerLatitude;
+    public Double customerLongitude;
+    public Double accuracyMeters;
+    public Double speedKmh;
+    public Double headingDegrees;
+    public Boolean mockLocation;
+    public Boolean rootedDevice;
+    public Boolean gpsEnabled;
 }

@@ -1,7 +1,7 @@
-package com.lexho.partner.repository;
+package com.lexho.provider.repository;
 
-import com.lexho.partner.entity.Provider;
-import com.lexho.partner.enums.OnboardingStatus;
+import com.lexho.provider.entity.Provider;
+import com.lexho.provider.enums.OnboardingStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 

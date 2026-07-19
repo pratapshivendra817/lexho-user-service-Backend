@@ -1,6 +1,7 @@
 package com.lexho.user_service.customer.repository;
 
 import com.lexho.user_service.admin.entity.PopularServiceEntity;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -25,5 +26,6 @@ public interface CustomerPopularServiceRepository extends JpaRepository<PopularS
               AND s.deleted = false
             ORDER BY ps.priority ASC
             """)
-    List<CustomerPopularServiceView> findActivePopularServicesByCategory(@Param("categoryId") Long categoryId);
+    List<CustomerPopularServiceView> findActivePopularServicesByCategory(@Param("categoryId") Long categoryId,
+                                                                          Pageable pageable);
 }

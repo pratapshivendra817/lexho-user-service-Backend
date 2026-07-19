@@ -1,4 +1,4 @@
-package com.lexho.partner.entity;
+package com.lexho.provider.entity;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -18,6 +18,7 @@ public class Partner {
     private Long categoryId;
     private Long subCategoryId;
     private Double rating;
+    private Long totalReviews;
     private Double price;
     private Boolean available;
     private Integer experience;
@@ -42,6 +43,17 @@ public class Partner {
 
     public Double getRating() {
         return rating;
+    }
+
+    public Double getAverageRating() {
+        return rating;
+    }
+
+    public Long getTotalReviews() {
+        if (totalReviews == null) {
+            return Long.valueOf(0L);
+        }
+        return totalReviews;
     }
 
     public Double getPrice() {
@@ -82,6 +94,14 @@ public class Partner {
 
     public void setRating(Double rating) {
         this.rating = rating;
+    }
+
+    public void setAverageRating(Double averageRating) {
+        this.rating = averageRating;
+    }
+
+    public void setTotalReviews(Long totalReviews) {
+        this.totalReviews = totalReviews;
     }
 
     public void setPrice(Double price) {

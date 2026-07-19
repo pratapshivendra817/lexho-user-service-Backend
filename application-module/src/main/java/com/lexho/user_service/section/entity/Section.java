@@ -32,7 +32,13 @@ public class Section {
     private String title;
 
     @Column(length = 255)
+    private String subtitle;
+
+    @Column(length = 255)
     private String icon;
+
+    @Column(nullable = false)
+    private Integer priority;
 
     @Column(name = "is_active", nullable = false)
     private boolean active;

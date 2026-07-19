@@ -1,6 +1,8 @@
 package com.lexho.user_service.customer.service;
 
 import com.lexho.user_service.booking.exception.BookingValidationException;
+import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
+import com.lexho.user_service.cartconfig.service.CartConfigService;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -8,10 +10,17 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SlotDateTimePolicyTest {
 
-    private final SlotDateTimePolicy policy = new SlotDateTimePolicy();
+    private final CartConfigService cartConfigService = mock(CartConfigService.class);
+    private final SlotDateTimePolicy policy = new SlotDateTimePolicy(cartConfigService);
+
+    SlotDateTimePolicyTest() {
+        when(cartConfigService.currentEntity()).thenReturn(new CartConfigEntity());
+    }
 
     @Test
     void shouldParseSlotStartForGivenDate() {

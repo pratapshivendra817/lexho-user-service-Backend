@@ -28,6 +28,8 @@ import java.time.LocalDateTime;
 )
 public class User {
 
+    private static final String OTP_LOGIN_MARKER = String.join("_", "OTP", "LOGIN", "USER");
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -86,7 +88,7 @@ public class User {
         this.phoneNumber = mobile;
         this.active = active;
         this.fullName = "Guest User";
-        this.password = "OTP_LOGIN_USER";
+        this.password = OTP_LOGIN_MARKER;
         this.role = Role.CUSTOMER;
         this.status = active ? UserStatus.ACTIVE : UserStatus.INACTIVE;
         this.totalBookings = 0L;

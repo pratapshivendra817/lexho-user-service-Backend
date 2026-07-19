@@ -2,6 +2,8 @@ package com.lexho.auth.dto;
 
 import jakarta.validation.constraints.NotNull;
 
+import java.util.Objects;
+
 public class IssueTokenRequest {
 
     @NotNull
@@ -24,5 +26,29 @@ public class IssueTokenRequest {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    @Override
+    public boolean equals(Object object) {
+        if (this == object) {
+            return true;
+        }
+        if (!(object instanceof IssueTokenRequest that)) {
+            return false;
+        }
+        return Objects.equals(userId, that.userId) && Objects.equals(role, that.role);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(userId, role);
+    }
+
+    @Override
+    public String toString() {
+        return "IssueTokenRequest{"
+                + "userId=" + userId
+                + ", role='" + role + '\''
+                + '}';
     }
 }

@@ -6,9 +6,8 @@ import com.lexho.catalog.entity.ServiceCategory;
 import com.lexho.catalog.repository.CategoryRepository;
 import com.lexho.common.enums.PaymentStatus;
 import com.lexho.common.enums.OrderStatus;
-import com.lexho.notification.entity.Notification;
-import com.lexho.partner.entity.Partner;
-import com.lexho.partner.repository.PartnerRepository;
+import com.lexho.provider.entity.Partner;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.entity.AdminCategoryEntity;
 import com.lexho.user_service.admin.entity.SupportFaq;
 import com.lexho.user_service.admin.entity.SupportFaqCategory;
@@ -20,12 +19,19 @@ import com.lexho.user_service.admin.entity.SupportTicket;
 import com.lexho.user_service.admin.repository.SupportTicketReplyRepository;
 import com.lexho.user_service.admin.repository.SupportTicketRepository;
 import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
+import com.lexho.user_service.audit.service.AuditLogService;
 import com.lexho.user_service.banner.entity.BannerPromotion;
 import com.lexho.user_service.banner.enums.BannerPlacement;
 import com.lexho.user_service.banner.enums.BannerStatus;
 import com.lexho.user_service.banner.repository.BannerPromotionRepository;
 import com.lexho.user_service.dto.*;
+import com.lexho.user_service.dispatch.entity.BookingEventEntity;
 import com.lexho.user_service.dispatch.service.DispatchOrchestrationService;
+import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
+import com.lexho.user_service.dispatch.repository.BookingEventRepository;
+import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
+import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
+import com.lexho.user_service.cartconfig.service.CartConfigService;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.customer.service.SlotDateTimePolicy;
 import com.lexho.user_service.customer.service.CustomerCartSlotService;
@@ -33,6 +39,8 @@ import com.lexho.user_service.booking.exception.BookingValidationException;
 import com.lexho.user_service.booking.exception.InstantBookingUnavailableException;
 import com.lexho.user_service.booking.model.BookingType;
 import com.lexho.user_service.booking.model.InstantUnavailableCode;
+import com.lexho.user_service.customer.location.dto.ServiceabilityCheckResponse;
+import com.lexho.user_service.customer.location.service.ServiceabilityService;
 import com.lexho.user_service.lexho.dto.LexhoDtos;
 import com.lexho.user_service.lexho.entity.*;
 import com.lexho.user_service.lexho.repository.*;
@@ -44,9 +52,17 @@ import com.lexho.user_service.review.enums.ReviewStatus;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import com.lexho.user_service.service.CartService;
 import com.lexho.user_service.service.HomeService;
-import com.lexho.user_service.service.NotificationService;
 import com.lexho.user_service.service.OrderService;
 import com.lexho.user_service.service.ApiRateLimiterService;
+import com.lexho.user_service.subscription.entity.SubscriptionFrequency;
+import com.lexho.user_service.subscription.entity.SubscriptionMaster;
+import com.lexho.user_service.subscription.entity.SubscriptionVisit;
+import com.lexho.user_service.subscription.repository.SubscriptionFrequencyRepository;
+import com.lexho.user_service.subscription.repository.SubscriptionMasterRepository;
+import com.lexho.user_service.subscription.repository.SubscriptionVisitRepository;
+import com.lexho.user_service.notification.dto.NotificationPageResponse;
+import com.lexho.user_service.notification.dto.NotificationResponse;
+import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.util.MediaUrlResolver;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -54,8 +70,11 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -65,12 +84,16 @@ import java.util.regex.Pattern;
 @RestController
 @Slf4j
 public class LexhoExperienceController {
+    private static final int BOOKING_CONTRACT_VERSION = 1;
+    private static final SecureRandom REFERRAL_CODE_RANDOM = new SecureRandom();
+    private static final char[] REFERRAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
+    private static final int REFERRAL_CODE_LENGTH = 8;
 
     private final HomeService homeService;
     private final CartService cartService;
     private final OrderService orderService;
     private final OrderRepository orderRepository;
-    private final NotificationService notificationService;
+    private final NotificationManagementService notificationManagementService;
     private final LexhoAddressService addressService;
     private final BannerPromotionRepository bannerPromotionRepository;
     private final CategoryRepository categoryRepository;
@@ -81,7 +104,6 @@ public class LexhoExperienceController {
     private final LexhoFavoriteRepository favoriteRepository;
     private final LexhoReferralCodeRepository referralCodeRepository;
     private final LexhoReferralUseRepository referralUseRepository;
-    private final LexhoSubscriptionRepository subscriptionRepository;
     private final SupportTicketRepository supportTicketRepository;
     private final SupportTicketReplyRepository supportTicketReplyRepository;
     private final SupportFaqCategoryRepository supportFaqCategoryRepository;
@@ -92,12 +114,22 @@ public class LexhoExperienceController {
     private final SlotDateTimePolicy slotDateTimePolicy;
     private final CustomerCartSlotService customerCartSlotService;
     private final GeoFenceValidationService geoFenceValidationService;
+    private final ServiceabilityService serviceabilityService;
+    private final CartConfigService cartConfigService;
+    private final SubscriptionMasterRepository subscriptionMasterRepository;
+    private final SubscriptionFrequencyRepository subscriptionFrequencyRepository;
+    private final SubscriptionVisitRepository subscriptionVisitRepository;
+    private final CurrentPartnerLocationRepository currentPartnerLocationRepository;
+    private final BookingEventRepository bookingEventRepository;
+
+    @Autowired(required = false)
+    private AuditLogService auditLogService;
 
     public LexhoExperienceController(HomeService homeService,
                                      CartService cartService,
                                      OrderService orderService,
                                      OrderRepository orderRepository,
-                                     NotificationService notificationService,
+                                     NotificationManagementService notificationManagementService,
                                      LexhoAddressService addressService,
                                      BannerPromotionRepository bannerPromotionRepository,
                                      CategoryRepository categoryRepository,
@@ -108,7 +140,6 @@ public class LexhoExperienceController {
                                      LexhoFavoriteRepository favoriteRepository,
                                      LexhoReferralCodeRepository referralCodeRepository,
                                      LexhoReferralUseRepository referralUseRepository,
-                                     LexhoSubscriptionRepository subscriptionRepository,
                                      SupportTicketRepository supportTicketRepository,
                                      SupportTicketReplyRepository supportTicketReplyRepository,
                                      SupportFaqCategoryRepository supportFaqCategoryRepository,
@@ -118,12 +149,19 @@ public class LexhoExperienceController {
                                      ApiRateLimiterService apiRateLimiterService,
                                      SlotDateTimePolicy slotDateTimePolicy,
                                      CustomerCartSlotService customerCartSlotService,
-                                     GeoFenceValidationService geoFenceValidationService) {
+                                     GeoFenceValidationService geoFenceValidationService,
+                                     ServiceabilityService serviceabilityService,
+                                     CartConfigService cartConfigService,
+                                     SubscriptionMasterRepository subscriptionMasterRepository,
+                                     SubscriptionFrequencyRepository subscriptionFrequencyRepository,
+                                     SubscriptionVisitRepository subscriptionVisitRepository,
+                                     CurrentPartnerLocationRepository currentPartnerLocationRepository,
+                                     BookingEventRepository bookingEventRepository) {
         this.homeService = homeService;
         this.cartService = cartService;
         this.orderService = orderService;
         this.orderRepository = orderRepository;
-        this.notificationService = notificationService;
+        this.notificationManagementService = notificationManagementService;
         this.addressService = addressService;
         this.bannerPromotionRepository = bannerPromotionRepository;
         this.categoryRepository = categoryRepository;
@@ -134,7 +172,6 @@ public class LexhoExperienceController {
         this.favoriteRepository = favoriteRepository;
         this.referralCodeRepository = referralCodeRepository;
         this.referralUseRepository = referralUseRepository;
-        this.subscriptionRepository = subscriptionRepository;
         this.supportTicketRepository = supportTicketRepository;
         this.supportTicketReplyRepository = supportTicketReplyRepository;
         this.supportFaqCategoryRepository = supportFaqCategoryRepository;
@@ -145,6 +182,13 @@ public class LexhoExperienceController {
         this.slotDateTimePolicy = slotDateTimePolicy;
         this.customerCartSlotService = customerCartSlotService;
         this.geoFenceValidationService = geoFenceValidationService;
+        this.serviceabilityService = serviceabilityService;
+        this.cartConfigService = cartConfigService;
+        this.subscriptionMasterRepository = subscriptionMasterRepository;
+        this.subscriptionFrequencyRepository = subscriptionFrequencyRepository;
+        this.subscriptionVisitRepository = subscriptionVisitRepository;
+        this.currentPartnerLocationRepository = currentPartnerLocationRepository;
+        this.bookingEventRepository = bookingEventRepository;
     }
 
     @GetMapping("/api/home/dashboard")
@@ -186,10 +230,17 @@ public class LexhoExperienceController {
 
     @GetMapping("/api/categories")
     public ResponseEntity<ApiResponse<Map<String, Object>>> categories(@RequestParam(defaultValue = "0") int page,
-                                                                       @RequestParam(defaultValue = "20") int size) {
+                                                                       @RequestParam(defaultValue = "20") int size,
+                                                                       @RequestParam(required = false) Double lat,
+                                                                       @RequestParam(required = false) Double lng,
+                                                                       @RequestParam(required = false) String pincode,
+                                                                       @RequestAttribute(value = "userId", required = false) Long userId) {
+        if (!isGeoServiceable(userId, lat, lng, pincode)) {
+            return ResponseEntity.ok(ApiResponse.success("Categories fetched", Map.of("data", List.of())));
+        }
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100));
         List<Map<String, Object>> data = adminCategoryRepository
-                .findByActiveTrueAndDeletedFalseOrderByCreatedAtDesc(pageable).stream()
+                .findActiveForCustomer(pageable).stream()
                 .map(this::mapCategory)
                 .toList();
         return ResponseEntity.ok(ApiResponse.success("Categories fetched", Map.of("data", data)));
@@ -197,27 +248,47 @@ public class LexhoExperienceController {
 
     @GetMapping("/api/services/popular")
     public ResponseEntity<ApiResponse<Map<String, Object>>> popular(@RequestParam(defaultValue = "0") int page,
-                                                                    @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.success("Popular services fetched", Map.of("data", partnerData(page, size, null))));
+                                                                    @RequestParam(defaultValue = "20") int size,
+                                                                    @RequestParam(required = false) Double lat,
+                                                                    @RequestParam(required = false) Double lng,
+                                                                    @RequestParam(required = false) String pincode,
+                                                                    @RequestAttribute(value = "userId", required = false) Long userId) {
+        return ResponseEntity.ok(ApiResponse.success("Popular services fetched",
+                Map.of("data", partnerData(page, size, null, userId, lat, lng, pincode))));
     }
 
     @GetMapping("/api/services/recommended")
     public ResponseEntity<ApiResponse<Map<String, Object>>> recommended(@RequestParam(defaultValue = "0") int page,
-                                                                        @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.success("Recommended services fetched", Map.of("data", partnerData(page, size, null))));
+                                                                        @RequestParam(defaultValue = "20") int size,
+                                                                        @RequestParam(required = false) Double lat,
+                                                                        @RequestParam(required = false) Double lng,
+                                                                        @RequestParam(required = false) String pincode,
+                                                                        @RequestAttribute(value = "userId", required = false) Long userId) {
+        return ResponseEntity.ok(ApiResponse.success("Recommended services fetched",
+                Map.of("data", partnerData(page, size, null, userId, lat, lng, pincode))));
     }
 
     @GetMapping("/api/services/quick")
     public ResponseEntity<ApiResponse<Map<String, Object>>> quick(@RequestParam(defaultValue = "0") int page,
-                                                                  @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.success("Quick services fetched", Map.of("data", partnerData(page, size, null))));
+                                                                  @RequestParam(defaultValue = "20") int size,
+                                                                  @RequestParam(required = false) Double lat,
+                                                                  @RequestParam(required = false) Double lng,
+                                                                  @RequestParam(required = false) String pincode,
+                                                                  @RequestAttribute(value = "userId", required = false) Long userId) {
+        return ResponseEntity.ok(ApiResponse.success("Quick services fetched",
+                Map.of("data", partnerData(page, size, null, userId, lat, lng, pincode))));
     }
 
     @GetMapping("/api/search/services")
     public ResponseEntity<ApiResponse<Map<String, Object>>> search(@RequestParam String keyword,
                                                                    @RequestParam(defaultValue = "0") int page,
-                                                                   @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.success("Search result for " + keyword, Map.of("data", partnerData(page, size, keyword))));
+                                                                   @RequestParam(defaultValue = "20") int size,
+                                                                   @RequestParam(required = false) Double lat,
+                                                                   @RequestParam(required = false) Double lng,
+                                                                   @RequestParam(required = false) String pincode,
+                                                                   @RequestAttribute(value = "userId", required = false) Long userId) {
+        return ResponseEntity.ok(ApiResponse.success("Search result for " + keyword,
+                Map.of("data", partnerData(page, size, keyword, userId, lat, lng, pincode))));
     }
 
     @PostMapping("/api/cart/add")
@@ -263,18 +334,41 @@ public class LexhoExperienceController {
         LexhoDtos.AddressResponse address;
         try {
             address = addressService.getById(userId, request.addressId());
-            geoFenceValidationService.validateBookingAddress(addressService.getRawById(userId, request.addressId()));
-        } catch (BadRequestException ex) {
-            throw new BookingValidationException("ADDRESS_NOT_FOUND", "Address not found for this customer");
-        }
-        PlaceOrderRequest placeOrderRequest = new PlaceOrderRequest();
-        placeOrderRequest.setAddress(address.line1() + ", " + address.city());
-        BookingType bookingType = request.bookingType() == null || request.bookingType().isBlank()
-                ? BookingType.SCHEDULED
-                : BookingType.valueOf(request.bookingType());
-        placeOrderRequest.setBookingType(bookingType.name());
-        if (bookingType == BookingType.SCHEDULED) {
-            placeOrderRequest.setScheduledAt(parseScheduledAt(request.date(), request.slot()));
+            Double requestLatitude = resolveBookingLatitude(request);
+            Double requestLongitude = resolveBookingLongitude(request);
+            log.info("booking_create_coordinates userId={} addressId={} latitudePresent={} longitudePresent={}",
+                    userId, request.addressId(), requestLatitude != null, requestLongitude != null);
+             LexhoAddress rawAddress = addressService.applyBookingCoordinatesFallback(
+                      userId,
+                      request.addressId(),
+                      requestLatitude,
+                      requestLongitude
+              );
+             geoFenceValidationService.validateBookingAddress(rawAddress);
+             ServiceabilityCheckResponse serviceability = serviceabilityService.resolveForCustomer(userId);
+             if (serviceability != null && !serviceability.isServiceable()) {
+                 throw new BookingValidationException("SERVICE_UNAVAILABLE",
+                         "Service is unavailable in selected area");
+             }
+          } catch (BadRequestException ex) {
+             throw new BookingValidationException("ADDRESS_NOT_FOUND", "Address not found for this customer");
+          }
+          PlaceOrderRequest placeOrderRequest = new PlaceOrderRequest();
+          placeOrderRequest.setAddress(address.line1() + ", " + address.city());
+          placeOrderRequest.setExpectedTotal(request.expectedTotal());
+         BookingType bookingType = request.bookingType() == null || request.bookingType().isBlank()
+                 ? BookingType.SCHEDULED
+                 : BookingType.valueOf(request.bookingType());
+         CartConfigEntity cartConfig = cartConfigService.currentEntity();
+         if (bookingType == BookingType.INSTANT && !Boolean.TRUE.equals(cartConfig.getInstantBookingEnabled())) {
+             throw new BookingValidationException("SERVICE_UNAVAILABLE", "Instant booking is currently disabled");
+         }
+         if (bookingType == BookingType.SCHEDULED && !Boolean.TRUE.equals(cartConfig.getScheduledBookingEnabled())) {
+             throw new BookingValidationException("SERVICE_UNAVAILABLE", "Scheduled booking is currently disabled");
+         }
+         placeOrderRequest.setBookingType(bookingType.name());
+         if (bookingType == BookingType.SCHEDULED) {
+             placeOrderRequest.setScheduledAt(parseScheduledAt(request.date(), request.slot()));
         } else {
             placeOrderRequest.setScheduledAt(LocalDateTime.now());
         }
@@ -291,15 +385,31 @@ public class LexhoExperienceController {
             }
         } else {
             Order scheduledOrder = orderRepository.findById(order.getId()).orElse(null);
-            if (scheduledOrder != null && scheduledOrder.getStatus() == OrderStatus.CREATED
-                    && scheduledOrder.getStatus().canTransitionTo(OrderStatus.SCHEDULED)) {
-                scheduledOrder.setStatus(OrderStatus.SCHEDULED);
+            if (scheduledOrder != null) {
+                if (scheduledOrder.getBookingType() == null || scheduledOrder.getBookingType().isBlank()) {
+                    scheduledOrder.setBookingType(bookingType.name());
+                }
+                if (scheduledOrder.getStatus() == OrderStatus.CREATED
+                        && scheduledOrder.getStatus().canTransitionTo(OrderStatus.SCHEDULED)) {
+                    scheduledOrder.setStatus(OrderStatus.SCHEDULED);
+                }
                 orderRepository.save(scheduledOrder);
             }
         }
-        if (bookingType == BookingType.INSTANT && dispatched <= 0) {
+        Order createdOrder = orderRepository.findById(order.getId()).orElse(null);
+        boolean instantDispatchFailed = bookingType == BookingType.INSTANT && dispatched <= 0;
+        if (!instantDispatchFailed
+                && createdOrder != null
+                && (createdOrder.getBookingType() == null || createdOrder.getBookingType().isBlank())) {
+            createdOrder.setBookingType(bookingType.name());
+            orderRepository.save(createdOrder);
+        }
+        if (instantDispatchFailed) {
             Order failedOrder = orderRepository.findById(order.getId()).orElse(null);
             if (failedOrder != null) {
+                if (failedOrder.getBookingType() == null || failedOrder.getBookingType().isBlank()) {
+                    failedOrder.setBookingType(bookingType.name());
+                }
                 failedOrder.setStatus(OrderStatus.INSTANT_FAILED);
                 failedOrder.setUnavailableReason(InstantUnavailableCode.INSTANT_UNAVAILABLE.name());
                 failedOrder.setSlaMinutes(DispatchOrchestrationService.INSTANT_SLA_MINUTES);
@@ -313,6 +423,7 @@ public class LexhoExperienceController {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("id", String.valueOf(order.getId()));
         payload.put("bookingId", String.valueOf(order.getId()));
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
         payload.put("serviceId", String.valueOf(request.serviceId()));
         payload.put("addressId", String.valueOf(request.addressId()));
         payload.put("bookingType", bookingType.name());
@@ -322,7 +433,56 @@ public class LexhoExperienceController {
         payload.put("note", request.note());
         payload.put("status", order.getStatus());
         payload.put("slaMinutes", bookingType == BookingType.INSTANT ? DispatchOrchestrationService.INSTANT_SLA_MINUTES : 0);
+        Order persisted = orderRepository.findById(order.getId()).orElse(null);
+        String assignmentStatus = persisted == null
+                ? (bookingType == BookingType.INSTANT ? "SEARCHING_PARTNER" : "SCHEDULED")
+                : deriveAssignmentStatus(persisted, persisted.getAssignedPartnerId() != null);
+        Map<String, Object> trackingPayload = persisted == null ? Map.of("showMap", false) : mapTrackingPayload(persisted, assignmentStatus);
+        Map<String, Object> permissions = persisted == null ? Map.of(
+                "canCancel", true,
+                "canReschedule", bookingType == BookingType.SCHEDULED,
+                "canCallPartner", false,
+                "canTrackPartner", false,
+                "canRaiseIssue", false
+        ) : actionPermissions(persisted, assignmentStatus, Boolean.TRUE.equals(trackingPayload.get("partnerAvailable")));
+        payload.put("statusHistory", persisted == null ? List.of() : statusHistory(persisted));
+        payload.put("meta", metaPayload(
+                persisted == null ? (bookingType == BookingType.SCHEDULED ? "SCHEDULED_STATUS" : "INSTANT_STATUS") : trackingScreen(persisted, assignmentStatus),
+                trackingRefreshSeconds(String.valueOf(order.getStatus()), assignmentStatus),
+                trackingPayload,
+                permissions
+        ));
+        audit(userId, null, order.getId(), "BOOKING_CREATED", null, bookingType.name());
         return ResponseEntity.ok(ApiResponse.success("Booking created", payload));
+    }
+
+    private Double resolveBookingLatitude(LexhoDtos.BookingCreateRequest request) {
+        return firstValidCoordinate(
+                request.latitude(),
+                request.addressLatitude(),
+                request.coordinates() == null ? null : request.coordinates().latitude(),
+                request.addressCoordinates() == null ? null : request.addressCoordinates().latitude()
+        );
+    }
+
+    private Double resolveBookingLongitude(LexhoDtos.BookingCreateRequest request) {
+        return firstValidCoordinate(
+                request.longitude(),
+                request.addressLongitude(),
+                request.coordinates() == null ? null : request.coordinates().longitude(),
+                request.addressCoordinates() == null ? null : request.addressCoordinates().longitude()
+        );
+    }
+
+    private Double firstValidCoordinate(Double... values) {
+        for (Double value : values) {
+            if (value != null
+                    && Double.isFinite(value)
+                    && BigDecimal.ZERO.compareTo(BigDecimal.valueOf(value)) != 0) {
+                return value;
+            }
+        }
+        return null;
     }
 
     @PostMapping("/api/bookings/debug/validate-slot")
@@ -389,13 +549,30 @@ public class LexhoExperienceController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> bookingHistory(@RequestAttribute("userId") Long userId,
                                                                            @RequestParam(defaultValue = "0") int page,
                                                                            @RequestParam(defaultValue = "20") int size) {
-        List<Map<String, Object>> data = orderRepository.findByUserId(userId).stream()
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        List<Order> orders = orderRepository.findByUserId(userId).stream()
                 .sorted(Comparator.comparing(Order::getId).reversed())
-                .skip((long) page * size)
-                .limit(size)
+                .toList();
+        List<Map<String, Object>> instantBookings = orders.stream()
+                .filter(order -> "INSTANT".equalsIgnoreCase(order.getBookingType()))
                 .map(this::mapOrderSummary)
                 .toList();
-        return ResponseEntity.ok(ApiResponse.success("Booking history fetched", Map.of("data", data)));
+        List<Map<String, Object>> scheduledBookings = orders.stream()
+                .filter(order -> "SCHEDULED".equalsIgnoreCase(order.getBookingType())
+                        || order.getBookingType() == null
+                        || order.getBookingType().isBlank())
+                .map(this::mapOrderSummary)
+                .toList();
+        List<Map<String, Object>> subscriptions = orders.stream()
+                .filter(order -> "SUBSCRIPTION".equalsIgnoreCase(order.getBookingType()))
+                .map(this::subscriptionSummaryPayload)
+                .toList();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("instantBookings", pagedGroup(instantBookings, safePage, safeSize));
+        payload.put("scheduledBookings", pagedGroup(scheduledBookings, safePage, safeSize));
+        payload.put("subscriptions", pagedGroup(subscriptions, safePage, safeSize));
+        return ResponseEntity.ok(ApiResponse.success("Booking history fetched", payload));
     }
 
     @GetMapping("/api/bookings/details/{id}")
@@ -406,6 +583,12 @@ public class LexhoExperienceController {
                 .orElseThrow(() -> new BadRequestException("Booking not found"));
         if (!Objects.equals(persistedOrder.getUserId(), userId)) {
             throw new BadRequestException("You are not allowed to access this booking");
+        }
+        if ("SUBSCRIPTION".equalsIgnoreCase(persistedOrder.getBookingType())) {
+            return ResponseEntity.ok(ApiResponse.success(
+                    "Booking details fetched successfully",
+                    subscriptionBookingPayload(userId, persistedOrder)
+            ));
         }
 
         double itemTotal = order.getItems() == null ? 0d : order.getItems().stream()
@@ -430,12 +613,14 @@ public class LexhoExperienceController {
                 : persistedOrder.getBookingType();
         boolean hasAssignedPartner = order.getItems() != null && !order.getItems().isEmpty();
         String assignmentStatus = deriveAssignmentStatus(persistedOrder, hasAssignedPartner);
-        String status = order.getStatus();
+        String status = responseStatus(persistedOrder, assignmentStatus);
+        String trackingScreen = trackingScreen(persistedOrder, assignmentStatus);
         Long serviceId = order.getItems() == null || order.getItems().isEmpty()
                 ? null
                 : order.getItems().get(0).getPartnerId();
         payload.put("id", String.valueOf(order.getId()));
         payload.put("bookingId", String.valueOf(order.getId()));
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
         payload.put("serviceId", serviceId == null ? "" : String.valueOf(serviceId));
         payload.put("status", status);
         payload.put("assignmentStatus", assignmentStatus);
@@ -447,19 +632,25 @@ public class LexhoExperienceController {
         payload.put("partnerName", partnerPayload == null ? "" : String.valueOf(partnerPayload.getOrDefault("name", "")));
         payload.put("partnerPhone", partnerPayload == null ? "" : String.valueOf(partnerPayload.getOrDefault("phone", "")));
         payload.put("partnerRating", partnerPayload == null ? 0d : partnerPayload.getOrDefault("rating", 0d));
-        payload.put("etaMinutes", deriveEtaMinutes(status, assignmentStatus));
+        int etaMinutes = deriveEtaMinutes(status, assignmentStatus);
+        payload.put("etaMinutes", etaMinutes);
+        payload.put("estimatedArrivalMinutes", etaMinutes);
+        payload.put("estimatedCompletionTime", estimatedCompletionTime(persistedOrder));
         payload.put("slaMinutes", persistedOrder.getSlaMinutes() == null ? 0 : persistedOrder.getSlaMinutes());
         payload.put("promisedStartTime", persistedOrder.getPromisedStartTime() == null ? null : persistedOrder.getPromisedStartTime().toString());
         payload.put("serviceName", order.getItems().isEmpty() ? "Service" : order.getItems().get(0).getPartnerName());
         payload.put("address", order.getAddress());
         payload.put("fullAddress", order.getAddress());
-        payload.put("createdAt", persistedOrder.getCreatedAt());
-        payload.put("scheduledAt", persistedOrder.getScheduledAt());
-        boolean isCompleted = "COMPLETED".equalsIgnoreCase(order.getStatus());
-        payload.put("completedAt", isCompleted ? persistedOrder.getUpdatedAt() : null);
+        payload.put("createdAt", utc(persistedOrder.getCreatedAt()));
+        payload.put("scheduledAt", utc(persistedOrder.getScheduledAt()));
+        boolean isCompleted = "COMPLETED".equalsIgnoreCase(status);
+        payload.put("arrivedAt", utc(persistedOrder.getArrivedAt()));
+        payload.put("startedAt", utc(persistedOrder.getStartedAt()));
+        payload.put("inProgressAt", utc(persistedOrder.getInProgressAt()));
+        payload.put("completedAt", utc(isCompleted ? firstNonNull(persistedOrder.getCompletedAt(), persistedOrder.getUpdatedAt()) : persistedOrder.getCompletedAt()));
         payload.put("completionStatus", isCompleted ? "COMPLETED" : "NOT_COMPLETED_YET");
-        payload.put("completedAtDisplay", isCompleted ? String.valueOf(persistedOrder.getUpdatedAt()) : "Not completed yet");
-        payload.put("completed", isCompleted ? String.valueOf(persistedOrder.getUpdatedAt()) : "Not completed yet");
+        payload.put("completedAtDisplay", isCompleted ? utc(firstNonNull(persistedOrder.getCompletedAt(), persistedOrder.getUpdatedAt())) : "Not completed yet");
+        payload.put("completed", isCompleted ? utc(firstNonNull(persistedOrder.getCompletedAt(), persistedOrder.getUpdatedAt())) : "Not completed yet");
         payload.put("amount", payableAmount);
         payload.put("payableAmount", payableAmount);
         payload.put("currency", "INR");
@@ -470,6 +661,16 @@ public class LexhoExperienceController {
         payload.put("discountAmount", discountAmount);
         payload.put("totalAmount", payableAmount);
         payload.put("paymentStatus", order.getPaymentStatus());
+        Map<String, Object> trackingPayload = mapTrackingPayload(persistedOrder, assignmentStatus);
+        payload.putAll(rootTrackingPayload(trackingPayload));
+        int trackingRefreshSeconds = trackingRefreshSeconds(status, assignmentStatus);
+        boolean partnerAvailable = Boolean.TRUE.equals(trackingPayload.get("partnerAvailable"));
+        Map<String, Object> permissions = actionPermissions(persistedOrder, assignmentStatus, partnerAvailable);
+        payload.put("retryPaymentAllowed", retryPaymentAllowed(persistedOrder));
+        payload.put("statusHistory", statusHistory(persistedOrder));
+        Map<String, Object> meta = metaPayload(trackingScreen, trackingRefreshSeconds, trackingPayload, permissions);
+        addReviewMeta(meta, persistedOrder);
+        payload.put("meta", meta);
         return ResponseEntity.ok(ApiResponse.success("Booking details fetched successfully", payload));
     }
 
@@ -480,8 +681,17 @@ public class LexhoExperienceController {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("id", String.valueOf(id));
         payload.put("bookingId", String.valueOf(id));
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
         payload.put("status", order.getStatus());
         payload.put("assignmentStatus", "CANCELLED");
+        payload.put("meta", metaPayload("INSTANT_STATUS", 0, Map.of("showMap", false), Map.of(
+                "canCancel", false,
+                "canReschedule", false,
+                "canCallPartner", false,
+                "canTrackPartner", false,
+                "canRaiseIssue", false
+        )));
+        audit(userId, null, id, "BOOKING_CANCELLED", null, String.valueOf(order.getStatus()));
         return ResponseEntity.ok(ApiResponse.success("Booking cancelled", payload));
     }
 
@@ -497,6 +707,7 @@ public class LexhoExperienceController {
         if (scheduledAt == null) {
             throw new BadRequestException("date is required");
         }
+        String oldValue = order.getScheduledAt() == null ? null : utc(order.getScheduledAt());
         order.setScheduledAt(scheduledAt);
         if (order.getStatus() == OrderStatus.CREATED && order.getStatus().canTransitionTo(OrderStatus.SCHEDULED)) {
             order.setStatus(OrderStatus.SCHEDULED);
@@ -505,9 +716,40 @@ public class LexhoExperienceController {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("id", String.valueOf(saved.getId()));
         payload.put("bookingId", String.valueOf(saved.getId()));
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
         payload.put("status", saved.getStatus() == null ? "SCHEDULED" : saved.getStatus().name());
         payload.put("assignmentStatus", "SCHEDULED");
-        payload.put("scheduledAt", saved.getScheduledAt());
+        payload.put("scheduledAt", utc(saved.getScheduledAt()));
+        payload.put("meta", metaPayload("SCHEDULED_STATUS", 15, Map.of("showMap", false), actionPermissions(saved, "SCHEDULED", false)));
+        audit(userId, null, saved.getId(), "BOOKING_RESCHEDULED", oldValue, utc(saved.getScheduledAt()));
+        return ResponseEntity.ok(ApiResponse.success("Booking rescheduled", payload));
+    }
+
+    @PostMapping("/api/bookings/{id}/reschedule")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> rescheduleBookingV2(@RequestAttribute("userId") Long userId,
+                                                                                @PathVariable Long id,
+                                                                                @RequestBody Map<String, String> request) {
+        Order order = orderRepository.findById(id).orElseThrow(() -> new BadRequestException("Booking not found"));
+        if (!Objects.equals(order.getUserId(), userId)) {
+            throw new BadRequestException("You are not allowed to reschedule this booking");
+        }
+        boolean allowed = canReschedule(order);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("allowed", allowed);
+        payload.put("remainingReschedules", allowed ? 2 : 0);
+        payload.put("bookingId", id);
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
+        if (!allowed) {
+            payload.put("meta", metaPayload("SCHEDULED_STATUS", 15, Map.of("showMap", false), actionPermissions(order, "SCHEDULED", false)));
+            return ResponseEntity.ok(ApiResponse.success("Booking cannot be rescheduled in current state", payload));
+        }
+        String oldValue = order.getScheduledAt() == null ? null : utc(order.getScheduledAt());
+        LocalDateTime scheduledAt = parseScheduledAt(request.get("date"), request.get("slot"));
+        order.setScheduledAt(scheduledAt);
+        Order saved = orderRepository.save(order);
+        payload.put("scheduledAt", utc(scheduledAt));
+        payload.put("meta", metaPayload("SCHEDULED_STATUS", 15, Map.of("showMap", false), actionPermissions(saved, "SCHEDULED", false)));
+        audit(userId, null, saved.getId(), "BOOKING_RESCHEDULED", oldValue, utc(saved.getScheduledAt()));
         return ResponseEntity.ok(ApiResponse.success("Booking rescheduled", payload));
     }
 
@@ -561,7 +803,7 @@ public class LexhoExperienceController {
         return ResponseEntity.ok(ApiResponse.success("Partner location updated", Map.of("bookingId", bookingId, "lat", latitude, "lng", longitude)));
     }
 
-    @GetMapping("/api/payments/options")
+    @GetMapping("/api/payments/legacy-options")
     public ResponseEntity<ApiResponse<Map<String, Object>>> paymentOptions(@RequestParam(required = false) String bookingId,
                                                                            @RequestParam(required = false) Long cartId,
                                                                            @RequestParam(required = false) java.math.BigDecimal amount) {
@@ -767,31 +1009,38 @@ public class LexhoExperienceController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> notifications(@RequestAttribute("userId") Long userId,
                                                                           @RequestParam(defaultValue = "0") int page,
                                                                           @RequestParam(defaultValue = "20") int size) {
-        List<Map<String, Object>> data = notificationService.getAll(userId).stream()
-                .skip((long) page * size)
-                .limit(size)
+        NotificationPageResponse<NotificationResponse> notifications =
+                notificationManagementService.getCustomerNotifications(page, size);
+        List<Map<String, Object>> data = notifications.getContent().stream()
                 .map(this::toNotificationMap)
                 .toList();
-        return ResponseEntity.ok(ApiResponse.success("Notifications fetched successfully", Map.of("data", data)));
+        return ResponseEntity.ok(ApiResponse.success("Notifications fetched successfully", Map.of(
+                "data", data,
+                "totalElements", notifications.getTotalElements(),
+                "totalPages", notifications.getTotalPages(),
+                "pageNumber", notifications.getPageNumber()
+        )));
     }
 
     @PutMapping("/api/notifications/read")
     public ResponseEntity<ApiResponse<Void>> markNotificationRead(@RequestAttribute("userId") Long userId,
                                                                   @Valid @RequestBody LexhoDtos.IdRequest request) {
-        notificationService.markRead(userId, request.id());
+        notificationManagementService.markAsReadForCurrentUser(request.id());
         return ResponseEntity.ok(ApiResponse.success("Notification marked as read", null));
     }
 
     @DeleteMapping("/api/notifications/read")
     public ResponseEntity<ApiResponse<Void>> deleteNotification(@RequestAttribute("userId") Long userId,
                                                                 @Valid @RequestBody LexhoDtos.IdRequest request) {
-        notificationService.deleteNotification(userId, request.id());
+        notificationManagementService.softDeleteForCurrentUser(request.id());
         return ResponseEntity.ok(ApiResponse.success("Notification deleted", null));
     }
 
     @GetMapping("/api/customer/notifications/unread-count")
     public ResponseEntity<ApiResponse<Map<String, Object>>> unreadCount(@RequestAttribute("userId") Long userId) {
-        return ResponseEntity.ok(ApiResponse.success("Unread count", Map.of("count", notificationService.unreadCount(userId))));
+        return ResponseEntity.ok(ApiResponse.success("Unread count", Map.of(
+                "count", notificationManagementService.unreadCountForCurrentUser()
+        )));
     }
 
     @PostMapping("/api/referral/generate")
@@ -824,38 +1073,6 @@ public class LexhoExperienceController {
         referralCode.setUsedCount(referralCode.getUsedCount() + 1);
         referralCodeRepository.save(referralCode);
         return ResponseEntity.ok(ApiResponse.success("Referral applied", Map.of("code", request.code())));
-    }
-
-    @PostMapping("/api/subscription/create")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> createSubscription(@RequestAttribute("userId") Long userId,
-                                                                               @Valid @RequestBody LexhoDtos.SubscriptionCreateRequest request) {
-        LexhoSubscription sub = new LexhoSubscription();
-        sub.setUserId(userId);
-        sub.setPlanId(request.planId());
-        sub.setStatus("ACTIVE");
-        LexhoSubscription saved = subscriptionRepository.save(sub);
-        return ResponseEntity.ok(ApiResponse.success("Subscription created", Map.of(
-                "id", String.valueOf(saved.getId()),
-                "planId", saved.getPlanId(),
-                "status", saved.getStatus()
-        )));
-    }
-
-    @GetMapping("/api/subscription/list")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> listSubscriptions(@RequestAttribute("userId") Long userId,
-                                                                              @RequestParam(defaultValue = "0") int page,
-                                                                              @RequestParam(defaultValue = "20") int size) {
-        List<Map<String, Object>> data = subscriptionRepository.findByUserIdOrderByIdDesc(userId).stream()
-                .skip((long) page * size)
-                .limit(size)
-                .map(item -> Map.<String, Object>of(
-                        "id", String.valueOf(item.getId()),
-                        "planId", item.getPlanId(),
-                        "status", item.getStatus(),
-                        "createdAt", String.valueOf(item.getCreatedAt())
-                ))
-                .toList();
-        return ResponseEntity.ok(ApiResponse.success("Subscriptions fetched", Map.of("data", data)));
     }
 
     @GetMapping("/api/support/faqs")
@@ -982,7 +1199,16 @@ public class LexhoExperienceController {
         ));
     }
 
-    private List<Map<String, Object>> partnerData(int page, int size, String keyword) {
+    private List<Map<String, Object>> partnerData(int page,
+                                                  int size,
+                                                  String keyword,
+                                                  Long userId,
+                                                  Double lat,
+                                                  Double lng,
+                                                  String pincode) {
+        if (!isGeoServiceable(userId, lat, lng, pincode)) {
+            return List.of();
+        }
         String normalizedKeyword = keyword == null ? null : keyword.trim().toLowerCase(Locale.ROOT);
         return partnerRepository.findAll().stream()
                 .filter(p -> Boolean.TRUE.equals(p.getAvailable()))
@@ -993,6 +1219,20 @@ public class LexhoExperienceController {
                 .limit(size)
                 .map(this::mapPartner)
                 .toList();
+    }
+
+    private boolean isGeoServiceable(Long userId, Double lat, Double lng, String pincode) {
+        ServiceabilityCheckResponse resolution;
+        if (lat != null || lng != null || (pincode != null && !pincode.isBlank())) {
+            resolution = serviceabilityService.resolve(pincode, lat, lng);
+        } else {
+            resolution = serviceabilityService.resolveForCustomer(userId);
+            if ("MISSING_CUSTOMER_CONTEXT".equals(resolution.getReason())
+                    || "CURRENT_LOCATION_NOT_FOUND".equals(resolution.getReason())) {
+                return true;
+            }
+        }
+        return resolution.isServiceable();
     }
 
     private Map<String, Object> mapPartner(Partner p) {
@@ -1023,7 +1263,8 @@ public class LexhoExperienceController {
                 "id", String.valueOf(category.getId()),
                 "name", category.getName() == null ? "" : category.getName(),
                 "icon", safeImageUrl,
-                "imageUrl", safeImageUrl
+                "imageUrl", safeImageUrl,
+                "displayOrder", category.getDisplayOrder()
         );
     }
 
@@ -1046,31 +1287,385 @@ public class LexhoExperienceController {
                 "id", String.valueOf(item.getId()),
                 "serviceId", String.valueOf(item.getPartnerId()),
                 "name", item.getPartnerName() == null ? "" : item.getPartnerName(),
+                "imageUrl", item.getImageUrl() == null ? "" : item.getImageUrl(),
                 "quantity", item.getQuantity(),
                 "price", item.getPrice() == null ? 0 : item.getPrice()
         );
     }
 
     private Map<String, Object> mapOrderSummary(Order order) {
+        if ("SUBSCRIPTION".equalsIgnoreCase(order.getBookingType())) {
+            return subscriptionSummaryPayload(order);
+        }
         // Keep history resilient even when order items are lazily unavailable.
         String serviceName = "Service";
-        return Map.of(
-                "id", String.valueOf(order.getId()),
-                "status", order.getStatus() == null ? "CREATED" : order.getStatus().name(),
-                "serviceName", serviceName,
-                "createdAt", String.valueOf(order.getCreatedAt())
+        String assignmentStatus = deriveAssignmentStatus(order, order.getAssignedPartnerId() != null);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", String.valueOf(order.getId()));
+        payload.put("bookingId", String.valueOf(order.getId()));
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
+        payload.put("status", responseStatus(order, assignmentStatus));
+        payload.put("assignmentStatus", assignmentStatus);
+        payload.put("bookingType", order.getBookingType());
+        payload.put("serviceName", serviceName);
+        payload.put("createdAt", utc(order.getCreatedAt()));
+        Map<String, Object> trackingPayload = mapTrackingPayload(order, assignmentStatus);
+        Map<String, Object> permissions = actionPermissions(order, assignmentStatus, Boolean.TRUE.equals(trackingPayload.get("partnerAvailable")));
+        Map<String, Object> meta = metaPayload(
+                trackingScreen(order, assignmentStatus),
+                trackingRefreshSeconds(responseStatus(order, assignmentStatus), assignmentStatus),
+                trackingPayload,
+                permissions
         );
+        addReviewMeta(meta, order);
+        payload.put("meta", meta);
+        return payload;
     }
 
-    private Map<String, Object> toNotificationMap(Notification notification) {
-        String bookingId = null;
-        if ("BOOKING".equalsIgnoreCase(notification.getReferenceType())) {
-            if (notification.getReferenceId() != null) {
-                bookingId = String.valueOf(notification.getReferenceId());
-            } else if (notification.getRedirectValue() != null && !notification.getRedirectValue().isBlank()) {
-                bookingId = notification.getRedirectValue().trim();
-            }
+    private Map<String, Object> pagedGroup(List<Map<String, Object>> items, int page, int size) {
+        int fromIndex = Math.min((page - 1) * size, items.size());
+        int toIndex = Math.min(fromIndex + size, items.size());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("items", items.subList(fromIndex, toIndex));
+        payload.put("page", page);
+        payload.put("size", size);
+        payload.put("hasMore", toIndex < items.size());
+        return payload;
+    }
+
+    private Map<String, Object> subscriptionBookingPayload(Long userId, Order order) {
+        SubscriptionMaster subscription = subscriptionMasterRepository
+                .findByBookingIdAndCustomerId(order.getId(), userId)
+                .orElseThrow(() -> new BadRequestException("Subscription not found"));
+        List<String> frequencyDays = subscriptionFrequencyRepository.findBySubscriptionIdOrderByIdAsc(subscription.getId())
+                .stream()
+                .map(SubscriptionFrequency::getDayName)
+                .toList();
+        List<SubscriptionVisit> visits = subscriptionVisitRepository.findBySubscriptionIdOrderByVisitDateAscIdAsc(subscription.getId());
+        LocalDate nextServiceDate = visits.stream()
+                .filter(visit -> !visit.getVisitDate().isBefore(LocalDate.now()))
+                .map(SubscriptionVisit::getVisitDate)
+                .findFirst()
+                .orElse(subscription.getStartDate());
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", subscription.getId());
+        payload.put("bookingId", order.getId());
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
+        payload.put("bookingType", "SUBSCRIPTION");
+        payload.put("subscriptionId", subscription.getId());
+        payload.put("subscriptionServiceType", subscription.getServiceType());
+        payload.put("frequencyLabel", frequencyLabel(frequencyDays));
+        payload.put("frequencyDays", frequencyDays);
+        payload.put("startDate", subscription.getStartDate());
+        payload.put("endDate", subscription.getEndDate());
+        payload.put("visits", subscription.getVisits());
+        payload.put("timeSlot", subscription.getTimeSlot());
+        payload.put("fullAddress", order.getAddress());
+        payload.put("totalAmount", subscription.getPrice());
+        payload.put("nextServiceDate", nextServiceDate);
+        payload.put("status", subscription.getStatus().name());
+        payload.put("paymentStatus", order.getPaymentStatus() == null ? "PENDING" : order.getPaymentStatus().name());
+        payload.put("map", Map.of("enabled", false, "reason", "SUBSCRIPTION_DETAILS"));
+        payload.put("partnerAvailable", false);
+        payload.put("retryPaymentAllowed", retryPaymentAllowed(order));
+        payload.put("statusHistory", statusHistory(order));
+        payload.put("meta", subscriptionBookingMeta());
+        return payload;
+    }
+
+    private Map<String, Object> subscriptionSummaryPayload(Order order) {
+        SubscriptionMaster subscription = subscriptionMasterRepository.findByBookingId(order.getId()).orElse(null);
+        if (subscription == null) {
+            return Map.of(
+                    "id", String.valueOf(order.getId()),
+                    "bookingId", String.valueOf(order.getId()),
+                    "contractVersion", BOOKING_CONTRACT_VERSION,
+                    "bookingType", "SUBSCRIPTION",
+                    "status", order.getStatus() == null ? "CONFIRMED" : order.getStatus().name(),
+                    "createdAt", utc(order.getCreatedAt()),
+                    "meta", subscriptionBookingMeta()
+            );
         }
+        List<String> frequencyDays = subscriptionFrequencyRepository.findBySubscriptionIdOrderByIdAsc(subscription.getId())
+                .stream()
+                .map(SubscriptionFrequency::getDayName)
+                .toList();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", subscription.getId());
+        payload.put("bookingId", order.getId());
+        payload.put("contractVersion", BOOKING_CONTRACT_VERSION);
+        payload.put("bookingType", "SUBSCRIPTION");
+        payload.put("subscriptionId", subscription.getId());
+        payload.put("subscriptionServiceType", subscription.getServiceType());
+        payload.put("frequencyLabel", frequencyLabel(frequencyDays));
+        payload.put("frequencyDays", frequencyDays);
+        payload.put("startDate", subscription.getStartDate());
+        payload.put("endDate", subscription.getEndDate());
+        payload.put("visits", subscription.getVisits());
+        payload.put("timeSlot", subscription.getTimeSlot());
+        payload.put("fullAddress", order.getAddress());
+        payload.put("totalAmount", subscription.getPrice());
+        payload.put("status", subscription.getStatus().name());
+        payload.put("createdAt", utc(order.getCreatedAt()));
+        payload.put("meta", subscriptionBookingMeta());
+        return payload;
+    }
+
+    private String frequencyLabel(List<String> frequencyDays) {
+        if (frequencyDays == null || frequencyDays.isEmpty()) {
+            return "Custom";
+        }
+        if (frequencyDays.size() == 7) {
+            return "Everyday";
+        }
+        if (frequencyDays.size() == 1) {
+            return frequencyDays.get(0);
+        }
+        return String.join(", ", frequencyDays);
+    }
+
+    private Map<String, Object> mapTrackingPayload(Order order, String assignmentStatus) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        boolean paid = order.getPaymentStatus() == PaymentStatus.SUCCESS;
+        boolean activeTracking = Set.of("PARTNER_ON_THE_WAY", "ARRIVED", "PARTNER_ARRIVED", "SERVICE_STARTED")
+                .contains(assignmentStatus == null ? "" : assignmentStatus.toUpperCase(Locale.ROOT));
+        Long partnerId = order.getAssignedPartnerId();
+        Optional<CurrentPartnerLocationEntity> partnerLocation = partnerId == null
+                ? Optional.empty()
+                : currentPartnerLocationRepository.findByPartnerIdAndDeletedFalse(partnerId);
+        boolean partnerAvailable = partnerLocation.isPresent();
+        boolean showMap = paid && activeTracking && partnerAvailable;
+
+        payload.put("showMap", showMap);
+        payload.put("mapEnabled", showMap);
+        payload.put("partnerAvailable", partnerAvailable);
+        payload.put("trackingStatus", assignmentStatus);
+        if (!showMap) {
+            payload.put("map", Map.of(
+                    "enabled", false,
+                    "reason", mapDisabledReason(paid, activeTracking, partnerId, partnerAvailable)
+            ));
+            return payload;
+        }
+
+        CurrentPartnerLocationEntity location = partnerLocation.get();
+        Map<String, Object> partner = new LinkedHashMap<>();
+        partner.put("id", partnerId);
+        partner.put("latitude", location.getLatitude() == null ? null : location.getLatitude().doubleValue());
+        partner.put("longitude", location.getLongitude() == null ? null : location.getLongitude().doubleValue());
+        partner.put("updatedAt", utc(location.getUpdatedAt()));
+        partner.put("lastHeartbeatAt", utc(location.getLastHeartbeatAt()));
+
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("enabled", true);
+        map.put("provider", "MAPBOX");
+        map.put("partner", partner);
+        map.put("customer", Map.of(
+                "latitude", "",
+                "longitude", ""
+        ));
+        payload.put("map", map);
+        return payload;
+    }
+
+    private Map<String, Object> rootTrackingPayload(Map<String, Object> trackingPayload) {
+        Map<String, Object> payload = new LinkedHashMap<>(trackingPayload);
+        payload.remove("showMap");
+        payload.remove("mapEnabled");
+        return payload;
+    }
+
+    private Map<String, Object> actionPermissions(Order order, String assignmentStatus, boolean partnerAvailable) {
+        Map<String, Object> permissions = new LinkedHashMap<>();
+        permissions.put("canCancel", order != null && order.getStatus() != null && order.getStatus().canCancel());
+        permissions.put("canReschedule", canReschedule(order));
+        permissions.put("canCallPartner", canCallPartner(order, assignmentStatus));
+        permissions.put("canTrackPartner", partnerAvailable && Set.of("PARTNER_ON_THE_WAY", "ARRIVED", "PARTNER_ARRIVED", "SERVICE_STARTED")
+                .contains(assignmentStatus == null ? "" : assignmentStatus.toUpperCase(Locale.ROOT)));
+        permissions.put("canRaiseIssue", canRaiseIssue(order));
+        return permissions;
+    }
+
+    private boolean canReschedule(Order order) {
+        if (order == null || order.getStatus() == null) {
+            return false;
+        }
+        boolean scheduled = "SCHEDULED".equalsIgnoreCase(order.getBookingType()) || order.getStatus() == OrderStatus.SCHEDULED;
+        return scheduled && Set.of(OrderStatus.CREATED, OrderStatus.CONFIRMED, OrderStatus.SCHEDULED, OrderStatus.BOOKING_CREATED)
+                .contains(order.getStatus());
+    }
+
+    private boolean canCallPartner(Order order, String assignmentStatus) {
+        if (order == null || order.getAssignedPartnerId() == null) {
+            return false;
+        }
+        return Set.of("PARTNER_ASSIGNED", "PARTNER_ON_THE_WAY", "ARRIVED", "PARTNER_ARRIVED", "SERVICE_STARTED", "IN_PROGRESS")
+                .contains(assignmentStatus == null ? "" : assignmentStatus.toUpperCase(Locale.ROOT));
+    }
+
+    private boolean canRaiseIssue(Order order) {
+        if (order == null || order.getStatus() == null) {
+            return false;
+        }
+        return Set.of(OrderStatus.SERVICE_STARTED, OrderStatus.SERVICE_IN_PROGRESS, OrderStatus.SERVICE_COMPLETED,
+                OrderStatus.DELIVERED, OrderStatus.PAYMENT_COMPLETED).contains(order.getStatus());
+    }
+
+    private boolean retryPaymentAllowed(Order order) {
+        return order != null && (order.getPaymentStatus() == PaymentStatus.FAILED || order.getPaymentStatus() == PaymentStatus.EXPIRED);
+    }
+
+    private int trackingRefreshSeconds(String status, String assignmentStatus) {
+        String normalized = assignmentStatus == null ? "" : assignmentStatus.toUpperCase(Locale.ROOT);
+        if ("PARTNER_ASSIGNED".equals(normalized)) {
+            return 15;
+        }
+        if ("PARTNER_ON_THE_WAY".equals(normalized)) {
+            return 5;
+        }
+        if ("ARRIVED".equals(normalized) || "PARTNER_ARRIVED".equals(normalized)) {
+            return 5;
+        }
+        if ("SERVICE_STARTED".equals(normalized)) {
+            return 15;
+        }
+        if ("IN_PROGRESS".equals(normalized) || "SERVICE_IN_PROGRESS".equalsIgnoreCase(status)) {
+            return 30;
+        }
+        if ("COMPLETED".equalsIgnoreCase(status) || "COMPLETED".equals(normalized)) {
+            return 0;
+        }
+        return 15;
+    }
+
+    private Map<String, Object> metaPayload(String trackingScreen,
+                                            int trackingRefreshSeconds,
+                                            Map<String, Object> trackingPayload,
+                                            Map<String, Object> permissions) {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("trackingScreen", trackingScreen);
+        meta.put("trackingRefreshSeconds", trackingRefreshSeconds);
+        meta.put("showMap", Boolean.TRUE.equals(trackingPayload.get("showMap")));
+        meta.put("canCancel", Boolean.TRUE.equals(permissions.get("canCancel")));
+        meta.put("canReschedule", Boolean.TRUE.equals(permissions.get("canReschedule")));
+        meta.put("canCallPartner", Boolean.TRUE.equals(permissions.get("canCallPartner")));
+        meta.put("canTrackPartner", Boolean.TRUE.equals(permissions.get("canTrackPartner")));
+        meta.put("canRaiseIssue", Boolean.TRUE.equals(permissions.get("canRaiseIssue")));
+        return meta;
+    }
+
+    private void addReviewMeta(Map<String, Object> meta, Order order) {
+        boolean reviewSubmitted = order != null
+                && order.getId() != null
+                && reviewRepository.existsByBookingIdAndDeletedFalse(order.getId());
+        boolean canReview = order != null && isCompletedStatus(order.getStatus()) && !reviewSubmitted;
+        meta.put("canReview", canReview);
+        meta.put("reviewSubmitted", reviewSubmitted);
+    }
+
+    private Map<String, Object> subscriptionBookingMeta() {
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("trackingScreen", "SUBSCRIPTION_DETAILS");
+        meta.put("showMap", false);
+        meta.put("trackingRefreshSeconds", 0);
+        meta.put("canCancel", false);
+        meta.put("canReschedule", false);
+        meta.put("canCallPartner", false);
+        meta.put("canTrackPartner", false);
+        meta.put("canRaiseIssue", false);
+        return meta;
+    }
+
+    private List<Map<String, Object>> statusHistory(Order order) {
+        if (order == null || order.getId() == null) {
+            return List.of();
+        }
+        List<Map<String, Object>> events = bookingEventRepository.findByBookingIdOrderByCreatedAtAsc(order.getId()).stream()
+                .map(this::statusHistoryEvent)
+                .filter(Objects::nonNull)
+                .toList();
+        if (!events.isEmpty()) {
+            return events;
+        }
+        List<Map<String, Object>> fallback = new ArrayList<>();
+        addStatusHistory(fallback, "BOOKING_CREATED", order.getCreatedAt());
+        addStatusHistory(fallback, "PARTNER_ASSIGNED", order.getUpdatedAt(), order.getAssignedPartnerId() != null);
+        addStatusHistory(fallback, "ARRIVED", order.getArrivedAt());
+        addStatusHistory(fallback, "SERVICE_STARTED", order.getStartedAt());
+        addStatusHistory(fallback, "SERVICE_IN_PROGRESS", order.getInProgressAt());
+        addStatusHistory(fallback, "COMPLETED", firstNonNull(order.getCompletedAt(), isCompletedStatus(order.getStatus()) ? order.getUpdatedAt() : null));
+        return fallback;
+    }
+
+    private Map<String, Object> statusHistoryEvent(BookingEventEntity event) {
+        if (event == null || event.getEventType() == null) {
+            return null;
+        }
+        String status = timelineStatus(event.getEventType());
+        if (status == null) {
+            return null;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("status", status);
+        payload.put("time", utc(event.getCreatedAt()));
+        return payload;
+    }
+
+    private String timelineStatus(String eventType) {
+        String normalized = eventType == null ? "" : eventType.toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "BOOKING_CREATED", "SEARCHING_PARTNER", "PARTNER_SEARCH", "PARTNER_ASSIGNED",
+                 "SERVICE_STARTED", "SERVICE_IN_PROGRESS", "COMPLETED" -> normalized;
+            case "PARTNER_ACCEPTED", "OUT_FOR_DELIVERY" -> "ON_THE_WAY";
+            case "ARRIVED", "PARTNER_REACHED" -> "ARRIVED";
+            case "SERVICE_COMPLETED", "PAYMENT_COMPLETED", "DELIVERED" -> "COMPLETED";
+            default -> null;
+        };
+    }
+
+    private void addStatusHistory(List<Map<String, Object>> history, String status, LocalDateTime time) {
+        addStatusHistory(history, status, time, time != null);
+    }
+
+    private void addStatusHistory(List<Map<String, Object>> history, String status, LocalDateTime time, boolean include) {
+        if (!include) {
+            return;
+        }
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("status", status);
+        row.put("time", utc(time));
+        history.add(row);
+    }
+
+    private boolean isCompletedStatus(OrderStatus status) {
+        return status == OrderStatus.SERVICE_COMPLETED
+                || status == OrderStatus.PAYMENT_COMPLETED
+                || status == OrderStatus.DELIVERED;
+    }
+
+    private String assignmentStatusForMap(Order order) {
+        return deriveAssignmentStatus(order, order != null && order.getAssignedPartnerId() != null);
+    }
+
+    private String mapDisabledReason(boolean paid, boolean activeTracking, Long partnerId, boolean hasPartnerLocation) {
+        if (!paid) {
+            return "PAYMENT_NOT_PAID";
+        }
+        if (!activeTracking) {
+            return "TRACKING_NOT_ACTIVE";
+        }
+        if (partnerId == null) {
+            return "PARTNER_NOT_ASSIGNED";
+        }
+        if (!hasPartnerLocation) {
+            return "PARTNER_LOCATION_UNAVAILABLE";
+        }
+        return "UNAVAILABLE";
+    }
+
+    private Map<String, Object> toNotificationMap(NotificationResponse notification) {
+        String bookingId = notification.getBookingId();
         return Map.of(
                 "id", String.valueOf(notification.getId()),
                 "title", notification.getTitle() == null ? "" : notification.getTitle(),
@@ -1095,6 +1690,15 @@ public class LexhoExperienceController {
 
     private double round2(double value) {
         return Math.round(value * 100d) / 100d;
+    }
+
+    private String utc(LocalDateTime value) {
+        if (value == null) {
+            return null;
+        }
+        return value.atZone(java.time.ZoneId.systemDefault())
+                .withZoneSameInstant(java.time.ZoneOffset.UTC)
+                .format(java.time.format.DateTimeFormatter.ISO_INSTANT);
     }
 
     private Map<String, Object> paymentOptionsPayload(String bookingId, Long cartId, java.math.BigDecimal amount) {
@@ -1170,15 +1774,18 @@ public class LexhoExperienceController {
             return "SEARCHING_PARTNER";
         }
         String status = order.getStatus() == null ? "" : order.getStatus().name();
-        if ("SERVICE_STARTED".equalsIgnoreCase(status)) {
+        if ("SERVICE_IN_PROGRESS".equalsIgnoreCase(status)) {
             return "IN_PROGRESS";
+        }
+        if ("SERVICE_STARTED".equalsIgnoreCase(status)) {
+            return "SERVICE_STARTED";
         }
         if ("SERVICE_COMPLETED".equalsIgnoreCase(status)
                 || "DELIVERED".equalsIgnoreCase(status)
                 || "PAYMENT_COMPLETED".equalsIgnoreCase(status)) {
             return "COMPLETED";
         }
-        if ("PARTNER_REACHED".equalsIgnoreCase(status)) {
+        if ("ARRIVED".equalsIgnoreCase(status) || "PARTNER_REACHED".equalsIgnoreCase(status)) {
             return "ARRIVED";
         }
         if ("PARTNER_ACCEPTED".equalsIgnoreCase(status)
@@ -1216,6 +1823,78 @@ public class LexhoExperienceController {
             return "Service completed";
         }
         return "Finding partner";
+    }
+
+    private String responseStatus(Order order, String assignmentStatus) {
+        if (order == null || order.getStatus() == null) {
+            return "PENDING_ASSIGNMENT";
+        }
+        return switch (order.getStatus()) {
+            case SEARCHING_PARTNER, PARTNER_SEARCH, BOOKING_CREATED, CREATED, CONFIRMED -> {
+                if ("SCHEDULED".equalsIgnoreCase(order.getBookingType())) {
+                    yield "SCHEDULED";
+                }
+                yield "PENDING_ASSIGNMENT";
+            }
+            case PARTNER_ASSIGNED -> "PARTNER_ASSIGNED";
+            case PARTNER_ACCEPTED, PREPARING, OUT_FOR_DELIVERY -> "ON_THE_WAY";
+            case ARRIVED, PARTNER_REACHED -> "ARRIVED";
+            case SERVICE_STARTED -> "SERVICE_STARTED";
+            case SERVICE_IN_PROGRESS -> "SERVICE_IN_PROGRESS";
+            case SERVICE_COMPLETED, PAYMENT_COMPLETED, DELIVERED -> "COMPLETED";
+            case INSTANT_FAILED -> "EXPIRED";
+            case CANCELLED -> "CANCELLED";
+            case SCHEDULED -> "SCHEDULED";
+        };
+    }
+
+    private String trackingScreen(Order order, String assignmentStatus) {
+        if (order == null) {
+            return "INSTANT_STATUS";
+        }
+        if ("SUBSCRIPTION".equalsIgnoreCase(order.getBookingType())) {
+            return "SUBSCRIPTION_DETAILS";
+        }
+        if ("SCHEDULED".equalsIgnoreCase(order.getBookingType())
+                && !Set.of("PARTNER_ASSIGNED", "PARTNER_ON_THE_WAY", "ARRIVED", "PARTNER_ARRIVED", "SERVICE_STARTED", "IN_PROGRESS")
+                .contains(assignmentStatus == null ? "" : assignmentStatus.toUpperCase(Locale.ROOT))) {
+            return "SCHEDULED_STATUS";
+        }
+        OrderStatus status = order.getStatus();
+        if (status == null) {
+            return "INSTANT_STATUS";
+        }
+        return switch (status) {
+            case PARTNER_ASSIGNED -> "INSTANT_STATUS";
+            case PARTNER_ACCEPTED, PREPARING, OUT_FOR_DELIVERY -> "LIVE_TRACKING";
+            case ARRIVED, PARTNER_REACHED -> "PARTNER_ARRIVED";
+            case SERVICE_STARTED -> "SERVICE_STARTED";
+            case SERVICE_IN_PROGRESS -> "SERVICE_IN_PROGRESS";
+            case SERVICE_COMPLETED, PAYMENT_COMPLETED, DELIVERED -> "SERVICE_COMPLETED";
+            case SCHEDULED -> "SCHEDULED_STATUS";
+            default -> "INSTANT_STATUS";
+        };
+    }
+
+    private String estimatedCompletionTime(Order order) {
+        LocalDateTime base = order == null ? null : firstNonNull(order.getInProgressAt(), order.getStartedAt(), order.getScheduledAt());
+        if (base == null) {
+            return "";
+        }
+        return base.plusHours(1).format(java.time.format.DateTimeFormatter.ofPattern("hh:mm a", Locale.ENGLISH));
+    }
+
+    @SafeVarargs
+    private final <T> T firstNonNull(T... values) {
+        if (values == null) {
+            return null;
+        }
+        for (T value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private int deriveEtaMinutes(String status, String assignmentStatus) {
@@ -1339,8 +2018,11 @@ public class LexhoExperienceController {
                     date, slot, slotDateTimePolicy.zoneId().getId(), slotDateTimePolicy.now());
             throw new BadRequestException("Invalid date format. Use YYYY-MM-DD");
         }
-        LocalDateTime scheduledStart = slotDateTimePolicy.parseSlotStart(bookingDate, slot);
-        Map<String, Object> slotRow = customerCartSlotService.slotRowForDate(bookingDate, slot);
+         LocalDateTime scheduledStart = slotDateTimePolicy.parseSlotStart(bookingDate, slot);
+        if (bookingDate.isAfter(slotDateTimePolicy.today().plusDays(cartConfigService.currentEntity().getScheduledBookingWindowDays()))) {
+            throw new BookingValidationException("SLOT_UNAVAILABLE", "Selected date is outside scheduled booking window.");
+        }
+         Map<String, Object> slotRow = customerCartSlotService.slotRowForDate(bookingDate, slot);
         if (slotRow == null) {
             log.warn("Booking slot validation failed: requestedDate={}, requestedSlot={}, parsedServerDateTime={}, serverTimezone={}, currentServerTime={}, rejectionReasonCode=SLOT_NOT_LISTED, rejectionMessage=Selected slot is not available for requested date., slotLookupResult=NOT_FOUND",
                     date, slot, scheduledStart, slotDateTimePolicy.zoneId().getId(), slotDateTimePolicy.now());
@@ -1365,12 +2047,32 @@ public class LexhoExperienceController {
     }
 
     private String generateUniqueReferralCode(Long userId) {
-        for (int i = 0; i < 5; i++) {
-            String code = "LEX" + userId + new Random().nextInt(9000);
+        for (int i = 0; i < 10; i++) {
+            String code = nextReferralCode();
             if (!referralCodeRepository.existsByCodeIgnoreCase(code)) {
                 return code;
             }
         }
-        return "LEX" + userId + System.currentTimeMillis() % 10000;
+        return "LEX" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT);
+    }
+
+    static String nextReferralCode() {
+        StringBuilder builder = new StringBuilder(3 + REFERRAL_CODE_LENGTH);
+        builder.append("LEX");
+        for (int i = 0; i < REFERRAL_CODE_LENGTH; i++) {
+            builder.append(REFERRAL_CODE_ALPHABET[REFERRAL_CODE_RANDOM.nextInt(REFERRAL_CODE_ALPHABET.length)]);
+        }
+        return builder.toString();
+    }
+
+    private void audit(Long userId, Long partnerId, Long bookingId, String action, String oldValue, String newValue) {
+        if (auditLogService == null) {
+            return;
+        }
+        try {
+            auditLogService.log(userId, partnerId, bookingId, action, oldValue, newValue);
+        } catch (RuntimeException exception) {
+            log.warn("Audit log write failed for action={} bookingId={}", action, bookingId, exception);
+        }
     }
 }

@@ -1,28 +1,29 @@
-package com.lexho.partner.service;
+package com.lexho.provider.service;
 
 import com.lexho.catalog.entity.ServiceCategory;
 import com.lexho.catalog.repository.CategoryRepository;
-import com.lexho.partner.dto.ProviderActionResponse;
-import com.lexho.partner.dto.ProviderDetailsResponse;
-import com.lexho.partner.dto.ProviderDocumentUploadResponse;
-import com.lexho.partner.dto.ProviderListItemResponse;
-import com.lexho.partner.dto.ProviderOnboardingRequest;
-import com.lexho.partner.dto.ProviderPageResponse;
-import com.lexho.partner.dto.ProviderStatsResponse;
-import com.lexho.partner.entity.Provider;
-import com.lexho.partner.entity.ProviderDocument;
-import com.lexho.partner.enums.KycStatus;
-import com.lexho.partner.enums.OnboardingStatus;
-import com.lexho.partner.enums.ProviderDocumentType;
-import com.lexho.partner.exception.DocumentNotFoundException;
-import com.lexho.partner.exception.ProviderNotFoundException;
-import com.lexho.partner.exception.ProviderOperationException;
-import com.lexho.partner.exception.ProviderValidationException;
-import com.lexho.partner.mapper.ProviderMapper;
-import com.lexho.partner.repository.ProviderDocumentRepository;
-import com.lexho.partner.repository.ProviderRepository;
-import com.lexho.partner.service.storage.DocumentStorageService;
-import com.lexho.partner.service.storage.StoredDocument;
+import com.lexho.provider.dto.ProviderActionResponse;
+import com.lexho.provider.dto.ProviderDetailsResponse;
+import com.lexho.provider.dto.ProviderDocumentUploadResponse;
+import com.lexho.provider.dto.ProviderListItemResponse;
+import com.lexho.provider.dto.ProviderOnboardingRequest;
+import com.lexho.provider.dto.ProviderPageResponse;
+import com.lexho.provider.dto.ProviderStatsResponse;
+import com.lexho.provider.entity.Provider;
+import com.lexho.provider.entity.ProviderDocument;
+import com.lexho.provider.enums.KycStatus;
+import com.lexho.provider.enums.OnboardingStatus;
+import com.lexho.provider.enums.ProviderDocumentType;
+import com.lexho.provider.exception.DocumentNotFoundException;
+import com.lexho.provider.exception.ProviderNotFoundException;
+import com.lexho.provider.exception.ProviderOperationException;
+import com.lexho.provider.exception.ProviderFileUploadException;
+import com.lexho.provider.exception.ProviderValidationException;
+import com.lexho.provider.mapper.ProviderMapper;
+import com.lexho.provider.repository.ProviderDocumentRepository;
+import com.lexho.provider.repository.ProviderRepository;
+import com.lexho.provider.service.storage.DocumentStorageService;
+import com.lexho.provider.service.storage.StoredDocument;
 import com.lexho.user.entity.User;
 import com.lexho.user.repository.UserRepository;
 import jakarta.persistence.criteria.JoinType;
@@ -106,7 +107,8 @@ public class ProviderOnboardingService {
         partner.setState(normalizeRequired(resolvedState, "State is required"));
         partner.setFullAddress(normalizeRequired(resolvedFullAddress, "Full address is required"));
         partner.setServiceCategory(category);
-        partner.setExperienceYears(request.getExperienceYears() == null ? 0 : request.getExperienceYears());
+        Integer experienceYears = request.getExperienceYears();
+        partner.setExperienceYears(experienceYears == null ? Integer.valueOf(0) : experienceYears);
         partner.setServiceAreas(resolveServiceAreas(request.getServiceAreas(), request.getServiceType(), resolvedCity));
         partner.setAccountNumber(normalizeRequired(request.getAccountNumber(), "Account number is required"));
         partner.setIfscCode(normalizeRequired(request.getIfscCode(), "IFSC code is required").toUpperCase(Locale.ROOT));
@@ -309,15 +311,16 @@ public class ProviderOnboardingService {
         if (file == null || file.isEmpty()) {
             throw new ProviderValidationException("Document file is required");
         }
-        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase(Locale.ROOT);
+        String fileContentType = file.getContentType();
+        String contentType = fileContentType == null ? "" : fileContentType.toLowerCase(Locale.ROOT);
         if (documentType == ProviderDocumentType.PROFILE_PHOTO) {
-            if (!contentType.equals("image/jpeg") && !contentType.equals("image/jpg")) {
-                throw new ProviderValidationException("PROFILE_PHOTO must be a JPG image");
+            if (!contentType.equals("image/jpeg") && !contentType.equals("image/jpg") && !contentType.equals("image/png")) {
+                throw new ProviderFileUploadException("INVALID_FILE_TYPE", "PROFILE_PHOTO must be a JPG or PNG image");
             }
             return;
         }
         if (!contentType.equals("application/pdf")) {
-            throw new ProviderValidationException(documentType.name() + " must be a PDF file");
+            throw new ProviderFileUploadException("INVALID_FILE_TYPE", documentType.name() + " must be a PDF file");
         }
     }
 

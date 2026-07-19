@@ -3,6 +3,7 @@ package com.lexho.user_service.lexhopartner.controller;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.lexhopartner.dto.DashboardStatsDto;
 import com.lexho.user_service.lexhopartner.dto.OrderResponseDto;
+import com.lexho.user_service.lexhopartner.dto.OrderTimelineDto;
 import com.lexho.user_service.lexhopartner.dto.PageResponseDto;
 import com.lexho.user_service.lexhopartner.service.PartnerOrderService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 @RestController
 @RequestMapping({"/api/orders", "/api/v1/orders"})
@@ -39,6 +42,18 @@ public class LexhoPartnerOrderController {
         return ApiResponse.success("Orders fetched", partnerOrderService.getNewOrders(page, size, sortBy, direction));
     }
 
+    @GetMapping("/{id}")
+    @Operation(summary = "Get order details")
+    public ApiResponse<OrderResponseDto> getOrder(@RequestAttribute("userId") Long partnerId, @PathVariable Long id) {
+        return ApiResponse.success("Order fetched", partnerOrderService.getOrder(partnerId, id));
+    }
+
+    @GetMapping("/{id}/timeline")
+    @Operation(summary = "Get order lifecycle timeline")
+    public ApiResponse<List<OrderTimelineDto>> timeline(@RequestAttribute("userId") Long partnerId, @PathVariable Long id) {
+        return ApiResponse.success("Order timeline fetched", partnerOrderService.timeline(partnerId, id));
+    }
+
     @PostMapping("/{id}/accept")
     public ApiResponse<OrderResponseDto> accept(@RequestAttribute("userId") Long partnerId, @PathVariable Long id) {
         return ApiResponse.success("Order accepted", partnerOrderService.acceptOrder(partnerId, id));
@@ -52,14 +67,14 @@ public class LexhoPartnerOrderController {
     @PostMapping("/{id}/start")
     public ApiResponse<OrderResponseDto> start(@RequestAttribute("userId") Long partnerId,
                                                @PathVariable Long id,
-                                               @RequestPart("beforeImage") MultipartFile beforeImage) {
+                                               @RequestPart(value = "beforeImage", required = false) MultipartFile beforeImage) {
         return ApiResponse.success("Order started", partnerOrderService.startOrder(partnerId, id, beforeImage));
     }
 
     @PostMapping("/{id}/complete")
     public ApiResponse<OrderResponseDto> complete(@RequestAttribute("userId") Long partnerId,
                                                   @PathVariable Long id,
-                                                  @RequestPart("afterImage") MultipartFile afterImage) {
+                                                  @RequestPart(value = "afterImage", required = false) MultipartFile afterImage) {
         return ApiResponse.success("Order completed", partnerOrderService.completeOrder(partnerId, id, afterImage));
     }
 

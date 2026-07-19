@@ -32,6 +32,8 @@ class CustomerCatalogServiceTest {
     private AdminCategoryRepository adminCategoryRepository;
     @Mock
     private MediaUrlResolver mediaUrlResolver;
+    @Mock
+    private CustomerServiceBookingModeMapper bookingModeMapper;
 
     @InjectMocks
     private CustomerCatalogService customerCatalogService;
@@ -52,11 +54,13 @@ class CustomerCatalogServiceTest {
         when(adminCategoryRepository.findByIdAndDeletedFalse(1L)).thenReturn(Optional.of(category));
         when(customerCatalogRepository.findByCategory_IdAndActiveTrueAndDeletedFalse(
                 ArgumentMatchers.eq(1L), ArgumentMatchers.any())).thenReturn(new PageImpl<>(List.of(service)));
+        when(bookingModeMapper.bookingModes(service)).thenReturn(List.of("FIXED"));
 
         List<CustomerServiceCardResponse> result = customerCatalogService.getServicesByCategory(1L, 0, 20);
 
         assertEquals(1, result.size());
         assertEquals("Bathroom Cleaning", result.get(0).getName());
+        assertEquals(new BigDecimal("49.00"), result.get(0).getPrice());
         assertEquals(new BigDecimal("49.00"), result.get(0).getDiscountedPrice());
         assertTrue(result.get(0).isNew());
     }

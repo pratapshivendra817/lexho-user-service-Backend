@@ -1,7 +1,7 @@
 package com.lexho.user_service.lexhopartner.entity;
 
-import com.lexho.partner.enums.KycStatus;
-import com.lexho.partner.enums.OnboardingStatus;
+import com.lexho.provider.enums.KycStatus;
+import com.lexho.provider.enums.OnboardingStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -39,6 +39,9 @@ public class PartnerProfile extends BaseEntity {
     @Column(length = 100)
     private String city;
 
+    @Column(length = 20)
+    private String pincode;
+
     @Column(length = 255)
     private String address;
 
@@ -47,6 +50,9 @@ public class PartnerProfile extends BaseEntity {
 
     @Column(nullable = false)
     private Double rating = 0.0;
+
+    @Column(name = "total_reviews", nullable = false)
+    private Long totalReviews = 0L;
 
     @Column(name = "profile_image", length = 1000)
     private String profileImage;
@@ -101,4 +107,16 @@ public class PartnerProfile extends BaseEntity {
 
     @Column(name = "admin_notes", length = 1000)
     private String adminNotes;
+
+    @Column(name = "kyc_workflow_status", nullable = false, length = 30)
+    private String kycWorkflowStatus = "PENDING";
+
+    @Column(name = "kyc_rejection_reason", length = 500)
+    private String kycRejectionReason;
+
+    @Column(name = "bank_verification_status", nullable = false, length = 30)
+    private String bankVerificationStatus = "PENDING";
+
+    @Column(name = "bank_rejection_reason", length = 500)
+    private String bankRejectionReason;
 }

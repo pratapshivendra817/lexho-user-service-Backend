@@ -16,6 +16,8 @@ public interface ReviewRepository extends JpaRepository<ReviewEntity, Long>, Jpa
 
     Optional<ReviewEntity> findByIdAndDeletedFalse(Long id);
 
+    Optional<ReviewEntity> findByBookingIdAndCustomerIdAndDeletedFalse(Long bookingId, Long customerId);
+
     boolean existsByBookingIdAndDeletedFalse(Long bookingId);
 
     List<ReviewEntity> findByCustomerIdAndDeletedFalseOrderByCreatedAtDesc(Long customerId);
@@ -32,8 +34,20 @@ public interface ReviewRepository extends JpaRepository<ReviewEntity, Long>, Jpa
 
     long countByDeletedFalseAndStatus(ReviewStatus status);
 
+    long countByProviderIdAndStatusAndDeletedFalse(Long providerId, ReviewStatus status);
+
     @Query("SELECT COALESCE(AVG(r.rating), 0) FROM MarketplaceReview r WHERE r.deleted = false")
     Double averageRating();
+
+    @Query("""
+            SELECT COALESCE(AVG(r.rating), 0)
+            FROM MarketplaceReview r
+            WHERE r.deleted = false
+              AND r.status = :status
+              AND r.providerId = :providerId
+            """)
+    Double averageRatingByProviderIdAndStatus(@Param("providerId") Long providerId,
+                                              @Param("status") ReviewStatus status);
 
     @Query("""
             SELECT r.providerId, COALESCE(AVG(r.rating), 0), COUNT(r)

@@ -71,6 +71,18 @@ public class LexhoAddressService {
     }
 
     @Transactional
+    public LexhoAddress applyBookingCoordinatesFallback(Long userId, Long addressId, Double latitude, Double longitude) {
+        LexhoAddress address = addressCoreService.findOwnedActive(userId, addressId);
+        if (isValidCoordinate(latitude, longitude) && !hasValidCoordinates(address)) {
+            address.setLatitude(BigDecimal.valueOf(latitude));
+            address.setLongitude(BigDecimal.valueOf(longitude));
+            address.setUpdatedBy("CUSTOMER:" + userId);
+            return addressRepository.save(address);
+        }
+        return address;
+    }
+
+    @Transactional
     public void delete(Long userId, Long addressId) {
         addressCoreService.softDelete(userId, addressId);
     }
@@ -88,5 +100,25 @@ public class LexhoAddressService {
                 address.getCity(),
                 address.isDefault()
         );
+    }
+
+    private boolean hasValidCoordinates(LexhoAddress address) {
+        return address.getLatitude() != null
+                && address.getLongitude() != null
+                && BigDecimal.ZERO.compareTo(address.getLatitude()) != 0
+                && BigDecimal.ZERO.compareTo(address.getLongitude()) != 0;
+    }
+
+    private boolean isValidCoordinate(Double latitude, Double longitude) {
+        return latitude != null
+                && longitude != null
+                && Double.isFinite(latitude)
+                && Double.isFinite(longitude)
+                && latitude >= -90.0d
+                && latitude <= 90.0d
+                && longitude >= -180.0d
+                && longitude <= 180.0d
+                && latitude != 0.0d
+                && longitude != 0.0d;
     }
 }

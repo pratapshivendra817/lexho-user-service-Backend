@@ -1,7 +1,7 @@
-package com.lexho.partner.repository;
+package com.lexho.provider.repository;
 
-import com.lexho.partner.entity.ProviderDocument;
-import com.lexho.partner.enums.ProviderDocumentType;
+import com.lexho.provider.entity.ProviderDocument;
+import com.lexho.provider.enums.ProviderDocumentType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

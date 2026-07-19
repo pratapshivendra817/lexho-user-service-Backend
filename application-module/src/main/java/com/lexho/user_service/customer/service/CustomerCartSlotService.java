@@ -2,6 +2,8 @@ package com.lexho.user_service.customer.service;
 
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
+import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
+import com.lexho.user_service.cartconfig.service.CartConfigService;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -18,9 +20,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CustomerCartSlotService {
 
-    private static final int SLOT_CAPACITY = 20;
     private static final Set<OrderStatus> ACTIVE_STATUSES = Set.of(
             OrderStatus.CREATED,
+            OrderStatus.SCHEDULED,
             OrderStatus.CONFIRMED,
             OrderStatus.PREPARING,
             OrderStatus.OUT_FOR_DELIVERY
@@ -28,11 +30,11 @@ public class CustomerCartSlotService {
 
     private static final LocalTime SLOT_DAY_START = LocalTime.of(6, 0);
     private static final LocalTime SLOT_DAY_END = LocalTime.of(23, 0);
-    private static final int SLOT_MINUTES = 15;
 
     private final OrderRepository orderRepository;
     private final PartnerShiftRepository partnerShiftRepository;
     private final SlotDateTimePolicy slotDateTimePolicy;
+    private final CartConfigService cartConfigService;
 
     public Map<String, Object> slotsForDate(LocalDate date) {
         LocalDate today = slotDateTimePolicy.today();
@@ -41,9 +43,10 @@ public class CustomerCartSlotService {
         }
 
         List<Map<String, Object>> slots = new ArrayList<>();
-        LocalDateTime now = slotDateTimePolicy.now();
+        CartConfigEntity config = cartConfigService.currentEntity();
+        int capacity = config.getMaxBookingsPerSlot();
 
-        for (SlotWindow window : slotWindows()) {
+        for (SlotWindow window : slotWindows(config.getSlotIntervalMinutes())) {
             LocalDateTime from = LocalDateTime.of(date, window.from());
             LocalDateTime to = LocalDateTime.of(date, window.to());
 
@@ -51,9 +54,9 @@ public class CustomerCartSlotService {
                     from, to, ACTIVE_STATUSES
             );
 
-            int remaining = Math.max(SLOT_CAPACITY - (int) booked, 0);
+            int remaining = Math.max(capacity - (int) booked, 0);
             boolean futureSlot = !slotDateTimePolicy.isExpired(from);
-            boolean available = futureSlot && remaining > 0;
+            boolean available = futureSlot && (!Boolean.TRUE.equals(config.getRejectFullSlots()) || remaining > 0);
 
             slots.add(Map.of(
                     "slot", window.label(),
@@ -62,7 +65,7 @@ public class CustomerCartSlotService {
                     "endTime", window.to().toString(),
                     "isInstantEligible", isInstantEligible(date, from),
                     "etaMinutes", estimateInstantEtaMinutes(),
-                    "capacity", SLOT_CAPACITY,
+                    "capacity", capacity,
                     "booked", booked,
                     "remaining", remaining,
                     "available", available
@@ -102,11 +105,11 @@ public class CustomerCartSlotService {
     private record SlotWindow(String label, LocalTime from, LocalTime to) {
     }
 
-    private List<SlotWindow> slotWindows() {
+    private List<SlotWindow> slotWindows(int slotMinutes) {
         List<SlotWindow> windows = new ArrayList<>();
         LocalTime from = SLOT_DAY_START;
         while (from.isBefore(SLOT_DAY_END)) {
-            LocalTime to = from.plusMinutes(SLOT_MINUTES);
+            LocalTime to = from.plusMinutes(slotMinutes);
             if (to.isAfter(SLOT_DAY_END)) {
                 break;
             }

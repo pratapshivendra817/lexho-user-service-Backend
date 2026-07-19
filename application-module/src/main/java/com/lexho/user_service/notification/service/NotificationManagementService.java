@@ -5,7 +5,6 @@ import com.lexho.common.enums.Role;
 import com.lexho.notification.entity.Notification;
 import com.lexho.notification.entity.NotificationLog;
 import com.lexho.notification.entity.NotificationPreference;
-import com.lexho.notification.entity.UserDeviceToken;
 import com.lexho.notification.enums.ChannelType;
 import com.lexho.notification.enums.DeliveryStatus;
 import com.lexho.notification.enums.NotificationPriority;
@@ -15,7 +14,6 @@ import com.lexho.notification.enums.NotificationUserType;
 import com.lexho.notification.repository.NotificationLogRepository;
 import com.lexho.notification.repository.NotificationPreferenceRepository;
 import com.lexho.notification.repository.NotificationRepository;
-import com.lexho.notification.repository.UserDeviceTokenRepository;
 import com.lexho.user.entity.User;
 import com.lexho.user.enums.UserStatus;
 import com.lexho.user.repository.UserRepository;
@@ -61,11 +59,13 @@ public class NotificationManagementService {
     private static final int MAX_RETRY = 3;
     private static final int PER_TYPE_MINUTE_LIMIT = 5;
     private static final int DUPLICATE_GUARD_SECONDS = 10;
+    private static final String WARNING_NOTIFICATION_TITLE = "New Warning Issued";
+    private static final String WARNING_NOTIFICATION_MESSAGE =
+            "A new warning has been issued to your account. Tap to view the details.";
 
     private final NotificationRepository notificationRepository;
     private final NotificationLogRepository notificationLogRepository;
     private final NotificationPreferenceRepository notificationPreferenceRepository;
-    private final UserDeviceTokenRepository userDeviceTokenRepository;
     private final UserRepository userRepository;
     private final LexhoUserProfileRepository lexhoUserProfileRepository;
     private final AdminRepository adminRepository;
@@ -76,7 +76,6 @@ public class NotificationManagementService {
     public NotificationManagementService(NotificationRepository notificationRepository,
                                          NotificationLogRepository notificationLogRepository,
                                          NotificationPreferenceRepository notificationPreferenceRepository,
-                                         UserDeviceTokenRepository userDeviceTokenRepository,
                                          UserRepository userRepository,
                                          LexhoUserProfileRepository lexhoUserProfileRepository,
                                          AdminRepository adminRepository,
@@ -86,7 +85,6 @@ public class NotificationManagementService {
         this.notificationRepository = notificationRepository;
         this.notificationLogRepository = notificationLogRepository;
         this.notificationPreferenceRepository = notificationPreferenceRepository;
-        this.userDeviceTokenRepository = userDeviceTokenRepository;
         this.userRepository = userRepository;
         this.lexhoUserProfileRepository = lexhoUserProfileRepository;
         this.adminRepository = adminRepository;
@@ -157,6 +155,13 @@ public class NotificationManagementService {
         }
     }
 
+    @Transactional
+    @CacheEvict(value = "notificationUnreadCount", key = "#partnerId")
+    public void createPartnerWarningNotification(Long partnerId, Long warningId, String reason) {
+        createWarningNotification(partnerId, warningId, ChannelType.IN_APP);
+        createWarningNotification(partnerId, warningId, ChannelType.PUSH);
+    }
+
     public NotificationPageResponse<NotificationResponse> getCustomerNotifications(int page, int size) {
         Long userId = currentUserId();
         return byUser(page, size, userId);
@@ -169,7 +174,11 @@ public class NotificationManagementService {
 
     @Cacheable(value = "notificationUnreadCount", key = "#userId")
     public long unreadCountByUserId(Long userId) {
-        return notificationRepository.countByUserIdAndStatusNotAndDeletedFalse(userId, NotificationStatus.READ);
+        return notificationRepository.countByUserIdAndChannelTypeAndStatusNotAndDeletedFalse(
+                userId,
+                ChannelType.IN_APP,
+                NotificationStatus.READ
+        );
     }
 
     public long unreadCountForCurrentUser() {
@@ -186,7 +195,9 @@ public class NotificationManagementService {
         }
         notification.setStatus(NotificationStatus.READ);
         notification.setReadAt(LocalDateTime.now());
-        return notificationRepository.save(notification);
+        Notification saved = notificationRepository.save(notification);
+        saveLog(saved.getId(), DeliveryStatus.READ, null, saved.getRetryCount());
+        return saved;
     }
 
     @Transactional
@@ -265,7 +276,8 @@ public class NotificationManagementService {
                 + notificationRepository.countByStatusAndDeletedFalse(NotificationStatus.DELIVERED);
         long totalFailed = notificationRepository.countByStatusAndDeletedFalse(NotificationStatus.FAILED);
         long totalRead = notificationRepository.countByStatusAndDeletedFalse(NotificationStatus.READ);
-        long totalPending = notificationRepository.countByStatusAndDeletedFalse(NotificationStatus.PENDING);
+        long totalPending = notificationRepository.countByStatusAndDeletedFalse(NotificationStatus.PENDING)
+                + notificationRepository.countByStatusAndDeletedFalse(NotificationStatus.QUEUED);
         long totalClicked = notificationRepository.countByStatusAndDeletedFalse(NotificationStatus.CLICKED);
 
         List<ChannelStatResponse> channelWise = new ArrayList<>();
@@ -285,7 +297,7 @@ public class NotificationManagementService {
     @CacheEvict(value = "notificationUnreadCount", allEntries = true)
     public void processScheduledNotifications() {
         List<Notification> due = notificationRepository.findByStatusAndScheduledTimeLessThanEqualAndDeletedFalse(
-                NotificationStatus.PENDING,
+                NotificationStatus.QUEUED,
                 LocalDateTime.now()
         );
         due.forEach(this::publishDispatch);
@@ -299,7 +311,7 @@ public class NotificationManagementService {
                 MAX_RETRY
         );
         for (Notification notification : failed) {
-            notification.setStatus(NotificationStatus.PENDING);
+            notification.setStatus(NotificationStatus.QUEUED);
             notification.setRetryCount(notification.getRetryCount() + 1);
             Notification saved = notificationRepository.save(notification);
             publishDispatch(saved);
@@ -317,10 +329,13 @@ public class NotificationManagementService {
     @Transactional
     @CacheEvict(value = "notificationUnreadCount", key = "#notification.userId")
     public void markDispatched(Notification notification) {
-        notification.setStatus(NotificationStatus.SENT);
-        notification.setSentAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        notification.setStatus(NotificationStatus.DELIVERED);
+        notification.setSentAt(notification.getSentAt() == null ? now : notification.getSentAt());
+        notification.setDeliveredAt(now);
         notificationRepository.save(notification);
-        saveLog(notification.getId(), DeliveryStatus.SUCCESS, null, notification.getRetryCount());
+        saveLog(notification.getId(), DeliveryStatus.SENT, null, notification.getRetryCount());
+        saveLog(notification.getId(), DeliveryStatus.DELIVERED, null, notification.getRetryCount());
     }
 
     @Transactional
@@ -334,13 +349,21 @@ public class NotificationManagementService {
         saveLog(notification.getId(), DeliveryStatus.FAILED, normalizedError, notification.getRetryCount());
     }
 
+    @Transactional
+    @CacheEvict(value = "notificationUnreadCount", key = "#notification.userId")
+    public void markFailedPermanently(Notification notification, String errorMessage) {
+        notification.setStatus(NotificationStatus.FAILED);
+        notification.setRetryCount(MAX_RETRY);
+        notificationRepository.save(notification);
+        String normalizedError = (errorMessage == null || errorMessage.isBlank())
+                ? "Dispatch failed due to a non-retryable error"
+                : errorMessage;
+        saveLog(notification.getId(), DeliveryStatus.FAILED, normalizedError, notification.getRetryCount());
+    }
+
     public Notification findActive(Long id) {
         return notificationRepository.findByIdAndDeletedFalse(id)
                 .orElseThrow(() -> new NotificationNotFoundException(id));
-    }
-
-    public List<UserDeviceToken> activeDeviceTokens(Long userId) {
-        return userDeviceTokenRepository.findByUserIdAndActiveTrue(userId);
     }
 
     private void validateBulkRequest(AdminBulkNotificationRequest request) {
@@ -368,15 +391,46 @@ public class NotificationManagementService {
         notification.setRedirectValue(request.getRedirectValue());
         notification.setScheduledTime(request.getScheduledTime());
         notification.setExpiryTime(request.getExpiryTime());
-        notification.setStatus(NotificationStatus.PENDING);
+        notification.setStatus(NotificationStatus.QUEUED);
         notification.setRetryCount(0);
         notification.setDeleted(false);
         return notification;
     }
 
+    private void createWarningNotification(Long partnerId, Long warningId, ChannelType channelType) {
+        Notification notification = new Notification();
+        notification.setUserId(partnerId);
+        notification.setUserType(NotificationUserType.PARTNER);
+        notification.setTitle(WARNING_NOTIFICATION_TITLE);
+        notification.setMessage(WARNING_NOTIFICATION_MESSAGE);
+        notification.setNotificationType(NotificationType.SYSTEM);
+        notification.setChannelType(channelType);
+        notification.setPriority(NotificationPriority.HIGH);
+        notification.setReferenceId(warningId);
+        notification.setReferenceType("WARNING");
+        notification.setRedirectType("WARNING");
+        notification.setRedirectValue(String.valueOf(warningId));
+        notification.setRetryCount(0);
+        notification.setDeleted(false);
+        if (channelType == ChannelType.IN_APP) {
+            notification.setScheduledTime(null);
+            notification.setStatus(NotificationStatus.SENT);
+            notification.setSentAt(LocalDateTime.now());
+        } else {
+            notification.setStatus(NotificationStatus.QUEUED);
+        }
+        if (isRecentDuplicate(notification)) {
+            log.warn("Duplicate warning notification skipped. partnerId={}, warningId={}, channel={}",
+                    partnerId, warningId, channelType);
+            return;
+        }
+        Notification saved = notificationRepository.save(notification);
+        publishDispatch(saved);
+    }
+
     private NotificationPageResponse<NotificationResponse> byUser(int page, int size, Long userId) {
         Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), Sort.by(Sort.Direction.DESC, "createdAt"));
-        List<Notification> all = notificationRepository.findByUserIdAndDeletedFalseOrderByCreatedAtDesc(userId)
+        List<Notification> all = notificationRepository.findByUserIdAndChannelTypeAndDeletedFalseOrderByCreatedAtDesc(userId, ChannelType.IN_APP)
                 .stream()
                 .filter(this::notExpired)
                 .toList();
@@ -423,6 +477,7 @@ public class NotificationManagementService {
     }
 
     private void publishDispatch(Notification notification) {
+        saveLog(notification.getId(), DeliveryStatus.QUEUED, null, notification.getRetryCount());
         eventPublisher.publishEvent(new NotificationDispatchEvent(notification.getId(), notification.getChannelType()));
     }
 
@@ -431,10 +486,10 @@ public class NotificationManagementService {
         if (preference == null) {
             return true;
         }
-        if (type == NotificationType.PROMOTION && !preference.isPromotionalEnabled()) {
+        if (isPromotionalNotification(type) && !preference.isPromotionalEnabled()) {
             return false;
         }
-        if (type == NotificationType.BOOKING && !preference.isBookingEnabled()) {
+        if (isBookingNotification(type) && !preference.isBookingEnabled()) {
             return false;
         }
         return switch (channelType) {
@@ -453,6 +508,19 @@ public class NotificationManagementService {
                 .filter(item -> item.getCreatedAt() != null && item.getCreatedAt().isAfter(threshold))
                 .count();
         return recentCount >= PER_TYPE_MINUTE_LIMIT;
+    }
+
+    private boolean isBookingNotification(NotificationType type) {
+        return type == NotificationType.BOOKING
+                || type == NotificationType.BOOKING_CONFIRMED
+                || type == NotificationType.PROFESSIONAL_ASSIGNED
+                || type == NotificationType.PROFESSIONAL_ON_THE_WAY
+                || type == NotificationType.SERVICE_STARTED
+                || type == NotificationType.SERVICE_COMPLETED;
+    }
+
+    private boolean isPromotionalNotification(NotificationType type) {
+        return type == NotificationType.PROMOTION || type == NotificationType.PROMOTIONAL_OFFER;
     }
 
     private boolean isRecentDuplicate(Notification notification) {

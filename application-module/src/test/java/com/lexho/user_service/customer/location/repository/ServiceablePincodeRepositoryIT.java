@@ -1,10 +1,13 @@
 package com.lexho.user_service.customer.location.repository;
 
+import com.lexho.user_service.UserServiceApplication;
 import com.lexho.user_service.customer.location.entity.ServiceablePincode;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
@@ -14,8 +17,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DataJpaTest
-@Testcontainers
+@ContextConfiguration(classes = UserServiceApplication.class)
+@Testcontainers(disabledWithoutDocker = true)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@Tag("infra-it")
 class ServiceablePincodeRepositoryIT {
 
     @Container

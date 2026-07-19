@@ -1,4 +1,4 @@
-package com.lexho.partner.exception;
+package com.lexho.provider.exception;
 
 public class DocumentNotFoundException extends RuntimeException {
     public DocumentNotFoundException(Long id) {

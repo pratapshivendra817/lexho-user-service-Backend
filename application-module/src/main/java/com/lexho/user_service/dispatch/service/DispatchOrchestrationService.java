@@ -23,8 +23,8 @@ import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
 import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.model.PartnerServiceRequestStatus;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
-import com.lexho.partner.entity.Partner;
-import com.lexho.partner.repository.PartnerRepository;
+import com.lexho.provider.entity.Partner;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.booking.model.BookingType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 
 @Service
@@ -40,6 +41,8 @@ public class DispatchOrchestrationService {
     public static final int INSTANT_SLA_MINUTES = 30;
     public static final int PARTNER_RESPONSE_WINDOW_MINUTES = 2;
     private static final double ETA_SPEED_KMPH = 25.0;
+    private static final int DEFAULT_SCHEDULED_PRE_DISPATCH_MINUTES = 30;
+    private static final ZoneId APPLICATION_ZONE = ZoneId.systemDefault();
 
     private final OrderRepository orderRepository;
     private final LexhoAddressRepository lexhoAddressRepository;
@@ -54,6 +57,8 @@ public class DispatchOrchestrationService {
     private final BookingEventRepository bookingEventRepository;
     private final DispatchScoringPolicy dispatchScoringPolicy;
     private final ObjectMapper objectMapper;
+    private final int scheduledPreDispatchMinutes;
+    private final TrackingLifecycleService trackingLifecycleService;
 
     public DispatchOrchestrationService(OrderRepository orderRepository,
                                         LexhoAddressRepository lexhoAddressRepository,
@@ -67,7 +72,9 @@ public class DispatchOrchestrationService {
                                         AdminServiceEntityRepository adminServiceEntityRepository,
                                         BookingEventRepository bookingEventRepository,
                                         DispatchScoringPolicy dispatchScoringPolicy,
-                                        ObjectMapper objectMapper) {
+                                        ObjectMapper objectMapper,
+                                        TrackingLifecycleService trackingLifecycleService,
+                                        @org.springframework.beans.factory.annotation.Value("${app.dispatch.scheduled.pre-dispatch-minutes:30}") int scheduledPreDispatchMinutes) {
         this.orderRepository = orderRepository;
         this.lexhoAddressRepository = lexhoAddressRepository;
         this.serviceableAreaRepository = serviceableAreaRepository;
@@ -81,144 +88,253 @@ public class DispatchOrchestrationService {
         this.bookingEventRepository = bookingEventRepository;
         this.dispatchScoringPolicy = dispatchScoringPolicy;
         this.objectMapper = objectMapper;
+        this.trackingLifecycleService = trackingLifecycleService;
+        this.scheduledPreDispatchMinutes = Math.max(5, Math.min(240, scheduledPreDispatchMinutes));
     }
 
     @Async
+    @Transactional
     public void dispatchOrderAsync(Long orderId, Long customerId, Long addressId, Long serviceId, Integer quantity, LocalDateTime scheduledAt) {
-        dispatchOrder(orderId, customerId, addressId, serviceId, quantity, scheduledAt);
+        dispatchOrderInternal(orderId, customerId, addressId, serviceId, quantity, scheduledAt);
     }
 
     @Transactional
     public int dispatchOrder(Long orderId, Long customerId, Long addressId, Long serviceId, Integer quantity, LocalDateTime scheduledAt) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        return dispatchOrderInternal(orderId, customerId, addressId, serviceId, quantity, scheduledAt);
+    }
 
-        LexhoAddress address = lexhoAddressRepository.findByIdAndUserId(addressId, customerId)
-                .orElseThrow(() -> new BadRequestException("Address not found"));
-
-        String pincode = normalizePincode(address.getPincode());
-        Long resolvedSubServiceId = serviceId;
-        AdminServiceEntity requestedService = adminServiceEntityRepository.findByIdAndDeletedFalse(serviceId).orElse(null);
-        if (requestedService == null) {
-            // Backward-compatible fallback: legacy booking payloads may send partnerId.
-            Partner partnerFromLegacyId = partnerRepository.findById(serviceId).orElse(null);
-            if (partnerFromLegacyId != null && partnerFromLegacyId.getSubCategoryId() != null) {
-                resolvedSubServiceId = partnerFromLegacyId.getSubCategoryId();
-                requestedService = adminServiceEntityRepository.findByIdAndDeletedFalse(resolvedSubServiceId).orElse(null);
-            }
-        }
-        if (requestedService == null) {
-            throw new BadRequestException("Requested service not found");
-        }
-        Long requestedCategoryId = requestedService.getCategory() == null ? null : requestedService.getCategory().getId();
-        if (!serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse(pincode)) {
-            saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "PINCODE_NOT_SERVICEABLE", "pincode", pincode));
-            throw new BadRequestException("Service is not available for this pincode");
-        }
-
+    private int dispatchOrderInternal(Long orderId, Long customerId, Long addressId, Long serviceId,
+                                      Integer quantity, LocalDateTime scheduledAt) {
+        DispatchContext context = buildDispatchContext(orderId, customerId, addressId, serviceId, quantity, scheduledAt);
+        ensureServiceable(context);
         saveEvent(orderId, "BOOKING_CREATED", Map.of("orderId", orderId, "customerId", customerId));
-        boolean instant = BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType());
-        saveEvent(orderId, instant ? "SEARCHING_PARTNER" : "PARTNER_SEARCH", Map.of("pincode", pincode));
-        OrderStatus searchStatus = instant ? OrderStatus.SEARCHING_PARTNER : OrderStatus.PARTNER_SEARCH;
-        if (order.getStatus() == OrderStatus.BOOKING_CREATED && order.getStatus().canTransitionTo(searchStatus)) {
-            order.setStatus(searchStatus);
-            orderRepository.save(order);
+
+        if (shouldDeferDispatch(context)) {
+            return 0;
         }
 
-        List<String> searchPincodes = new ArrayList<>();
-        searchPincodes.add(pincode);
-        pincodeAdjacencyRepository.findBySourcePincodeAndActiveTrueOrderByPriorityAsc(pincode)
-                .forEach(a -> searchPincodes.add(a.getAdjacentPincode()));
+        startPartnerSearch(context);
 
-        List<PartnerShiftEntity> onlineShifts = partnerShiftRepository.findByCurrentPincodeInAndOnlineTrue(searchPincodes);
+        List<PartnerShiftEntity> onlineShifts = findOnlineShifts(context.pincode());
         if (onlineShifts.isEmpty()) {
             saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ONLINE_PARTNER"));
             return 0;
         }
 
-        Map<Long, Partner> partnersById = new HashMap<>();
-        for (Partner partner : partnerRepository.findAllById(onlineShifts.stream().map(PartnerShiftEntity::getPartnerId).toList())) {
-            partnersById.put(partner.getId(), partner);
-        }
-
-        List<Candidate> eligible = new ArrayList<>();
-        for (PartnerShiftEntity shift : onlineShifts) {
-            Partner partner = partnersById.get(shift.getPartnerId());
-            if (partner == null) {
-                continue;
-            }
-            if (!Boolean.TRUE.equals(partner.getAvailable())) {
-                continue;
-            }
-            if (!hasRequiredSkill(partner, resolvedSubServiceId, requestedCategoryId)) {
-                continue;
-            }
-            // Allow dispatch in local/dev environments where legacy partner profiles
-            // may not carry synchronized verification status.
-            if (shift.getActiveJobsCount() >= shift.getMaxActiveJobs()) {
-                continue;
-            }
-            if (shift.getShiftStart() != null && shift.getShiftEnd() != null) {
-                LocalDateTime now = LocalDateTime.now();
-                if (now.isBefore(shift.getShiftStart()) || now.isAfter(shift.getShiftEnd())) {
-                    continue;
-                }
-            }
-            BigDecimal distance = calculateDistanceKm(address, shift.getPartnerId());
-            if (!dispatchScoringPolicy.isWithinDispatchRadius(distance)) {
-                continue;
-            }
-            int etaMinutes = estimateEtaMinutes(distance);
-            if (instant && etaMinutes > INSTANT_SLA_MINUTES) {
-                continue;
-            }
-            eligible.add(new Candidate(shift, partner, distance, etaMinutes));
-        }
-
+        List<Candidate> eligible = findEligibleCandidates(context, onlineShifts);
         if (eligible.isEmpty()) {
             saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
             return 0;
         }
 
-        eligible.sort(dispatchScoringPolicy.comparator(pincode));
+        eligible.sort(dispatchScoringPolicy.comparator(context.pincode()));
+        int created = createPartnerRequests(context, eligible);
+        finishDispatch(context, created);
+        return created;
+    }
 
-        int dispatchAttempt = (int) partnerServiceRequestRepository.findByCartId(orderId).stream().count() + 1;
+    private DispatchContext buildDispatchContext(Long orderId, Long customerId, Long addressId, Long serviceId,
+                                                 Integer quantity, LocalDateTime scheduledAt) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        LexhoAddress address = lexhoAddressRepository.findByIdAndUserId(addressId, customerId)
+                .orElseThrow(() -> new BadRequestException("Address not found"));
+        ResolvedService resolvedService = resolveRequestedService(serviceId);
+        return new DispatchContext(
+                orderId,
+                customerId,
+                quantity,
+                scheduledAt,
+                order,
+                address,
+                normalizePincode(address.getPincode()),
+                resolvedService.subServiceId(),
+                categoryId(resolvedService.service()),
+                BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType()),
+                BookingType.SCHEDULED.name().equalsIgnoreCase(order.getBookingType())
+        );
+    }
+
+    private ResolvedService resolveRequestedService(Long serviceId) {
+        AdminServiceEntity requestedService = adminServiceEntityRepository.findByIdAndDeletedFalse(serviceId).orElse(null);
+        if (requestedService != null) {
+            return new ResolvedService(serviceId, requestedService);
+        }
+        return resolveLegacyPartnerService(serviceId);
+    }
+
+    private ResolvedService resolveLegacyPartnerService(Long serviceId) {
+        Partner partnerFromLegacyId = partnerRepository.findById(serviceId).orElse(null);
+        if (partnerFromLegacyId == null || partnerFromLegacyId.getSubCategoryId() == null) {
+            throw new BadRequestException("Requested service not found");
+        }
+        Long subServiceId = partnerFromLegacyId.getSubCategoryId();
+        AdminServiceEntity requestedService = adminServiceEntityRepository.findByIdAndDeletedFalse(subServiceId)
+                .orElseThrow(() -> new BadRequestException("Requested service not found"));
+        return new ResolvedService(subServiceId, requestedService);
+    }
+
+    private Long categoryId(AdminServiceEntity requestedService) {
+        return requestedService.getCategory() == null ? null : requestedService.getCategory().getId();
+    }
+
+    private void ensureServiceable(DispatchContext context) {
+        if (serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse(context.pincode())) {
+            return;
+        }
+        saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED",
+                Map.of("reason", "PINCODE_NOT_SERVICEABLE", "pincode", context.pincode()));
+        throw new BadRequestException("Service is not available for this pincode");
+    }
+
+    private boolean shouldDeferDispatch(DispatchContext context) {
+        if (!context.scheduled() || shouldActivateScheduledDispatch(context.scheduledAt())) {
+            return false;
+        }
+        saveEvent(context.orderId(), "DISPATCH_DEFERRED", Map.of(
+                "reason", "PRE_ARRIVAL_WINDOW_NOT_REACHED",
+                "scheduledAt", context.scheduledAt(),
+                "activationMinutesBefore", scheduledPreDispatchMinutes
+        ));
+        return true;
+    }
+
+    private void startPartnerSearch(DispatchContext context) {
+        saveEvent(context.orderId(), context.instant() ? "SEARCHING_PARTNER" : "PARTNER_SEARCH",
+                Map.of("pincode", context.pincode()));
+        OrderStatus searchStatus = context.instant() ? OrderStatus.SEARCHING_PARTNER : OrderStatus.PARTNER_SEARCH;
+        if (context.order().getStatus() == OrderStatus.BOOKING_CREATED
+                && context.order().getStatus().canTransitionTo(searchStatus)) {
+            context.order().setStatus(searchStatus);
+            orderRepository.save(context.order());
+        }
+    }
+
+    private List<PartnerShiftEntity> findOnlineShifts(String pincode) {
+        List<String> searchPincodes = new ArrayList<>();
+        searchPincodes.add(pincode);
+        pincodeAdjacencyRepository.findBySourcePincodeAndActiveTrueOrderByPriorityAsc(pincode)
+                .forEach(a -> searchPincodes.add(a.getAdjacentPincode()));
+        return partnerShiftRepository.findByCurrentPincodeInAndOnlineTrue(searchPincodes);
+    }
+
+    private List<Candidate> findEligibleCandidates(DispatchContext context, List<PartnerShiftEntity> onlineShifts) {
+        Map<Long, Partner> partnersById = findPartnersById(onlineShifts);
+        List<Candidate> eligible = new ArrayList<>();
+        for (PartnerShiftEntity shift : onlineShifts) {
+            candidateForShift(context, partnersById, shift).ifPresent(eligible::add);
+        }
+        return eligible;
+    }
+
+    private Map<Long, Partner> findPartnersById(List<PartnerShiftEntity> onlineShifts) {
+        Map<Long, Partner> partnersById = new HashMap<>();
+        List<Long> partnerIds = onlineShifts.stream().map(PartnerShiftEntity::getPartnerId).toList();
+        for (Partner partner : partnerRepository.findAllById(partnerIds)) {
+            partnersById.put(partner.getId(), partner);
+        }
+        return partnersById;
+    }
+
+    private Optional<Candidate> candidateForShift(DispatchContext context, Map<Long, Partner> partnersById,
+                                                  PartnerShiftEntity shift) {
+        Partner partner = partnersById.get(shift.getPartnerId());
+        if (!isEligiblePartner(context, partner, shift)) {
+            return Optional.empty();
+        }
+        BigDecimal distance = calculateDistanceKm(context.address(), shift.getPartnerId());
+        int etaMinutes = estimateEtaMinutes(distance);
+        if (!isDispatchableByDistance(context, distance, etaMinutes)) {
+            return Optional.empty();
+        }
+        return Optional.of(new Candidate(shift, partner, distance, etaMinutes));
+    }
+
+    private boolean isEligiblePartner(DispatchContext context, Partner partner, PartnerShiftEntity shift) {
+        return partner != null
+                && Boolean.TRUE.equals(partner.getAvailable())
+                && hasRequiredSkill(partner, context.resolvedSubServiceId(), context.requestedCategoryId())
+                && shift.getActiveJobsCount() < shift.getMaxActiveJobs()
+                && isShiftActive(shift);
+    }
+
+    private boolean isShiftActive(PartnerShiftEntity shift) {
+        if (shift.getShiftStart() == null || shift.getShiftEnd() == null) {
+            return true;
+        }
+        LocalDateTime currentTime = now();
+        return !currentTime.isBefore(shift.getShiftStart()) && !currentTime.isAfter(shift.getShiftEnd());
+    }
+
+    private boolean isDispatchableByDistance(DispatchContext context, BigDecimal distance, int etaMinutes) {
+        return dispatchScoringPolicy.isWithinDispatchRadius(distance)
+                && (!context.instant() || etaMinutes <= INSTANT_SLA_MINUTES);
+    }
+
+    private int createPartnerRequests(DispatchContext context, List<Candidate> eligible) {
+        int dispatchAttempt = (int) partnerServiceRequestRepository.findByCartId(context.orderId()).stream().count() + 1;
         int created = 0;
         for (Candidate candidate : eligible.stream().limit(5).toList()) {
-            if (partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(orderId, candidate.partner().getId(), PartnerServiceRequestStatus.PENDING)) {
+            if (hasPendingRequest(context.orderId(), candidate.partner().getId())) {
                 continue;
             }
-            PartnerServiceRequestEntity request = new PartnerServiceRequestEntity();
-            request.setPartnerId(candidate.partner().getId());
-            request.setCartId(orderId);
-            request.setCustomerId(customerId);
-            request.setServiceId(resolvedSubServiceId);
-            request.setQuantity(quantity);
-            request.setScheduledTime(scheduledAt);
-            request.setFullAddress(address.getHouseNo() + ", " + address.getArea() + ", " + address.getCity());
-            request.setCity(address.getCity());
-            request.setLatitude(address.getLatitude());
-            request.setLongitude(address.getLongitude());
-            request.setTargetPincode(pincode);
-            request.setDispatchAttempt(dispatchAttempt);
-            request.setDistanceKm(candidate.distance());
-            request.setEtaMinutes(candidate.etaMinutes());
-            request.setExpiresAt(LocalDateTime.now().plusMinutes(PARTNER_RESPONSE_WINDOW_MINUTES));
-            request.setStatus(PartnerServiceRequestStatus.PENDING);
-            partnerServiceRequestRepository.save(request);
+            partnerServiceRequestRepository.save(toPartnerServiceRequest(context, candidate, dispatchAttempt));
             created++;
         }
-
-        if (created > 0) {
-            saveEvent(orderId, instant ? "INSTANT_DISPATCHED" : "PARTNER_ASSIGNED", Map.of("candidateCount", created, "pincode", pincode));
-            if (!instant && order.getStatus() == OrderStatus.PARTNER_SEARCH && order.getStatus().canTransitionTo(OrderStatus.PARTNER_ASSIGNED)) {
-                order.setStatus(OrderStatus.PARTNER_ASSIGNED);
-                orderRepository.save(order);
-            }
-        } else {
-            saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_NEW_REQUEST_CREATED"));
-        }
         return created;
+    }
+
+    private boolean hasPendingRequest(Long orderId, Long partnerId) {
+        return partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(
+                orderId,
+                partnerId,
+                PartnerServiceRequestStatus.PENDING
+        );
+    }
+
+    private PartnerServiceRequestEntity toPartnerServiceRequest(DispatchContext context, Candidate candidate,
+                                                                int dispatchAttempt) {
+        PartnerServiceRequestEntity request = new PartnerServiceRequestEntity();
+        request.setPartnerId(candidate.partner().getId());
+        request.setCartId(context.orderId());
+        request.setCustomerId(context.customerId());
+        request.setServiceId(context.resolvedSubServiceId());
+        request.setQuantity(context.quantity());
+        request.setScheduledTime(context.scheduledAt());
+        request.setFullAddress(fullAddress(context.address()));
+        request.setCity(context.address().getCity());
+        request.setLatitude(context.address().getLatitude());
+        request.setLongitude(context.address().getLongitude());
+        request.setTargetPincode(context.pincode());
+        request.setDispatchAttempt(dispatchAttempt);
+        request.setDistanceKm(candidate.distance());
+        request.setEtaMinutes(candidate.etaMinutes());
+        request.setExpiresAt(now().plusMinutes(PARTNER_RESPONSE_WINDOW_MINUTES));
+        request.setStatus(PartnerServiceRequestStatus.PENDING);
+        return request;
+    }
+
+    private String fullAddress(LexhoAddress address) {
+        return address.getHouseNo() + ", " + address.getArea() + ", " + address.getCity();
+    }
+
+    private void finishDispatch(DispatchContext context, int created) {
+        if (created <= 0) {
+            saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_NEW_REQUEST_CREATED"));
+            return;
+        }
+        saveEvent(context.orderId(), context.instant() ? "INSTANT_DISPATCHED" : "PARTNER_ASSIGNED",
+                Map.of("candidateCount", created, "pincode", context.pincode()));
+        assignScheduledPartnerIfAllowed(context);
+    }
+
+    private void assignScheduledPartnerIfAllowed(DispatchContext context) {
+        if (context.instant() || context.order().getStatus() != OrderStatus.PARTNER_SEARCH
+                || !context.order().getStatus().canTransitionTo(OrderStatus.PARTNER_ASSIGNED)) {
+            return;
+        }
+        context.order().setStatus(OrderStatus.PARTNER_ASSIGNED);
+        orderRepository.save(context.order());
     }
 
     @Transactional
@@ -229,13 +345,15 @@ public class DispatchOrchestrationService {
             order.setStatus(OrderStatus.PARTNER_ASSIGNED);
             order.setSlaMinutes(INSTANT_SLA_MINUTES);
             int eta = etaMinutesAtAcceptance == null ? INSTANT_SLA_MINUTES : etaMinutesAtAcceptance;
-            order.setPromisedStartTime(LocalDateTime.now().plusMinutes(eta));
+            order.setPromisedStartTime(now().plusMinutes(eta));
             order.setUnavailableReason(null);
         } else if (order.getStatus() == OrderStatus.CREATED || order.getStatus() == OrderStatus.PARTNER_ASSIGNED
                 || order.getStatus() == OrderStatus.PARTNER_SEARCH || order.getStatus() == OrderStatus.BOOKING_CREATED) {
             order.setStatus(OrderStatus.PARTNER_ACCEPTED);
         }
+        order.setAssignedPartnerId(partnerId);
         orderRepository.save(order);
+        syncTrackingStateFromOrder(order, order.getStatus());
         PartnerShiftEntity shift = partnerShiftRepository.findByPartnerId(partnerId).orElse(null);
         if (shift != null) {
             shift.setActiveJobsCount(shift.getActiveJobsCount() + 1);
@@ -269,7 +387,9 @@ public class DispatchOrchestrationService {
             throw new BadRequestException("Invalid order status transition from " + current + " to " + targetStatus);
         }
         order.setStatus(targetStatus);
+        applyLifecycleTimestamp(order, targetStatus);
         orderRepository.save(order);
+        syncTrackingStateFromOrder(order, targetStatus);
         saveEvent(orderId, targetStatus.name(), Map.of("previous", current.name(), "next", targetStatus.name()));
         return targetStatus;
     }
@@ -330,6 +450,80 @@ public class DispatchOrchestrationService {
     }
 
     public record Candidate(PartnerShiftEntity shift, Partner partner, BigDecimal distance, int etaMinutes) {}
+
+    private record ResolvedService(Long subServiceId, AdminServiceEntity service) {}
+
+    private record DispatchContext(Long orderId,
+                                   Long customerId,
+                                   Integer quantity,
+                                   LocalDateTime scheduledAt,
+                                   Order order,
+                                   LexhoAddress address,
+                                   String pincode,
+                                   Long resolvedSubServiceId,
+                                   Long requestedCategoryId,
+                                   boolean instant,
+                                   boolean scheduled) {}
+
+    private boolean shouldActivateScheduledDispatch(LocalDateTime scheduledAt) {
+        if (scheduledAt == null) {
+            return true;
+        }
+        LocalDateTime activationAt = scheduledAt.minusMinutes(scheduledPreDispatchMinutes);
+        return !now().isBefore(activationAt);
+    }
+
+    private void syncTrackingStateFromOrder(Order order, OrderStatus status) {
+        if (order == null) {
+            return;
+        }
+        Long partnerId = extractAssignedPartnerId(order);
+        if (partnerId == null) {
+            return;
+        }
+        TrackingLifecycleState state = trackingLifecycleService.deriveFromOrder(
+                order.getBookingType(),
+                status,
+                TrackingLifecycleState.ASSIGNED
+        );
+        trackingLifecycleService.persistState(partnerId, state, order.getId());
+    }
+
+    private void applyLifecycleTimestamp(Order order, OrderStatus status) {
+        LocalDateTime now = now();
+        switch (status) {
+            case ARRIVED, PARTNER_REACHED -> {
+                if (order.getArrivedAt() == null) {
+                    order.setArrivedAt(now);
+                }
+            }
+            case SERVICE_STARTED -> {
+                if (order.getStartedAt() == null) {
+                    order.setStartedAt(now);
+                }
+            }
+            case SERVICE_IN_PROGRESS -> {
+                if (order.getInProgressAt() == null) {
+                    order.setInProgressAt(now);
+                }
+            }
+            case SERVICE_COMPLETED, DELIVERED, PAYMENT_COMPLETED -> {
+                if (order.getCompletedAt() == null) {
+                    order.setCompletedAt(now);
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private Long extractAssignedPartnerId(Order order) {
+        return order.getAssignedPartnerId();
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(APPLICATION_ZONE);
+    }
 
     private boolean hasRequiredSkill(Partner partner, Long requestedSubServiceId, Long requestedCategoryId) {
         if (partner.getSubCategoryId() != null && partner.getSubCategoryId().equals(requestedSubServiceId)) {

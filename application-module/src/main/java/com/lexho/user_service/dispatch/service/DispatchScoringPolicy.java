@@ -1,6 +1,6 @@
 package com.lexho.user_service.dispatch.service;
 
-import com.lexho.partner.entity.Partner;
+import com.lexho.provider.entity.Partner;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;

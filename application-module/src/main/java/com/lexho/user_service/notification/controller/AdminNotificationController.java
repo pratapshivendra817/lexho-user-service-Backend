@@ -114,10 +114,15 @@ public class AdminNotificationController {
         if (notificationType == null || notificationType.isBlank()) {
             return null;
         }
-        String normalized = notificationType.trim().toUpperCase(Locale.ROOT);
-        if ("OFFER".equals(normalized)) {
-            normalized = "PROMOTION";
-        }
+        String normalized = notificationType.trim()
+                .replace('-', '_')
+                .replace(' ', '_')
+                .toUpperCase(Locale.ROOT);
+        normalized = switch (normalized) {
+            case "OFFER", "OFFERS", "PROMOTIONAL_OFFERS" -> "PROMOTIONAL_OFFER";
+            case "PAYMENT_SUCCESS" -> "PAYMENT_SUCCESSFUL";
+            default -> normalized;
+        };
         try {
             return NotificationType.valueOf(normalized);
         } catch (IllegalArgumentException exception) {

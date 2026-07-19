@@ -1,7 +1,10 @@
 package com.lexho.user_service.controller;
 
+import com.lexho.catalog.entity.ServiceCategory;
 import com.lexho.catalog.entity.SubCategory;
 import com.lexho.catalog.repository.SubCategoryRepository;
+import com.lexho.user_service.dto.SubCategoryCreateRequestDTO;
+import com.lexho.user_service.dto.SubCategoryResponseDTO;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,12 +25,40 @@ public class SubCategoryController {
     }
 
     @PostMapping
-    public SubCategory create(@RequestBody SubCategory subCategory) {
-        return repo.save(subCategory);
+    public SubCategoryResponseDTO create(@RequestBody SubCategoryCreateRequestDTO request) {
+        return toDto(repo.save(toEntity(request)));
     }
 
     @GetMapping("/category/{id}")
-    public List<SubCategory> getByCategory(@PathVariable Long id) {
-        return repo.findByCategoryId(id);
+    public List<SubCategoryResponseDTO> getByCategory(@PathVariable Long id) {
+        return repo.findByCategoryId(id).stream()
+                .map(this::toDto)
+                .toList();
+    }
+
+    private SubCategory toEntity(SubCategoryCreateRequestDTO request) {
+        SubCategory subCategory = new SubCategory();
+        if (request == null) {
+            return subCategory;
+        }
+        subCategory.setName(request.getName());
+        subCategory.setIcon(request.getIcon());
+        if (request.getCategoryId() != null) {
+            ServiceCategory category = new ServiceCategory();
+            category.setId(request.getCategoryId());
+            subCategory.setCategory(category);
+        }
+        return subCategory;
+    }
+
+    private SubCategoryResponseDTO toDto(SubCategory subCategory) {
+        ServiceCategory category = subCategory.getCategory();
+        return new SubCategoryResponseDTO(
+                subCategory.getId(),
+                subCategory.getName(),
+                subCategory.getIcon(),
+                category == null ? null : category.getId(),
+                category == null ? null : category.getName()
+        );
     }
 }

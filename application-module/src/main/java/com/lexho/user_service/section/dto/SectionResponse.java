@@ -13,7 +13,9 @@ public class SectionResponse {
     private Long id;
     private SectionType type;
     private String title;
+    private String subtitle;
     private String icon;
+    private Integer priority;
     private boolean active;
     private LocalDateTime createdAt;
     private List<SectionItemResponse> items;

@@ -5,16 +5,18 @@ public class CartResponseDTO {
     private Long id;
     private Long partnerId;
     private String partnerName;
+    private String imageUrl;
     private Double price;
     private Integer quantity;
 
     public CartResponseDTO() {
     }
 
-    public CartResponseDTO(Long id, Long partnerId, String partnerName, Double price, Integer quantity) {
+    public CartResponseDTO(Long id, Long partnerId, String partnerName, String imageUrl, Double price, Integer quantity) {
         this.id = id;
         this.partnerId = partnerId;
         this.partnerName = partnerName;
+        this.imageUrl = imageUrl;
         this.price = price;
         this.quantity = quantity;
     }
@@ -43,6 +45,14 @@ public class CartResponseDTO {
         this.partnerName = partnerName;
     }
 
+    public String getImageUrl() {
+        return imageUrl;
+    }
+
+    public void setImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
+    }
+
     public Double getPrice() {
         return price;
     }
@@ -59,4 +69,3 @@ public class CartResponseDTO {
         this.quantity = quantity;
     }
 }
-

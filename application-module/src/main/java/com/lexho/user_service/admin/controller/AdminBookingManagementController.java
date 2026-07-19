@@ -4,7 +4,9 @@ import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
 import com.lexho.user_service.admin.service.AdminBookingManagementService;
 import com.lexho.user_service.dto.ApiResponse;
+import com.lexho.user_service.map.dto.NavigationRouteResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -12,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
-@RequestMapping({"/api/admin/bookings", "/api/v1/admin/bookings"})
+@RequestMapping("/api/v1/admin/booking-management")
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminBookingManagementController {
 
@@ -55,6 +57,11 @@ public class AdminBookingManagementController {
         return ApiResponse.success("Live tracking fetched", adminBookingManagementService.liveTracking(bookingId));
     }
 
+    @GetMapping("/{bookingId}/navigation")
+    public ApiResponse<NavigationRouteResponse> navigation(@PathVariable Long bookingId) {
+        return ApiResponse.success("Navigation ETA fetched", adminBookingManagementService.navigation(bookingId));
+    }
+
     @PatchMapping("/{bookingId}/tracking/partner-location")
     public ApiResponse<Map<String, Object>> overridePartnerLocation(@PathVariable Long bookingId,
                                                                     @Valid @RequestBody PartnerLocationOverrideRequest request) {
@@ -70,9 +77,15 @@ public class AdminBookingManagementController {
 
     @PatchMapping("/{bookingId}/payment/status")
     public ApiResponse<Map<String, Object>> updatePaymentStatus(@PathVariable Long bookingId,
+                                                                 @RequestAttribute("userId") Long adminId,
                                                                  @Valid @RequestBody PaymentStatusUpdateRequest request) {
         return ApiResponse.success("Payment status updated",
-                adminBookingManagementService.updatePaymentStatus(bookingId, request.paymentStatus));
+                adminBookingManagementService.updatePaymentStatus(
+                        bookingId,
+                        request.paymentStatus,
+                        request.reason,
+                        adminId
+                ));
     }
 
     @PutMapping("/{bookingId}/payment/payout")
@@ -98,6 +111,8 @@ public class AdminBookingManagementController {
     public static class PaymentStatusUpdateRequest {
         @NotNull(message = "paymentStatus is required")
         public PaymentStatus paymentStatus;
+        @NotBlank(message = "reason is required")
+        public String reason;
     }
 
     public static class PayoutUpsertRequest {

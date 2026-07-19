@@ -9,6 +9,7 @@ public class SectionItemResponse {
     private Long id;
     private Long sectionId;
     private String title;
+    private String subtitle;
     private String value;
     private String icon;
     private Integer priority;

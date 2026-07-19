@@ -10,6 +10,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -26,10 +27,10 @@ public class FcmPushService {
 
     public int sendToTokens(List<String> tokens, String title, String body, Map<String, String> data) {
         if (firebaseMessaging == null) {
-            log.warn("FCM messaging not initialized. Skipping push dispatch.");
-            return 0;
+            throw new IllegalStateException("FCM messaging not initialized. Check app.push.fcm configuration.");
         }
         int sent = 0;
+        List<String> failures = new ArrayList<>();
         for (String token : tokens) {
             try {
                 Message message = Message.builder()
@@ -40,11 +41,17 @@ public class FcmPushService {
                 firebaseMessaging.send(message);
                 sent++;
             } catch (FirebaseMessagingException ex) {
-                log.warn("FCM send failed for token. code={}, message={}",
-                        ex.getMessagingErrorCode(), ex.getMessage());
+                String failure = "code=" + ex.getMessagingErrorCode() + ", message=" + ex.getMessage();
+                failures.add(failure);
+                log.warn("FCM send failed for token. {}", failure);
             } catch (Exception ex) {
-                log.warn("FCM send failed for token due to runtime error: {}", ex.getMessage());
+                String failure = "runtime=" + ex.getClass().getSimpleName() + ", message=" + ex.getMessage();
+                failures.add(failure);
+                log.warn("FCM send failed for token due to runtime error: {}", failure);
             }
+        }
+        if (sent <= 0 && !failures.isEmpty()) {
+            throw new IllegalStateException("FCM dispatch failed for all tokens. " + String.join(" | ", failures));
         }
         return sent;
     }

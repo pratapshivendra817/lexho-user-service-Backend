@@ -8,6 +8,7 @@ public class AdminCategoryResponse {
     private String name;
     private String iconUrl;
     private String imageUrl;
+    private int displayOrder;
     private boolean active;
     private long totalServicesCount;
     private long totalBookingsCount;
@@ -52,6 +53,14 @@ public class AdminCategoryResponse {
 
     public void setImageUrl(String imageUrl) {
         this.imageUrl = imageUrl;
+    }
+
+    public int getDisplayOrder() {
+        return displayOrder;
+    }
+
+    public void setDisplayOrder(int displayOrder) {
+        this.displayOrder = displayOrder;
     }
 
     public long getTotalServicesCount() {

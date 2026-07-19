@@ -13,6 +13,9 @@ public class SectionItemRequest {
     @Size(max = 255, message = "title must be at most 255 characters")
     private String title;
 
+    @Size(max = 255, message = "subtitle must be at most 255 characters")
+    private String subtitle;
+
     @Size(max = 255, message = "value must be at most 255 characters")
     private String value;
 

@@ -1,4 +1,4 @@
-package com.lexho.partner.enums;
+package com.lexho.provider.enums;
 
 public enum ProviderDocumentType {
     AADHAAR_FRONT,

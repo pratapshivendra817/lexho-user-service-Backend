@@ -3,6 +3,7 @@ package com.lexho.user_service.admin.entity;
 import jakarta.persistence.*;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "payouts")
@@ -17,6 +18,24 @@ public class Payout {
 
     @Column(nullable = false)
     private Double amount;
+
+    @Column(name = "gross_amount", precision = 12, scale = 2)
+    private BigDecimal grossAmount;
+
+    @Column(name = "commission_percent", nullable = false, precision = 5, scale = 2)
+    private BigDecimal commissionPercent = BigDecimal.ZERO;
+
+    @Column(name = "commission_amount", precision = 12, scale = 2)
+    private BigDecimal commissionAmount;
+
+    @Column(nullable = false, length = 3)
+    private String currency = "INR";
+
+    @Column(name = "reversed_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal reversedAmount = BigDecimal.ZERO;
+
+    @Column(name = "reversed_at")
+    private LocalDateTime reversedAt;
 
     @Column(nullable = false, length = 40)
     private String status;
@@ -56,6 +75,54 @@ public class Payout {
 
     public void setAmount(Double amount) {
         this.amount = amount;
+    }
+
+    public BigDecimal getGrossAmount() {
+        return grossAmount;
+    }
+
+    public void setGrossAmount(BigDecimal grossAmount) {
+        this.grossAmount = grossAmount;
+    }
+
+    public BigDecimal getCommissionPercent() {
+        return commissionPercent;
+    }
+
+    public void setCommissionPercent(BigDecimal commissionPercent) {
+        this.commissionPercent = commissionPercent;
+    }
+
+    public BigDecimal getCommissionAmount() {
+        return commissionAmount;
+    }
+
+    public void setCommissionAmount(BigDecimal commissionAmount) {
+        this.commissionAmount = commissionAmount;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public void setCurrency(String currency) {
+        this.currency = currency;
+    }
+
+    public BigDecimal getReversedAmount() {
+        return reversedAmount;
+    }
+
+    public void setReversedAmount(BigDecimal reversedAmount) {
+        this.reversedAmount = reversedAmount;
+    }
+
+    public LocalDateTime getReversedAt() {
+        return reversedAt;
+    }
+
+    public void setReversedAt(LocalDateTime reversedAt) {
+        this.reversedAt = reversedAt;
     }
 
     public String getStatus() {

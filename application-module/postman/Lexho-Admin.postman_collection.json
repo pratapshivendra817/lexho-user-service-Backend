@@ -63,7 +63,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@lexho.com\",\n  \"password\": \"Admin@12345\"\n}"
+              "raw": "{\n  \"email\": \"admin@lexho.com\",\n  \"password\": \"<admin-password>\"\n}"
             },
             "url": "{{baseUrl}}/api/admin/login"
           }

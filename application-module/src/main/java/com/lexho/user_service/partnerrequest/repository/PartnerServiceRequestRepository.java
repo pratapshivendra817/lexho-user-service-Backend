@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import jakarta.persistence.LockModeType;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,4 +25,5 @@ public interface PartnerServiceRequestRepository extends JpaRepository<PartnerSe
     List<PartnerServiceRequestEntity> findByCartId(Long cartId);
     boolean existsByCartIdAndPartnerIdAndStatus(Long cartId, Long partnerId, PartnerServiceRequestStatus status);
     long countByCartIdAndStatus(Long cartId, PartnerServiceRequestStatus status);
+    List<PartnerServiceRequestEntity> findByStatusAndExpiresAtBefore(PartnerServiceRequestStatus status, LocalDateTime expiresAt);
 }

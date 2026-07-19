@@ -1,13 +1,13 @@
-package com.lexho.partner.controller;
+package com.lexho.provider.controller;
 
-import com.lexho.partner.dto.ProviderDetailsResponse;
-import com.lexho.partner.dto.ProviderDocumentResponse;
-import com.lexho.partner.dto.ProviderDocumentUploadResponse;
-import com.lexho.partner.dto.ProviderOnboardingRequest;
-import com.lexho.partner.entity.ProviderDocument;
-import com.lexho.partner.enums.ProviderDocumentType;
-import com.lexho.partner.mapper.ProviderMapper;
-import com.lexho.partner.service.ProviderOnboardingService;
+import com.lexho.provider.dto.ProviderDetailsResponse;
+import com.lexho.provider.dto.ProviderDocumentResponse;
+import com.lexho.provider.dto.ProviderDocumentUploadResponse;
+import com.lexho.provider.dto.ProviderOnboardingRequest;
+import com.lexho.provider.entity.ProviderDocument;
+import com.lexho.provider.enums.ProviderDocumentType;
+import com.lexho.provider.mapper.ProviderMapper;
+import com.lexho.provider.service.ProviderOnboardingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;

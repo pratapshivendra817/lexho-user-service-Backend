@@ -12,6 +12,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -64,9 +65,21 @@ public class AdminReviewController {
         return ResponseEntity.ok(reviewManagementService.approveReview(id));
     }
 
+    @PostMapping("/{id}/approve")
+    @Operation(summary = "Approve review")
+    public ResponseEntity<ReviewResponse> approvePost(@PathVariable Long id) {
+        return ResponseEntity.ok(reviewManagementService.approveReview(id));
+    }
+
     @PatchMapping("/{id}/reject")
     @Operation(summary = "Reject review")
     public ResponseEntity<ReviewResponse> reject(@PathVariable Long id) {
+        return ResponseEntity.ok(reviewManagementService.rejectReview(id));
+    }
+
+    @PostMapping("/{id}/reject")
+    @Operation(summary = "Reject review")
+    public ResponseEntity<ReviewResponse> rejectPost(@PathVariable Long id) {
         return ResponseEntity.ok(reviewManagementService.rejectReview(id));
     }
 
