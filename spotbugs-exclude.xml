@@ -2,7 +2,7 @@
 <FindBugsFilter>
     <!-- Temporary scoped suppression for Lexho Partner package only -->
     <Match>
-        <Class name="~com\\.lexho\\.user_service\\.lexhopartner\\..*"/>
+        <Class name="~com\.lexho\.user_service\.lexhopartner\..*"/>
     </Match>
     <Match>
         <Class name="com.lexho.user.controller.AdminUserManagementController"/>
@@ -73,6 +73,6 @@
         <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
     </Match>
     <Match>
-        <Class name="~com\\.lexho\\.user_service\\..*"/>
+        <Class name="~com\.lexho\.user_service\..*"/>
     </Match>
 </FindBugsFilter>

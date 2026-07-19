@@ -17,7 +17,6 @@
     <description>Single Spring Boot runtime module for Lexho multi-module backend</description>
 
     <properties>
-        <spotbugs.skip>true</spotbugs.skip>
         <failsafe.excludedGroups>infra-it</failsafe.excludedGroups>
         <failsafe.groups></failsafe.groups>
     </properties>
