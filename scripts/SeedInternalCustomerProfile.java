@@ -7,7 +7,7 @@ public class SeedInternalCustomerProfile {
     public static void main(String[] args) throws Exception {
         String url = "jdbc:mysql://localhost:3306/user_servicedb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true";
         String user = "root";
-        String pass = "Muskaan@8756";
+        String pass = args.length > 1 ? args[1] : System.getenv().getOrDefault("DB_PASSWORD", "");
 
         try (Connection c = DriverManager.getConnection(url, user, pass)) {
             try (PreparedStatement ps = c.prepareStatement(

@@ -22,9 +22,13 @@ import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerServiceAreaRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
+import com.lexho.user_service.lexhopartner.service.PartnerActivityFeedService;
 import com.lexho.user_service.lexhopartner.service.PartnerOperationsService;
+import com.lexho.user_service.lexhopartner.service.PartnerWarningRealtimeService;
 import com.lexho.user_service.notification.mapper.NotificationMapper;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import com.lexho.user_service.security.SecurityUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -110,20 +114,23 @@ class PartnerWarningNotificationFlowIT {
                 mock(PartnerLeaveRepository.class),
                 mock(PartnerServiceAreaRepository.class),
                 partnerPenaltyRepository,
+                mock(PartnerWarningCommentRepository.class),
                 mock(PartnerOrderRepository.class),
                 mock(PartnerProfileRepository.class),
                 mock(PartnerShiftRepository.class),
                 mock(ReviewRepository.class),
                 auditLogService,
-                notificationManagementService
+                notificationManagementService,
+                mock(PartnerWarningRealtimeService.class)
         );
 
         AdminPartnerControlController adminController = new AdminPartnerControlController(
                 null, null, null, null, partnerOperationsService);
         LexhoPartnerController partnerController = new LexhoPartnerController(
-                null, null, null, null, null, partnerOperationsService);
+                null, null, null, null, null, partnerOperationsService, mock(PartnerActivityFeedService.class));
         LexhoPartnerNotificationController notificationController =
-                new LexhoPartnerNotificationController(notificationManagementService, notificationMapper);
+                new LexhoPartnerNotificationController(notificationManagementService, notificationMapper,
+                        mock(NotificationRealtimeService.class));
 
         adminMockMvc = MockMvcBuilders.standaloneSetup(adminController).build();
         partnerMockMvc = MockMvcBuilders.standaloneSetup(partnerController).build();

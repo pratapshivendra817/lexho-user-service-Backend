@@ -7,10 +7,13 @@ import com.lexho.user_service.lexhopartner.dto.CreateWithdrawalRequest;
 import com.lexho.user_service.lexhopartner.dto.PartnerDeviceTokenRequest;
 import com.lexho.user_service.lexhopartner.dto.PartnerLeaveRequest;
 import com.lexho.user_service.lexhopartner.dto.PartnerServiceAreaRequest;
+import com.lexho.user_service.lexhopartner.dto.PartnerWarningCommentRequest;
+import com.lexho.user_service.lexhopartner.dto.PartnerWarningDisputeRequest;
 import com.lexho.user_service.lexhopartner.dto.UpdateAvailabilityRequest;
 import com.lexho.user_service.lexhopartner.dto.UpdatePartnerBankDetailsRequest;
 import com.lexho.user_service.lexhopartner.dto.UpdatePartnerProfileRequest;
 import com.lexho.user_service.lexhopartner.service.AdminPartnerGovernanceService;
+import com.lexho.user_service.lexhopartner.service.PartnerActivityFeedService;
 import com.lexho.user_service.lexhopartner.service.PartnerBannerService;
 import com.lexho.user_service.lexhopartner.service.PartnerDeviceTokenService;
 import com.lexho.user_service.lexhopartner.service.PartnerOperationsService;
@@ -49,6 +52,8 @@ class PartnerControllersTest {
     @Mock
     private PartnerOperationsService operationsService;
     @Mock
+    private PartnerActivityFeedService activityFeedService;
+    @Mock
     private AdminPartnerGovernanceService governanceService;
     @Mock
     private ChatService chatService;
@@ -61,7 +66,7 @@ class PartnerControllersTest {
     @BeforeEach
     void setUp() {
         partnerController = new LexhoPartnerController(profileService, orderService, bannerService,
-                settlementService, tokenService, operationsService);
+                settlementService, tokenService, operationsService, activityFeedService);
         orderController = new LexhoPartnerOrderController(orderService);
         adminController = new AdminPartnerControlController(profileService, orderService, bannerService,
                 governanceService, operationsService);
@@ -100,6 +105,10 @@ class PartnerControllersTest {
         Long partnerId = 8L;
         PartnerLeaveRequest leave = mock(PartnerLeaveRequest.class);
         PartnerServiceAreaRequest areas = mock(PartnerServiceAreaRequest.class);
+        PartnerWarningDisputeRequest dispute = new PartnerWarningDisputeRequest(
+                "Please review this warning", java.util.List.of("https://cdn.lexho.test/evidence.jpg"));
+        PartnerWarningCommentRequest commentRequest = new PartnerWarningCommentRequest(
+                "Adding follow-up", java.util.List.of("https://cdn.lexho.test/follow-up.jpg"));
         UpdatePartnerBankDetailsRequest bank = mock(UpdatePartnerBankDetailsRequest.class);
         CreateWithdrawalRequest withdrawal = mock(CreateWithdrawalRequest.class);
         when(settlementService.withdrawableBalance(partnerId)).thenReturn(BigDecimal.valueOf(1200));
@@ -115,12 +124,19 @@ class PartnerControllersTest {
         partnerController.leaves(partnerId);
         partnerController.serviceAreas(partnerId);
         partnerController.updateServiceAreas(partnerId, areas);
+        partnerController.warnings(partnerId);
+        partnerController.warning(partnerId, 71L);
+        partnerController.acknowledgeWarning(partnerId, 71L);
+        partnerController.disputeWarning(partnerId, 71L, dispute);
+        partnerController.warningComment(partnerId, 71L, commentRequest);
+        partnerController.warningStream(partnerId, 71L);
         partnerController.payout(partnerId, 91L);
         partnerController.bankDetails(partnerId);
         partnerController.updateBankDetails(partnerId, bank);
         partnerController.requestWithdrawal(partnerId, withdrawal);
         partnerController.withdrawals(partnerId, 4, 12);
         partnerController.withdrawalBalance(partnerId);
+        partnerController.activityFeed(partnerId, 1, 15);
 
         verify(orderService).dashboard(partnerId);
         verify(orderService).earningsSummary(partnerId);
@@ -133,12 +149,20 @@ class PartnerControllersTest {
         verify(operationsService).leaves(partnerId);
         verify(operationsService).serviceAreas(partnerId);
         verify(operationsService).updateServiceAreas(partnerId, areas);
+        verify(operationsService).warnings(partnerId);
+        verify(operationsService).warningDetail(partnerId, 71L);
+        verify(operationsService).acknowledgeWarning(partnerId, 71L);
+        verify(operationsService).disputeWarning(partnerId, 71L, "Please review this warning",
+                java.util.List.of("https://cdn.lexho.test/evidence.jpg"));
+        verify(operationsService).addWarningComment(partnerId, 71L, commentRequest);
+        verify(operationsService).warningStream(partnerId, 71L);
         verify(settlementService).payout(partnerId, 91L);
         verify(profileService).bankDetails(partnerId);
         verify(profileService).updateBankDetails(partnerId, bank);
         verify(settlementService).requestWithdrawal(partnerId, withdrawal);
         verify(settlementService).withdrawals(partnerId, 4, 12);
         verify(settlementService).withdrawableBalance(partnerId);
+        verify(activityFeedService).activity(partnerId, 1, 15);
     }
 
     @Test
@@ -218,6 +242,10 @@ class PartnerControllersTest {
                 new AdminPartnerControlController.WarningRequest();
         warning.reason = "documents missing";
         warning.sendNotification = false;
+        AdminPartnerControlController.WarningDisputeReviewRequest disputeReview =
+                new AdminPartnerControlController.WarningDisputeReviewRequest();
+        disputeReview.status = "APPROVED";
+        disputeReview.reviewNote = "accepted";
 
         adminController.dashboardStats(4L);
         adminController.updateAvailability(4L, availability);
@@ -235,6 +263,8 @@ class PartnerControllersTest {
         adminController.addPenalty(4L, 99L, penalty);
         adminController.penalties(4L);
         adminController.createWarning(4L, 99L, warning);
+        adminController.warningDisputes("OPEN", 1, 10);
+        adminController.reviewWarningDispute(4L, 44L, 99L, disputeReview);
 
         verify(orderService).dashboard(4L);
         verify(profileService).updateAvailability(4L, availability);
@@ -252,5 +282,7 @@ class PartnerControllersTest {
         verify(operationsService).addPenalty(4L, "WARNING", "late", 99L);
         verify(operationsService).penalties(4L);
         verify(operationsService).createWarning(4L, "documents missing", 99L, false);
+        verify(governanceService).warningDisputes("OPEN", 1, 10);
+        verify(governanceService).reviewWarningDispute(4L, 44L, "APPROVED", "accepted", 99L);
     }
 }

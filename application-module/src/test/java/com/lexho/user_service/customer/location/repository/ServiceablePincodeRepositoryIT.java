@@ -1,42 +1,27 @@
 package com.lexho.user_service.customer.location.repository;
 
-import com.lexho.user_service.UserServiceApplication;
 import com.lexho.user_service.customer.location.entity.ServiceablePincode;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.test.context.ContextConfiguration;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@DataJpaTest
-@ContextConfiguration(classes = UserServiceApplication.class)
-@Testcontainers(disabledWithoutDocker = true)
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Tag("infra-it")
+@SpringBootTest(classes = ServiceablePincodeRepositoryIT.JpaConfig.class)
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY)
+@TestPropertySource(properties = {
+        "spring.flyway.enabled=false",
+        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "spring.jpa.properties.hibernate.jdbc.time_zone=UTC"
+})
 class ServiceablePincodeRepositoryIT {
-
-    @Container
-    static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0.39")
-            .withDatabaseName("lexho_test")
-            .withUsername("test")
-            .withPassword("test");
-
-    @DynamicPropertySource
-    static void datasource(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", mysql::getJdbcUrl);
-        registry.add("spring.datasource.username", mysql::getUsername);
-        registry.add("spring.datasource.password", mysql::getPassword);
-        registry.add("spring.flyway.enabled", () -> false);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
-    }
 
     @Autowired
     private ServiceablePincodeRepository repository;
@@ -44,10 +29,24 @@ class ServiceablePincodeRepositoryIT {
     @Test
     void shouldPersistAndFindActivePincode() {
         ServiceablePincode p = new ServiceablePincode();
+        p.setId("svc-pin-201304");
         p.setPincode("201304");
         p.setCity("Noida");
         p.setActive(true);
         repository.save(p);
         assertTrue(repository.existsByPincodeAndActiveTrue("201304"));
+    }
+
+    @org.springframework.boot.SpringBootConfiguration
+    @EnableAutoConfiguration
+    @EntityScan(basePackageClasses = ServiceablePincode.class)
+    @EnableJpaRepositories(
+            basePackageClasses = ServiceablePincodeRepository.class,
+            includeFilters = @ComponentScan.Filter(
+                    type = FilterType.ASSIGNABLE_TYPE,
+                    classes = ServiceablePincodeRepository.class
+            )
+    )
+    static class JpaConfig {
     }
 }

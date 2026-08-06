@@ -2,9 +2,16 @@ package com.lexho.user_service.subscription.service;
 
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
+import com.lexho.user_service.config.DispatchProperties;
+import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
+import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
+import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dispatch.repository.PartnerServiceSkillRepository;
+import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import com.lexho.user_service.lexho.entity.LexhoAddress;
+import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
 import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
 import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.subscription.dto.AdminPartnerAssignRequest;
@@ -34,6 +41,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,6 +61,10 @@ public class AdminSubscriptionManagementService {
     private final SubscriptionVisitPartnerAssignmentRepository visitPartnerAssignmentRepository;
     private final PartnerProfileRepository partnerProfileRepository;
     private final PartnerServiceSkillRepository partnerServiceSkillRepository;
+    private final LexhoAddressRepository lexhoAddressRepository;
+    private final PartnerShiftRepository partnerShiftRepository;
+    private final CurrentPartnerLocationRepository currentPartnerLocationRepository;
+    private final DispatchProperties dispatchProperties;
 
     public AdminSubscriptionManagementService(SubscriptionMasterRepository subscriptionMasterRepository,
                                               SubscriptionFrequencyRepository subscriptionFrequencyRepository,
@@ -59,7 +73,11 @@ public class AdminSubscriptionManagementService {
                                               SubscriptionPartnerAssignmentRepository subscriptionPartnerAssignmentRepository,
                                               SubscriptionVisitPartnerAssignmentRepository visitPartnerAssignmentRepository,
                                               PartnerProfileRepository partnerProfileRepository,
-                                              PartnerServiceSkillRepository partnerServiceSkillRepository) {
+                                              PartnerServiceSkillRepository partnerServiceSkillRepository,
+                                              LexhoAddressRepository lexhoAddressRepository,
+                                              PartnerShiftRepository partnerShiftRepository,
+                                              CurrentPartnerLocationRepository currentPartnerLocationRepository,
+                                              DispatchProperties dispatchProperties) {
         this.subscriptionMasterRepository = subscriptionMasterRepository;
         this.subscriptionFrequencyRepository = subscriptionFrequencyRepository;
         this.subscriptionVisitRepository = subscriptionVisitRepository;
@@ -68,6 +86,10 @@ public class AdminSubscriptionManagementService {
         this.visitPartnerAssignmentRepository = visitPartnerAssignmentRepository;
         this.partnerProfileRepository = partnerProfileRepository;
         this.partnerServiceSkillRepository = partnerServiceSkillRepository;
+        this.lexhoAddressRepository = lexhoAddressRepository;
+        this.partnerShiftRepository = partnerShiftRepository;
+        this.currentPartnerLocationRepository = currentPartnerLocationRepository;
+        this.dispatchProperties = dispatchProperties;
     }
 
     @Transactional(readOnly = true)
@@ -153,6 +175,7 @@ public class AdminSubscriptionManagementService {
         SubscriptionMaster subscription = getSubscription(subscriptionId);
         PartnerProfile partner = getValidPartner(request.partnerId());
         validatePartnerSkill(partner.getId(), subscription.getServiceId());
+        validatePartnerDispatchEligibility(subscription, partner.getId());
 
         SubscriptionPartnerAssignment assignment = subscriptionPartnerAssignmentRepository
                 .findBySubscriptionId(subscriptionId)
@@ -173,6 +196,7 @@ public class AdminSubscriptionManagementService {
         SubscriptionMaster subscription = getSubscription(subscriptionId);
         PartnerProfile replacement = getValidPartner(request.partnerId());
         validatePartnerSkill(replacement.getId(), subscription.getServiceId());
+        validatePartnerDispatchEligibility(subscription, replacement.getId());
 
         SubscriptionPartnerAssignment assignment = subscriptionPartnerAssignmentRepository
                 .findBySubscriptionId(subscriptionId)
@@ -194,6 +218,7 @@ public class AdminSubscriptionManagementService {
                 .orElseThrow(() -> new ResourceNotFoundException("Visit not found"));
         PartnerProfile partner = getValidPartner(request.partnerId());
         validatePartnerSkill(partner.getId(), subscription.getServiceId());
+        validatePartnerDispatchEligibility(subscription, partner.getId());
 
         SubscriptionVisitPartnerAssignment assignment = visitPartnerAssignmentRepository.findByVisitId(visitId)
                 .orElseGet(SubscriptionVisitPartnerAssignment::new);
@@ -286,6 +311,12 @@ public class AdminSubscriptionManagementService {
         if (partner.isDeleted()) {
             throw new BadRequestException("Partner is deleted");
         }
+        if (!partner.isOnline()) {
+            throw new BadRequestException("Partner is offline");
+        }
+        if (!partner.isVerified()) {
+            throw new BadRequestException("Partner is not verified");
+        }
         return partner;
     }
 
@@ -293,6 +324,73 @@ public class AdminSubscriptionManagementService {
         if (!partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(partnerId, serviceId)) {
             throw new BadRequestException("Partner is not mapped to this subscription service");
         }
+    }
+
+    private void validatePartnerDispatchEligibility(SubscriptionMaster subscription, Long partnerId) {
+        LexhoAddress address = lexhoAddressRepository.findById(subscription.getAddressId())
+                .orElseThrow(() -> new BadRequestException("Subscription address not found"));
+        if (address.getLatitude() == null || address.getLongitude() == null) {
+            throw new BadRequestException("Subscription address coordinates are missing");
+        }
+
+        PartnerShiftEntity shift = partnerShiftRepository.findByPartnerId(partnerId)
+                .orElseThrow(() -> new BadRequestException("Partner shift not found"));
+        if (!shift.isOnline() || shift.getActiveJobsCount() >= shift.getMaxActiveJobs() || !isShiftActive(shift)) {
+            throw new BadRequestException("Partner is not eligible for subscription assignment");
+        }
+
+        CurrentPartnerLocationEntity location = currentPartnerLocationRepository.findByPartnerId(partnerId)
+                .orElseThrow(() -> new BadRequestException("Partner live location not available"));
+        BigDecimal distanceKm = calculateDistanceKm(address, location);
+        if (distanceKm.compareTo(BigDecimal.valueOf(getMaxSearchRadiusKm())) > 0) {
+            throw new BadRequestException("Partner is outside maximum dispatch radius");
+        }
+        if (estimateEtaMinutes(distanceKm) > getMaxEtaMinutes()) {
+            throw new BadRequestException("Partner ETA exceeds allowed dispatch limit");
+        }
+    }
+
+    private boolean isShiftActive(PartnerShiftEntity shift) {
+        if (shift.getShiftStart() == null || shift.getShiftEnd() == null) {
+            return true;
+        }
+        LocalDateTime currentTime = LocalDateTime.now();
+        return !currentTime.isBefore(shift.getShiftStart()) && !currentTime.isAfter(shift.getShiftEnd());
+    }
+
+    private BigDecimal calculateDistanceKm(LexhoAddress address, CurrentPartnerLocationEntity location) {
+        double km = haversineKm(
+                address.getLatitude().doubleValue(),
+                address.getLongitude().doubleValue(),
+                location.getLatitude().doubleValue(),
+                location.getLongitude().doubleValue()
+        );
+        return BigDecimal.valueOf(km).setScale(3, RoundingMode.HALF_UP);
+    }
+
+    private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
+        double earthRadiusKm = 6371.0d;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return earthRadiusKm * c;
+    }
+
+    private int estimateEtaMinutes(BigDecimal distanceKm) {
+        double hours = distanceKm.doubleValue() / 25.0d;
+        int minutes = (int) Math.ceil(hours * 60.0d);
+        return Math.max(minutes, 1);
+    }
+
+    private double getMaxSearchRadiusKm() {
+        return Math.max(0.1d, Math.min(25.0d, dispatchProperties.getPartner().getMaxSearchRadiusKm()));
+    }
+
+    private int getMaxEtaMinutes() {
+        return Math.max(1, Math.min(120, dispatchProperties.getBooking().getMaxEtaMinutes()));
     }
 
     private String normalizeReason(String reason) {

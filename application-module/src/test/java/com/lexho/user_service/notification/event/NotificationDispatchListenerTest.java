@@ -7,6 +7,7 @@ import com.lexho.notification.enums.NotificationUserType;
 import com.lexho.user_service.notification.service.EmailNotificationService;
 import com.lexho.user_service.notification.service.FcmPushService;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import com.lexho.user_service.notification.service.PushTokenService;
 import com.lexho.user_service.notification.service.SmsNotificationService;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +43,8 @@ class NotificationDispatchListenerTest {
     @Mock
     private SmsNotificationService smsService;
     @Mock
+    private NotificationRealtimeService notificationRealtimeService;
+    @Mock
     private SimpMessagingTemplate messagingTemplate;
 
     private NotificationDispatchListener listener;
@@ -49,7 +52,7 @@ class NotificationDispatchListenerTest {
     @BeforeEach
     void setUp() {
         listener = new NotificationDispatchListener(managementService, pushTokenService, fcmPushService,
-                emailService, smsService, messagingTemplate);
+                emailService, smsService, notificationRealtimeService, messagingTemplate);
     }
 
     @Test
@@ -61,6 +64,8 @@ class NotificationDispatchListenerTest {
 
         verify(messagingTemplate).convertAndSend(eq("/topic/notifications/7"), any(Object.class));
         verify(messagingTemplate).convertAndSend(eq("/topic/admin/notifications"), any(Object.class));
+        verify(notificationRealtimeService).publish(eq(7L), eq("notification-created"), any(Map.class));
+        verify(notificationRealtimeService).publishAdmin(eq("notification-created"), any(Map.class));
         verify(managementService).markDispatched(notification);
     }
 

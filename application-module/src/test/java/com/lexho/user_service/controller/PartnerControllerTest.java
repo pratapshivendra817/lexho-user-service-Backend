@@ -3,23 +3,29 @@ package com.lexho.user_service.controller;
 import com.lexho.provider.entity.Partner;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.dto.PartnerCreateRequestDTO;
+import com.lexho.user_service.security.SecurityUtils;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PartnerControllerTest {
 
     private final PartnerRepository repository = mock(PartnerRepository.class);
-    private final PartnerController controller = new PartnerController(repository);
+    private final SecurityUtils securityUtils = mock(SecurityUtils.class);
+    private final PartnerController controller = new PartnerController(repository, securityUtils);
 
     @Test
     void createShouldReturnDtoInsteadOfEntity() {
@@ -53,6 +59,8 @@ class PartnerControllerTest {
 
     @Test
     void getByIdShouldMapEntityToDto() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(7L));
         Partner partner = partner();
         partner.setId(7L);
         when(repository.findById(7L)).thenReturn(Optional.of(partner));
@@ -62,6 +70,46 @@ class PartnerControllerTest {
         assertTrue(response.isSuccess());
         assertEquals(7L, response.getData().getId());
         assertEquals(20L, response.getData().getSubCategoryId());
+    }
+
+    @Test
+    void getByIdShouldRejectForeignPartnerAccess() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(7L));
+
+        assertThrows(AccessDeniedException.class, () -> controller.getById(9L));
+        verify(repository, never()).findById(9L);
+    }
+
+    @Test
+    void getByIdShouldAllowAdminAccess() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("ADMIN"));
+        Partner partner = partner();
+        partner.setId(9L);
+        when(repository.findById(9L)).thenReturn(Optional.of(partner));
+
+        assertDoesNotThrow(() -> controller.getById(9L));
+    }
+
+    @Test
+    void deleteShouldRejectForeignPartnerAccess() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(7L));
+
+        assertThrows(AccessDeniedException.class, () -> controller.delete(9L));
+        verify(repository, never()).existsById(9L);
+    }
+
+    @Test
+    void deleteShouldAllowSelf() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(7L));
+        when(repository.existsById(7L)).thenReturn(true);
+
+        var response = controller.delete(7L);
+
+        assertTrue(response.isSuccess());
+        verify(repository).deleteById(7L);
     }
 
     private PartnerCreateRequestDTO request() {

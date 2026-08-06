@@ -35,12 +35,18 @@ class AdminMonitoringControllerTest {
     void returnsMonitoringDashboardOnVersionedEndpoint() throws Exception {
         when(adminMonitoringService.dashboard()).thenReturn(Map.of(
                 "status", "UP",
+                "apiHealth", "UP",
+                "redisHealth", "UP",
+                "databaseHealth", "UP",
                 "totalUsers", 25L,
                 "apiRequestCount", 100L));
 
         mockMvc.perform(get("/api/v1/admin/monitoring/dashboard"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("UP"))
+                .andExpect(jsonPath("$.data.apiHealth").value("UP"))
+                .andExpect(jsonPath("$.data.redisHealth").value("UP"))
+                .andExpect(jsonPath("$.data.databaseHealth").value("UP"))
                 .andExpect(jsonPath("$.data.totalUsers").value(25))
                 .andExpect(jsonPath("$.data.apiRequestCount").value(100));
     }

@@ -20,6 +20,7 @@ public class ServiceablePincode {
     private boolean active;
 
     public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
     public String getPincode() { return pincode; }
     public void setPincode(String pincode) { this.pincode = pincode; }
     public String getCity() { return city; }

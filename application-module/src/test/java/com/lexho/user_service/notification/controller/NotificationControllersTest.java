@@ -9,6 +9,7 @@ import com.lexho.user_service.notification.exception.NotificationAccessDeniedExc
 import com.lexho.user_service.notification.exception.NotificationValidationException;
 import com.lexho.user_service.notification.mapper.NotificationMapper;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import com.lexho.user_service.notification.service.PushTokenService;
 import com.lexho.user_service.security.SecurityUtils;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +18,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -33,6 +36,7 @@ class NotificationControllersTest {
     @Mock private SecurityUtils securityUtils;
     @Mock private PushTokenService pushTokenService;
     @Mock private NotificationMapper notificationMapper;
+    @Mock private NotificationRealtimeService notificationRealtimeService;
 
     private AdminNotificationController adminController;
     private NotificationSendController sendController;
@@ -42,9 +46,10 @@ class NotificationControllersTest {
     @BeforeEach
     void setUp() {
         adminController = new AdminNotificationController(managementService);
+        ReflectionTestUtils.setField(adminController, "notificationRealtimeService", notificationRealtimeService);
         sendController = new NotificationSendController(managementService, securityUtils);
         pushTokenController = new PushTokenController(pushTokenService);
-        partnerController = new LexhoPartnerNotificationController(managementService, notificationMapper);
+        partnerController = new LexhoPartnerNotificationController(managementService, notificationMapper, notificationRealtimeService);
     }
 
     @Test
@@ -99,6 +104,15 @@ class NotificationControllersTest {
         assertThatThrownBy(() -> adminController.retry(2L))
                 .isInstanceOf(NotificationValidationException.class)
                 .hasMessage("Retry failed: provider down");
+    }
+
+    @Test
+    void adminNotificationStreamDelegatesToRealtimeService() {
+        SseEmitter emitter = new SseEmitter();
+        when(notificationRealtimeService.subscribeAdmin()).thenReturn(emitter);
+
+        assertThat(adminController.stream()).isSameAs(emitter);
+        verify(notificationRealtimeService).subscribeAdmin();
     }
 
     @Test
@@ -158,6 +172,10 @@ class NotificationControllersTest {
         when(managementService.getProviderNotifications(1, 5)).thenReturn(page);
         Notification entity = mock(Notification.class);
         NotificationResponse mapped = new NotificationResponse();
+        when(entity.getUserId()).thenReturn(7L);
+        when(entity.getId()).thenReturn(8L);
+        when(entity.getReadAt()).thenReturn(java.time.LocalDateTime.of(2026, 7, 27, 12, 0));
+        when(entity.getStatus()).thenReturn(com.lexho.notification.enums.NotificationStatus.READ);
         when(managementService.markAsReadForCurrentUser(8L)).thenReturn(entity);
         when(notificationMapper.toResponse(entity)).thenReturn(mapped);
         when(managementService.unreadCountForCurrentUser()).thenReturn(4L);
@@ -165,6 +183,7 @@ class NotificationControllersTest {
         assertThat(partnerController.notifications(1, 5).getData()).isSameAs(page);
         assertThat(partnerController.markRead(8L).getData()).isSameAs(mapped);
         assertThat(partnerController.unreadCount().getData().getUnreadCount()).isEqualTo(4L);
+        verify(notificationRealtimeService).publish(eq(7L), eq("notification-read"), any(Map.class));
     }
 
     private PushSendRequest pushRequest(Long userId, String redirectType, String bookingId) {

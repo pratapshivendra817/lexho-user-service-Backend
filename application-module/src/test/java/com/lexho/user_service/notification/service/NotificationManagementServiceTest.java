@@ -519,6 +519,27 @@ class NotificationManagementServiceTest {
         assertEquals(null, request.getScheduledTime());
     }
 
+    @Test
+    void warningDisputeStatusNotificationShouldCreateInAppAndPushNotifications() {
+        when(notificationRepository.existsRecentDuplicate(eq(7L), eq(NotificationUserType.PARTNER), eq(NotificationType.SYSTEM),
+                any(), any(), any(), eq("WARNING"), eq(55L), eq("WARNING"), eq("55"), any()))
+                .thenReturn(false);
+        when(notificationRepository.save(any(Notification.class))).thenAnswer(invocation -> {
+            Notification saved = invocation.getArgument(0);
+            saved.setId(saved.getChannelType() == ChannelType.IN_APP ? 201L : 202L);
+            return saved;
+        });
+
+        notificationManagementService.createPartnerWarningDisputeStatusNotification(7L, 55L, "APPROVED");
+
+        verify(notificationRepository, times(2)).save(argThat(notification ->
+                notification.getUserId().equals(7L)
+                        && "WARNING".equals(notification.getRedirectType())
+                        && "55".equals(notification.getRedirectValue())
+                        && NotificationType.SYSTEM == notification.getNotificationType()));
+        verify(eventPublisher, times(2)).publishEvent(any(NotificationDispatchEvent.class));
+    }
+
     private AdminBulkNotificationRequest baseRequest() {
         AdminBulkNotificationRequest request = new AdminBulkNotificationRequest();
         request.setTitle("Notice");

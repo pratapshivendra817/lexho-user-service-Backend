@@ -1,3 +1,16 @@
+CREATE TABLE IF NOT EXISTS lexho_addresses (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    house_no VARCHAR(100) NOT NULL,
+    area VARCHAR(180) NOT NULL,
+    city VARCHAR(120) NOT NULL,
+    state VARCHAR(120) NOT NULL,
+    pincode VARCHAR(10) NULL,
+    latitude DECIMAL(10, 7) NULL,
+    longitude DECIMAL(10, 7) NULL,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE
+);
+
 SET @has_addr_is_deleted := (
     SELECT COUNT(*)
     FROM information_schema.columns
@@ -125,4 +138,3 @@ SET @sql_idx_partner_location_geo := IF(
 PREPARE stmt_idx_partner_location_geo FROM @sql_idx_partner_location_geo;
 EXECUTE stmt_idx_partner_location_geo;
 DEALLOCATE PREPARE stmt_idx_partner_location_geo;
-

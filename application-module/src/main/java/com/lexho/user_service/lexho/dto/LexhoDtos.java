@@ -2,6 +2,7 @@ package com.lexho.user_service.lexho.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
@@ -28,10 +29,10 @@ public final class LexhoDtos {
     ) {
     }
 
-    public record RefreshTokenRequest(String refreshToken) {
+    public record RefreshTokenRequest(@NotBlank String refreshToken) {
     }
 
-    public record RefreshTokenApiRequest(String refreshToken, String deviceId) {
+    public record RefreshTokenApiRequest(@NotBlank String refreshToken, String deviceId) {
     }
 
     public record AuthUserDetails(
@@ -140,7 +141,13 @@ public final class LexhoDtos {
     ) {
     }
 
-    public record RescheduleRequest(String date) {
+    public record RescheduleRequest(@NotBlank String date) {
+    }
+
+    public record RescheduleSlotRequest(
+            @NotBlank String date,
+            @NotBlank String slot
+    ) {
     }
 
     public record PaymentOptionsRequest(String bookingId, Long cartId, BigDecimal amount) {
@@ -172,7 +179,21 @@ public final class LexhoDtos {
             String categoryId,
             String bookingId,
             @Pattern(regexp = "LOW|MEDIUM|HIGH|URGENT", message = "priority must be LOW, MEDIUM, HIGH or URGENT")
-            String priority
+            String priority,
+            List<String> attachmentUrls
+    ) {
+    }
+
+    public record SupportReplyRequest(
+            @NotNull @Size(max = 2000) String message,
+            List<String> attachmentUrls
+    ) {
+    }
+
+    public record SupportStatusUpdateRequest(
+            @NotNull
+            @Pattern(regexp = "OPEN|CLOSED", message = "status must be OPEN or CLOSED")
+            String status
     ) {
     }
 }

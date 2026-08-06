@@ -27,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -163,11 +164,44 @@ class AdminManagementServiceTest {
                 .thenReturn(new PageImpl<>(List.of(ticket)));
 
         assertEquals(1, service.supportTickets(1, 10, " find ", " OPEN ", " GENERAL ", " HIGH ").getTotal());
+        assertEquals("CUSTOMER", service.supportTickets(1, 10, " find ", " OPEN ", " GENERAL ", " HIGH ")
+                .getData().get(0).get("requesterType"));
 
         when(ticketRepository.findById(55L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> service.supportTicketDetail(55L));
+        assertThrows(ResourceNotFoundException.class, () -> service.supportTicketStream(55L));
         assertThrows(ResourceNotFoundException.class, () -> service.updateSupportTicketStatus(55L, "OPEN"));
         assertThrows(ResourceNotFoundException.class, () -> service.replySupportTicket(55L, "reply"));
+    }
+
+    @Test
+    void supportTicketStreamRequiresRealtimeService() {
+        SupportTicket ticket = ticket(5L, "OPEN");
+        when(ticketRepository.findById(5L)).thenReturn(Optional.of(ticket));
+
+        assertThrows(BadRequestException.class, () -> service.supportTicketStream(5L));
+    }
+
+    @Test
+    void customerAndPartnerSupportTicketFiltersUseRequesterType() {
+        SupportTicket customerTicket = ticket(5L, "OPEN");
+        SupportTicket partnerTicket = ticket(6L, "OPEN");
+        partnerTicket.setCategoryId("PARTNER:PAYOUT");
+        when(ticketRepository.searchByRequesterType(eq("find"), eq("OPEN"), eq("GENERAL"), eq("HIGH"), eq(false), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(customerTicket)));
+        when(ticketRepository.searchByRequesterType(eq("payout"), eq("OPEN"), eq("PAYOUT"), eq("HIGH"), eq(true), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(partnerTicket)));
+
+        Map<String, Object> customer = service.customerSupportTickets(1, 10, " find ", " OPEN ", " GENERAL ", " HIGH ")
+                .getData().get(0);
+        Map<String, Object> partner = service.partnerSupportTickets(1, 10, " payout ", " OPEN ", " PAYOUT ", " HIGH ")
+                .getData().get(0);
+
+        assertEquals("CUSTOMER", customer.get("requesterType"));
+        assertEquals("GENERAL", customer.get("categoryId"));
+        assertEquals("PARTNER", partner.get("requesterType"));
+        assertEquals("PAYOUT", partner.get("categoryId"));
+        assertEquals("PARTNER:PAYOUT", partner.get("rawCategoryId"));
     }
 
     @Test
@@ -181,6 +215,7 @@ class AdminManagementServiceTest {
         var data = service.supportTicketDetail(5L).getData();
 
         assertEquals("TCK-10005", data.get("ticketId"));
+        assertEquals("CUSTOMER", data.get("requesterType"));
         assertEquals(2, ((List<?>) data.get("messages")).size());
     }
 

@@ -15,6 +15,7 @@ import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerSettlementRefundRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,15 +49,28 @@ class PartnerSettlementServiceTest {
         properties.setCommissionPercent(new BigDecimal("10.00"));
         PartnerOrder order = partnerOrder(100L, 5L, 1000.0, OrderStatus.COMPLETED, PaymentStatus.SUCCESS);
         when(payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(100L)).thenReturn(Optional.empty());
-        when(partnerOrderRepository.findById(100L)).thenReturn(Optional.of(order));
+        when(partnerOrderRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(order));
 
         service.ensurePayout(100L);
 
-        verify(payoutRepository).save(any(Payout.class));
+        verify(payoutRepository).saveAndFlush(any(Payout.class));
 
         PartnerOrder pending = partnerOrder(101L, 5L, 1000.0, OrderStatus.ACCEPTED, PaymentStatus.SUCCESS);
-        when(partnerOrderRepository.findById(101L)).thenReturn(Optional.of(pending));
+        when(partnerOrderRepository.findByIdForUpdate(101L)).thenReturn(Optional.of(pending));
         service.ensurePayout(101L);
+    }
+
+    @Test
+    void ensurePayoutShouldTreatDuplicateInsertRaceAsIdempotent() {
+        PartnerOrder order = partnerOrder(100L, 5L, 1000.0, OrderStatus.COMPLETED, PaymentStatus.SUCCESS);
+        when(payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(100L)).thenReturn(Optional.empty());
+        when(partnerOrderRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(order));
+        doThrow(new DataIntegrityViolationException("duplicate payout"))
+                .when(payoutRepository).saveAndFlush(any(Payout.class));
+
+        service.ensurePayout(100L);
+
+        verify(payoutRepository).saveAndFlush(any(Payout.class));
     }
 
     @Test

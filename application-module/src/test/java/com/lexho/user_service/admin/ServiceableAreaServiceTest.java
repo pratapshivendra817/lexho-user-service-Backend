@@ -23,6 +23,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -63,7 +64,7 @@ class ServiceableAreaServiceTest {
         assertEquals("400058", captor.getValue().getPincode());
         assertEquals(10L, response.getId());
         assertTrue(response.isActive());
-        verify(jdbcTemplate).update(anyString(), any(Object[].class));
+        verify(jdbcTemplate, atLeastOnce()).update(anyString(), any(Object[].class));
     }
 
     @Test

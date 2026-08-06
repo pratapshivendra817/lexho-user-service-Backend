@@ -6,6 +6,7 @@ import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,12 +64,13 @@ class InfrastructureSupportTest {
         filter.doFilterInternal(request, response, chain);
 
         assertThat(response.getStatus()).isEqualTo(204);
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test
     void startupGuardRequiresExpectedEnvironmentVariables() {
         MockEnvironment valid = new MockEnvironment()
-                .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/app")
+                .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/app?sslMode=REQUIRED")
                 .withProperty("spring.datasource.username", "app")
                 .withProperty("spring.datasource.password", "db-password")
                 .withProperty("security.jwt.secret", "abcdefghijklmnopqrstuvwxyz123456")
@@ -80,7 +82,7 @@ class InfrastructureSupportTest {
         new RequiredEnvStartupGuard(valid).run(new DefaultApplicationArguments(new String[0]));
 
         MockEnvironment invalid = new MockEnvironment()
-                .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/app")
+                .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/app?sslMode=REQUIRED")
                 .withProperty("spring.datasource.username", "app")
                 .withProperty("spring.datasource.password", "db-password")
                 .withProperty("security.jwt.secret", "abcdefghijklmnopqrstuvwxyz123456")
@@ -96,7 +98,7 @@ class InfrastructureSupportTest {
     @Test
     void startupGuardRejectsWeakProductionDefaults() {
         MockEnvironment invalid = new MockEnvironment()
-                .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/app")
+                .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/app?sslMode=REQUIRED")
                 .withProperty("spring.datasource.username", "app")
                 .withProperty("spring.datasource.password", "db-password")
                 .withProperty("security.jwt.secret", "change-this-to-a-long-random-secret-key-min-32-bytes")
@@ -111,26 +113,61 @@ class InfrastructureSupportTest {
     }
 
     @Test
+    void startupGuardRejectsDevOnlyJwtFallbackInProduction() {
+        MockEnvironment invalid = new MockEnvironment()
+                .withProperty("spring.datasource.url", "jdbc:mysql://db.example.com:3306/app?sslMode=REQUIRED")
+                .withProperty("spring.datasource.username", "app")
+                .withProperty("spring.datasource.password", "db-password")
+                .withProperty("security.jwt.secret", "dev-only-local-jwt-secret-minimum-32-characters")
+                .withProperty("admin.seed.enabled", "false")
+                .withProperty("app.security.exposure.allow-internal-open", "false")
+                .withProperty("INTERNAL_API_TOKEN", "internal-token-abcdefghijklmnopqrstuvwxyz");
+        invalid.setActiveProfiles("prod");
+
+        assertThatThrownBy(() -> new RequiredEnvStartupGuard(invalid).run(new DefaultApplicationArguments(new String[0])))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("security.jwt.secret");
+    }
+
+    @Test
+    void startupGuardRejectsInsecureMysqlTransportSettingsInProduction() {
+        MockEnvironment invalid = new MockEnvironment()
+                .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/app?useSSL=false&allowPublicKeyRetrieval=true")
+                .withProperty("spring.datasource.username", "app")
+                .withProperty("spring.datasource.password", "db-password")
+                .withProperty("security.jwt.secret", "abcdefghijklmnopqrstuvwxyz123456")
+                .withProperty("admin.seed.enabled", "false")
+                .withProperty("app.security.exposure.allow-internal-open", "false")
+                .withProperty("INTERNAL_API_TOKEN", "internal-token-abcdefghijklmnopqrstuvwxyz");
+        invalid.setActiveProfiles("prod");
+
+        assertThatThrownBy(() -> new RequiredEnvStartupGuard(invalid).run(new DefaultApplicationArguments(new String[0])))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("spring.datasource.url")
+                .hasMessageContaining("TLS-safe");
+    }
+
+    @Test
     void securityExposurePropertiesExposeDefaultsAndMutations() {
         SecurityExposureProperties properties = new SecurityExposureProperties();
-
-        assertThat(properties.isExposeSwagger()).isTrue();
-        assertThat(properties.isAllowInternalOpen()).isTrue();
-        assertThat(properties.isAllowPublicCustomerRead()).isTrue();
-        assertThat(properties.isAllowPublicProviderOnboarding()).isTrue();
-        assertThat(properties.isAllowPublicAdminProfileContent()).isTrue();
-
-        properties.setExposeSwagger(false);
-        properties.setAllowInternalOpen(false);
-        properties.setAllowPublicCustomerRead(false);
-        properties.setAllowPublicProviderOnboarding(false);
-        properties.setAllowPublicAdminProfileContent(false);
 
         assertThat(properties.isExposeSwagger()).isFalse();
         assertThat(properties.isAllowInternalOpen()).isFalse();
         assertThat(properties.isAllowPublicCustomerRead()).isFalse();
         assertThat(properties.isAllowPublicProviderOnboarding()).isFalse();
         assertThat(properties.isAllowPublicAdminProfileContent()).isFalse();
+
+        properties.setExposeSwagger(true);
+        properties.setAllowInternalOpen(true);
+        properties.setAllowPublicCustomerRead(true);
+        properties.setAllowPublicProviderOnboarding(true);
+        properties.setAllowPublicAdminProfileContent(true);
+
+        assertThat(properties.isExposeSwagger()).isTrue();
+        assertThat(properties.isAllowInternalOpen()).isTrue();
+        assertThat(properties.isAllowPublicCustomerRead()).isTrue();
+        assertThat(properties.isAllowPublicProviderOnboarding()).isTrue();
+        assertThat(properties.isAllowPublicAdminProfileContent()).isTrue();
     }
 
     private static MockHttpServletRequest request(String method, String path) {

@@ -29,9 +29,15 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class PartnerOrderService {
+    private static final Set<String> ALLOWED_SORT_FIELDS = Set.of(
+            "id", "customerName", "amount", "status", "paymentMode",
+            "assignedPartnerId", "acceptedAt", "startedAt", "completedAt",
+            "rejectedAt", "createdAt"
+    );
 
     private final PartnerOrderRepository partnerOrderRepository;
     private final OrderStatusHistoryRepository orderStatusHistoryRepository;
@@ -262,9 +268,17 @@ public class PartnerOrderService {
     }
 
     private Pageable pageable(int page, int size, String sortBy, String direction) {
-        String field = sortBy == null || sortBy.isBlank() ? "createdAt" : sortBy;
+        String field = sanitizeSortBy(sortBy);
         Sort sort = "asc".equalsIgnoreCase(direction) ? Sort.by(field).ascending() : Sort.by(field).descending();
         return PageRequest.of(page, size, sort);
+    }
+
+    private String sanitizeSortBy(String sortBy) {
+        if (sortBy == null || sortBy.isBlank()) {
+            return "createdAt";
+        }
+        String candidate = sortBy.trim();
+        return ALLOWED_SORT_FIELDS.contains(candidate) ? candidate : "createdAt";
     }
 
     private OrderResponseDto toDto(PartnerOrder order) {

@@ -16,6 +16,8 @@ import com.lexho.user_service.map.dto.NavigationRouteRequest;
 import com.lexho.user_service.map.dto.NavigationRouteResponse;
 import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
+import com.lexho.user_service.security.SecurityUtils;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -38,6 +40,7 @@ public class PartnerNavigationService {
     private final CustomerAddressRepository customerAddressRepository;
     private final LexhoAddressRepository lexhoAddressRepository;
     private final NavigationEtaTrackingRegistry navigationEtaTrackingRegistry;
+    private final SecurityUtils securityUtils;
 
     public PartnerNavigationService(MapboxDirectionsClient mapboxDirectionsClient,
                                     NavigationRouteCacheService navigationRouteCacheService,
@@ -48,7 +51,8 @@ public class PartnerNavigationService {
                                     CustomerCurrentLocationRepository customerCurrentLocationRepository,
                                     CustomerAddressRepository customerAddressRepository,
                                     LexhoAddressRepository lexhoAddressRepository,
-                                    NavigationEtaTrackingRegistry navigationEtaTrackingRegistry) {
+                                    NavigationEtaTrackingRegistry navigationEtaTrackingRegistry,
+                                    SecurityUtils securityUtils) {
         this.mapboxDirectionsClient = mapboxDirectionsClient;
         this.navigationRouteCacheService = navigationRouteCacheService;
         this.mapboxProperties = mapboxProperties;
@@ -59,6 +63,7 @@ public class PartnerNavigationService {
         this.customerAddressRepository = customerAddressRepository;
         this.lexhoAddressRepository = lexhoAddressRepository;
         this.navigationEtaTrackingRegistry = navigationEtaTrackingRegistry;
+        this.securityUtils = securityUtils;
     }
 
     public NavigationRouteResponse route(NavigationRouteRequest request) {
@@ -81,6 +86,7 @@ public class PartnerNavigationService {
     public NavigationRouteResponse etaForBookingSnapshot(Long bookingId) {
         Order order = orderRepository.findById(bookingId)
                 .orElseThrow(() -> new ResourceNotFoundException("Booking not found"));
+        assertEtaAccessAllowed(order);
         if (order.getAssignedPartnerId() == null) {
             throw new BadRequestException("No partner assigned for this booking");
         }
@@ -100,6 +106,25 @@ public class PartnerNavigationService {
                 destination.longitude(),
                 partnerLocation.getUpdatedAt()
         ));
+    }
+
+    private void assertEtaAccessAllowed(Order order) {
+        String role = securityUtils.getCurrentRole().orElse("");
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+
+        Long currentUserId = securityUtils.getCurrentUserId()
+                .orElseThrow(() -> new AccessDeniedException("You are not allowed to access this booking ETA"));
+        if ("CUSTOMER".equalsIgnoreCase(role) && currentUserId.equals(order.getUserId())) {
+            return;
+        }
+        if ("PARTNER".equalsIgnoreCase(role)
+                && order.getAssignedPartnerId() != null
+                && currentUserId.equals(order.getAssignedPartnerId())) {
+            return;
+        }
+        throw new AccessDeniedException("You are not allowed to access this booking ETA");
     }
 
     private NavigationRouteResponse buildRoute(RouteContext context) {

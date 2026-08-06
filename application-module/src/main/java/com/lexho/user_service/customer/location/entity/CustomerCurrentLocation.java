@@ -5,7 +5,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UuidGenerator;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -18,6 +20,8 @@ public class CustomerCurrentLocation {
 
     @Id
     @UuidGenerator
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(nullable = false, length = 36, columnDefinition = "char(36)")
     private UUID id;
 
     @Column(name = "customer_id", nullable = false, unique = true)

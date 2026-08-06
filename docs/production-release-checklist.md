@@ -102,3 +102,27 @@ Confirm Flyway validates the configured locations:
 - `classpath:db/migration/user-service`
 
 If production has history from the old flat migration path, compare `flyway_schema_history` checksums before migration.
+
+## Opt-in MySQL Proofs
+
+Run these against isolated MySQL databases before a production claim:
+
+```powershell
+.\mvnw.cmd -pl application-module "-Dlexho.it.mysql.application.flyway=true" "-DIT_DB_URL=jdbc:mysql://localhost:3306/lexho_application_flyway_test?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true" "-DIT_DB_USERNAME=<user>" "-DIT_DB_PASSWORD=<password>" "-Dtest=ApplicationMysqlFlywayMigrationIT" test
+
+.\mvnw.cmd -pl application-module "-Dlexho.it.mysql.explain=true" "-DIT_DB_URL=jdbc:mysql://localhost:3306/lexho_application_explain_test?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true" "-DIT_DB_USERNAME=<user>" "-DIT_DB_PASSWORD=<password>" "-Dtest=ApplicationMysqlExplainPlanIT" test
+```
+
+These runs are expected to prove:
+
+- clean MySQL migration execution
+- critical unique/index contracts exist after migration
+- critical query paths resolve to the expected MySQL indexes
+
+## Backup And Restore Rehearsal
+
+Do not call the database layer production-ready without a recorded restore drill.
+
+Use:
+
+- [db-backup-restore-rehearsal.md](/C:/Users/shivendra/Downloads/lexho-user-service-master/docs/db-backup-restore-rehearsal.md)

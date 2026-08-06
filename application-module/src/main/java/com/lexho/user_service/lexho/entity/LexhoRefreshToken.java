@@ -15,7 +15,7 @@ public class LexhoRefreshToken {
     @Column(nullable = false)
     private Long userId;
 
-    @Column(nullable = false, unique = true, length = 1024)
+    @Column(nullable = false, unique = true, length = 64)
     private String token;
 
     @Column(nullable = false)
@@ -33,5 +33,15 @@ public class LexhoRefreshToken {
     public void setExpiresAt(LocalDateTime expiresAt) { this.expiresAt = expiresAt; }
     public boolean isRevoked() { return revoked; }
     public void setRevoked(boolean revoked) { this.revoked = revoked; }
-}
 
+    @Override
+    public String toString() {
+        return "LexhoRefreshToken{"
+                + "id=" + id
+                + ", userId=" + userId
+                + ", token='[REDACTED]'"
+                + ", expiresAt=" + expiresAt
+                + ", revoked=" + revoked
+                + '}';
+    }
+}

@@ -17,6 +17,7 @@ import java.util.Set;
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByUserId(Long userId);
+    boolean existsByUserIdAndAssignedPartnerIdAndStatusIn(Long userId, Long assignedPartnerId, Set<OrderStatus> statuses);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from Order o where o.id = :id")
     java.util.Optional<Order> findByIdForUpdate(@Param("id") Long id);

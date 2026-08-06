@@ -66,11 +66,11 @@ public class PartnerOrder extends BaseEntity {
     private Long assignedPartnerId;
 
     @Lob
-    @Column(name = "before_image_urls")
+    @Column(name = "before_image_urls", columnDefinition = "LONGTEXT")
     private String beforeImageUrls;
 
     @Lob
-    @Column(name = "after_image_urls")
+    @Column(name = "after_image_urls", columnDefinition = "LONGTEXT")
     private String afterImageUrls;
 
     @Column(name = "accepted_at")

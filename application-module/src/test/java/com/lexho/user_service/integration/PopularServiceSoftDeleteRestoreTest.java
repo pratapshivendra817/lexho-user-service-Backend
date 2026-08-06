@@ -17,8 +17,8 @@ import com.lexho.user_service.util.MediaUrlResolver;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -108,7 +108,7 @@ class PopularServiceSoftDeleteRestoreTest {
                 .containsExactly("POPULAR_SERVICE_CREATE", "POPULAR_SERVICE_DELETE", "POPULAR_SERVICE_REACTIVATE");
     }
 
-    @SpringBootApplication
+    @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = {
             Admin.class,

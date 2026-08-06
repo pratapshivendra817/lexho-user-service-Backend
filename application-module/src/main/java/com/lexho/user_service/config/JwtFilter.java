@@ -25,9 +25,6 @@ import java.util.Locale;
 
 @Component
 public class JwtFilter extends OncePerRequestFilter {
-
-    private static final String INTERNAL_HEADER = "X-Internal-Token";
-
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
     private final AdminRepository adminRepository;
@@ -65,9 +62,7 @@ public class JwtFilter extends OncePerRequestFilter {
             return true;
         }
 
-        if (isAllowInternalOpen()
-                && (servletPath.startsWith("/internal/auth/")
-                || servletPath.startsWith("/internal/bookings/"))) {
+        if (servletPath.startsWith("/internal/")) {
             return true;
         }
 
@@ -78,12 +73,17 @@ public class JwtFilter extends OncePerRequestFilter {
                 || servletPath.startsWith("/api/customer/home/banners")
                 || servletPath.startsWith("/api/customer/home/sections")
                 || servletPath.startsWith("/api/customer/services")
-                || "/api/customer/profile-content".equals(servletPath))) {
+                || "/api/customer/profile-content".equals(servletPath)
+                || "/api/customer/location/reverse-geocode".equals(servletPath)
+                || "/api/v1/customer/location/reverse-geocode".equals(servletPath)
+                || "/api/customer/location/serviceability/check".equals(servletPath)
+                || "/api/v1/customer/location/serviceability/check".equals(servletPath))) {
             return true;
         }
 
-        if (isAllowPublicAdminProfileContent()
-                && "/api/admin/profile-content".equals(servletPath)) {
+        if (HttpMethod.GET.matches(request.getMethod())
+                && ("/api/admin/profile-content".equals(servletPath)
+                || "/api/v1/admin/profile-content".equals(servletPath))) {
             return true;
         }
 
@@ -96,60 +96,6 @@ public class JwtFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
         if (isAlwaysPublicPath(request.getServletPath())) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        if (isAllowInternalOpen()
-                && request.getServletPath().startsWith("/api/admin/")
-                && !"/api/admin/login".equals(request.getServletPath())
-                && !"/api/admin/verify-otp".equals(request.getServletPath())) {
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(
-                            "dev-open-admin",
-                            null,
-                            Collections.singletonList(new SimpleGrantedAuthority("ROLE_ADMIN"))
-                    );
-            authentication.setDetails(-2L);
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            request.setAttribute("email", "dev-open-admin@local");
-            request.setAttribute("userId", -2L);
-            request.setAttribute("role", Role.ADMIN.name());
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        if (request.getServletPath().startsWith("/api/admin/")
-                && isValidInternalAdminToken(request)) {
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(
-                            "internal-admin",
-                            null,
-                            Collections.singletonList(new SimpleGrantedAuthority("ROLE_ADMIN"))
-                    );
-            authentication.setDetails(-1L);
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            request.setAttribute("email", "internal-admin@local");
-            request.setAttribute("userId", -1L);
-            request.setAttribute("role", Role.ADMIN.name());
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        if (request.getServletPath().startsWith("/api/customer/")
-                && isValidInternalAdminToken(request)) {
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(
-                            "internal-customer",
-                            null,
-                            Collections.singletonList(new SimpleGrantedAuthority("ROLE_CUSTOMER"))
-                    );
-            authentication.setDetails(-3L);
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            request.setAttribute("mobile", "9999999999");
-            request.setAttribute("email", "internal-customer@local");
-            request.setAttribute("userId", -3L);
-            request.setAttribute("role", Role.CUSTOMER.name());
             filterChain.doFilter(request, response);
             return;
         }
@@ -224,17 +170,8 @@ public class JwtFilter extends OncePerRequestFilter {
         }
     }
 
-    private boolean isValidInternalAdminToken(HttpServletRequest request) {
-        String configured = environment.getProperty("INTERNAL_API_TOKEN");
-        String provided = request.getHeader(INTERNAL_HEADER);
-        return configured != null
-                && !configured.isBlank()
-                && provided != null
-                && configured.equals(provided);
-    }
-
     private boolean isExposeSwagger() {
-        return environment.getProperty("app.security.exposure.expose-swagger", Boolean.class, true);
+        return environment.getProperty("app.security.exposure.expose-swagger", Boolean.class, false);
     }
 
     private boolean isAlwaysPublicPath(String servletPath) {
@@ -257,8 +194,6 @@ public class JwtFilter extends OncePerRequestFilter {
                 || "/api/health/liveness".equals(servletPath)
                 || "/actuator/health".equals(servletPath)
                 || "/actuator/info".equals(servletPath)
-                || "/actuator/prometheus".equals(servletPath)
-                || "/actuator/metrics".equals(servletPath)
                 || "/api/payments/webhook".equals(servletPath)
                 || "/api/payments/webhook/razorpay".equals(servletPath)
                 || "/api/v1/webhooks/razorpay".equals(servletPath)
@@ -266,25 +201,19 @@ public class JwtFilter extends OncePerRequestFilter {
                 || servletPath.startsWith("/auth/")
                 || servletPath.startsWith("/api/otp/")
                 || servletPath.startsWith("/api/auth/")
+                || servletPath.startsWith("/api/v1/auth/")
                 || servletPath.startsWith("/uploads/")
                 || servletPath.startsWith("/images/")
                 || "/api/admin/login".equals(servletPath)
                 || "/api/admin/verify-otp".equals(servletPath);
     }
 
-    private boolean isAllowInternalOpen() {
-        return environment.getProperty("app.security.exposure.allow-internal-open", Boolean.class, true);
-    }
-
     private boolean isAllowPublicCustomerRead() {
-        return environment.getProperty("app.security.exposure.allow-public-customer-read", Boolean.class, true);
+        return environment.getProperty("app.security.exposure.allow-public-customer-read", Boolean.class, false);
     }
 
     private boolean isAllowPublicProviderOnboarding() {
-        return environment.getProperty("app.security.exposure.allow-public-partner-onboarding", Boolean.class, true);
+        return environment.getProperty("app.security.exposure.allow-public-partner-onboarding", Boolean.class, false);
     }
 
-    private boolean isAllowPublicAdminProfileContent() {
-        return environment.getProperty("app.security.exposure.allow-public-admin-profile-content", Boolean.class, true);
-    }
 }

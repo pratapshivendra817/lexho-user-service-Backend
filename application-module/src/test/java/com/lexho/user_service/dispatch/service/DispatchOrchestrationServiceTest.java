@@ -14,6 +14,7 @@ import com.lexho.user_service.dispatch.repository.PartnerServiceSkillRepository;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
+import com.lexho.user_service.config.DispatchProperties;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.lexho.entity.LexhoAddress;
 import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
@@ -41,9 +42,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -99,10 +103,10 @@ class DispatchOrchestrationServiceTest {
                 dispatchScoringPolicy,
                 objectMapper,
                 trackingLifecycleService,
-                30
+                dispatchProperties()
         );
         try {
-            when(objectMapper.writeValueAsString(any())).thenReturn("{\"ok\":true}");
+            lenient().when(objectMapper.writeValueAsString(any())).thenReturn("{\"ok\":true}");
         } catch (Exception ignored) {
         }
     }
@@ -139,6 +143,24 @@ class DispatchOrchestrationServiceTest {
         boolean inRange = !saved.getPromisedStartTime().isBefore(minExpected)
                 && !saved.getPromisedStartTime().isAfter(maxExpected);
         assertTrue(inRange);
+    }
+
+    @Test
+    void markPartnerAcceptedShouldRejectConflictingPartnerAfterAssignment() {
+        Order order = new Order();
+        order.setId(2L);
+        order.setBookingType("INSTANT");
+        order.setStatus(OrderStatus.PARTNER_ASSIGNED);
+        order.setAssignedPartnerId(99L);
+
+        when(orderRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(order));
+
+        BadRequestException error = assertThrows(BadRequestException.class,
+                () -> dispatchOrchestrationService.markPartnerAccepted(2L, 100L, 10));
+
+        assertEquals("Order is already assigned to another partner", error.getMessage());
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(partnerShiftRepository, never()).save(any(PartnerShiftEntity.class));
     }
 
     @Test
@@ -191,16 +213,22 @@ class DispatchOrchestrationServiceTest {
         partner.setId(99L);
         partner.setAvailable(true);
         partner.setSubCategoryId(5L);
+        partner.setVerificationStatus("APPROVED");
+        com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity location =
+                new com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity();
+        location.setPartnerId(99L);
+        location.setLatitude(java.math.BigDecimal.valueOf(28.4596));
+        location.setLongitude(java.math.BigDecimal.valueOf(77.0267));
 
         when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
         when(lexhoAddressRepository.findByIdAndUserId(21L, 31L)).thenReturn(Optional.of(address));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
-        when(pincodeAdjacencyRepository.findBySourcePincodeAndActiveTrueOrderByPriorityAsc("110001")).thenReturn(List.of());
-        when(partnerShiftRepository.findByCurrentPincodeInAndOnlineTrue(List.of("110001"))).thenReturn(List.of(shift));
+        when(currentPartnerLocationRepository.findNearbyPartnerIds(anyDouble(), anyDouble(), eq(1.0d), eq(200))).thenReturn(List.of(99L));
+        when(partnerShiftRepository.findByPartnerIdInAndDeletedFalse(List.of(99L))).thenReturn(List.of(shift));
         when(partnerRepository.findAllById(List.of(99L))).thenReturn(List.of(partner));
-        when(currentPartnerLocationRepository.findByPartnerId(99L)).thenReturn(Optional.empty());
-        when(dispatchScoringPolicy.isWithinDispatchRadius(null)).thenReturn(true);
+        when(currentPartnerLocationRepository.findByPartnerId(99L)).thenReturn(Optional.of(location));
+        when(dispatchScoringPolicy.isWithinDispatchRadius(any(), anyDouble())).thenReturn(true);
         when(dispatchScoringPolicy.comparator("110001")).thenReturn(Comparator.comparing(candidate -> 0));
         when(partnerServiceRequestRepository.findByCartId(11L)).thenReturn(List.of());
         when(partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(11L, 99L, PartnerServiceRequestStatus.PENDING))
@@ -235,14 +263,14 @@ class DispatchOrchestrationServiceTest {
         when(partnerRepository.findById(700L)).thenReturn(Optional.of(legacyPartner));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
-        when(pincodeAdjacencyRepository.findBySourcePincodeAndActiveTrueOrderByPriorityAsc("110001")).thenReturn(List.of());
-        when(partnerShiftRepository.findByCurrentPincodeInAndOnlineTrue(List.of("110001"))).thenReturn(List.of());
+        when(currentPartnerLocationRepository.findNearbyPartnerIds(anyDouble(), anyDouble(), eq(1.0d), eq(200))).thenReturn(List.of());
+        when(currentPartnerLocationRepository.findNearbyPartnerIds(anyDouble(), anyDouble(), eq(2.0d), eq(200))).thenReturn(List.of());
 
         int created = dispatchOrchestrationService.dispatchOrder(15L, 32L, 22L, 700L, 1, null);
 
         assertEquals(0, created);
         verify(partnerRepository).findById(700L);
-        verify(bookingEventRepository).save(argThat(event -> "PARTNER_SEARCH_FAILED".equals(event.getEventType())));
+        verify(bookingEventRepository, atLeastOnce()).save(argThat(event -> "PARTNER_SEARCH_FAILED".equals(event.getEventType())));
     }
 
     @Test
@@ -260,16 +288,22 @@ class DispatchOrchestrationServiceTest {
         partner.setId(99L);
         partner.setAvailable(true);
         partner.setSubCategoryId(5L);
+        partner.setVerificationStatus("APPROVED");
+        com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity location =
+                new com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity();
+        location.setPartnerId(99L);
+        location.setLatitude(java.math.BigDecimal.valueOf(28.4596));
+        location.setLongitude(java.math.BigDecimal.valueOf(77.0267));
 
         when(orderRepository.findById(16L)).thenReturn(Optional.of(order));
         when(lexhoAddressRepository.findByIdAndUserId(23L, 33L)).thenReturn(Optional.of(address));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
-        when(pincodeAdjacencyRepository.findBySourcePincodeAndActiveTrueOrderByPriorityAsc("110001")).thenReturn(List.of());
-        when(partnerShiftRepository.findByCurrentPincodeInAndOnlineTrue(List.of("110001"))).thenReturn(List.of(shift));
+        when(currentPartnerLocationRepository.findNearbyPartnerIds(anyDouble(), anyDouble(), eq(1.0d), eq(200))).thenReturn(List.of(99L));
+        when(partnerShiftRepository.findByPartnerIdInAndDeletedFalse(List.of(99L))).thenReturn(List.of(shift));
         when(partnerRepository.findAllById(List.of(99L))).thenReturn(List.of(partner));
-        when(currentPartnerLocationRepository.findByPartnerId(99L)).thenReturn(Optional.empty());
-        when(dispatchScoringPolicy.isWithinDispatchRadius(null)).thenReturn(true);
+        when(currentPartnerLocationRepository.findByPartnerId(99L)).thenReturn(Optional.of(location));
+        when(dispatchScoringPolicy.isWithinDispatchRadius(any(), anyDouble())).thenReturn(true);
         when(dispatchScoringPolicy.comparator("110001")).thenReturn(Comparator.comparing(candidate -> 0));
         when(partnerServiceRequestRepository.findByCartId(16L)).thenReturn(List.of(new PartnerServiceRequestEntity()));
         when(partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(16L, 99L, PartnerServiceRequestStatus.PENDING))
@@ -279,14 +313,14 @@ class DispatchOrchestrationServiceTest {
 
         assertEquals(0, created);
         verify(partnerServiceRequestRepository, never()).save(any(PartnerServiceRequestEntity.class));
-        verify(bookingEventRepository).save(argThat(event -> "PARTNER_SEARCH_FAILED".equals(event.getEventType())));
+        verify(bookingEventRepository, atLeastOnce()).save(argThat(event -> "PARTNER_SEARCH_FAILED".equals(event.getEventType())));
     }
 
     @Test
     void transitionOrderStatusShouldApplyLifecycleAndRejectInvalidTransition() {
         Order order = baseOrder(12L, "INSTANT", OrderStatus.PARTNER_ACCEPTED);
         order.setAssignedPartnerId(77L);
-        when(orderRepository.findById(12L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(12L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(trackingLifecycleService.deriveFromOrder(eq("INSTANT"), eq(OrderStatus.ARRIVED), any()))
                 .thenReturn(com.lexho.user_service.dispatch.service.TrackingLifecycleState.ARRIVED);
@@ -298,7 +332,7 @@ class DispatchOrchestrationServiceTest {
         verify(trackingLifecycleService).persistState(77L,
                 com.lexho.user_service.dispatch.service.TrackingLifecycleState.ARRIVED, 12L);
 
-        when(orderRepository.findById(13L)).thenReturn(Optional.of(baseOrder(13L, "INSTANT", OrderStatus.CANCELLED)));
+        when(orderRepository.findByIdForUpdate(13L)).thenReturn(Optional.of(baseOrder(13L, "INSTANT", OrderStatus.CANCELLED)));
         assertThrows(BadRequestException.class,
                 () -> dispatchOrchestrationService.transitionOrderStatus(13L, OrderStatus.SERVICE_STARTED));
     }
@@ -310,8 +344,8 @@ class DispatchOrchestrationServiceTest {
         Order startedOrder = baseOrder(18L, "INSTANT", OrderStatus.SERVICE_STARTED);
         startedOrder.setAssignedPartnerId(89L);
 
-        when(orderRepository.findById(17L)).thenReturn(Optional.of(createdOrder));
-        when(orderRepository.findById(18L)).thenReturn(Optional.of(startedOrder));
+        when(orderRepository.findByIdForUpdate(17L)).thenReturn(Optional.of(createdOrder));
+        when(orderRepository.findByIdForUpdate(18L)).thenReturn(Optional.of(startedOrder));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(trackingLifecycleService.deriveFromOrder(eq("INSTANT"), eq(OrderStatus.PARTNER_SEARCH), any()))
                 .thenReturn(com.lexho.user_service.dispatch.service.TrackingLifecycleState.EN_ROUTE);
@@ -332,7 +366,7 @@ class DispatchOrchestrationServiceTest {
 
     @Test
     void helperMethodsShouldCoverEtaSerializationAndScheduledAcceptance() throws Exception {
-        assertEquals(20, dispatchOrchestrationService.estimateEtaMinutes(null));
+        assertEquals(16, dispatchOrchestrationService.estimateEtaMinutes(null));
         assertEquals(1, dispatchOrchestrationService.estimateEtaMinutes(java.math.BigDecimal.ZERO));
 
         Order scheduled = baseOrder(14L, "SCHEDULED", OrderStatus.CREATED);
@@ -388,5 +422,14 @@ class DispatchOrchestrationServiceTest {
         org.springframework.test.util.ReflectionTestUtils.setField(service, "id", serviceId);
         service.setCategory(category);
         return service;
+    }
+
+    private static DispatchProperties dispatchProperties() {
+        DispatchProperties properties = new DispatchProperties();
+        properties.getPartner().setInitialSearchRadiusKm(1.0d);
+        properties.getPartner().setMaxSearchRadiusKm(2.0d);
+        properties.getBooking().setMaxEtaMinutes(15);
+        properties.getBooking().setPreDispatchMinutes(30);
+        return properties;
     }
 }

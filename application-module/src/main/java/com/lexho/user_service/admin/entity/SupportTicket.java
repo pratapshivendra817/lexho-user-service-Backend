@@ -1,6 +1,8 @@
 package com.lexho.user_service.admin.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -34,6 +36,10 @@ public class SupportTicket {
 
     @Column(length = 20)
     private String priority;
+
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "attachment_urls", columnDefinition = "TEXT")
+    private String attachmentUrls;
 
     @OneToMany(mappedBy = "ticket", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SupportTicketReply> replies = new ArrayList<>();
@@ -118,6 +124,14 @@ public class SupportTicket {
 
     public void setPriority(String priority) {
         this.priority = priority;
+    }
+
+    public String getAttachmentUrls() {
+        return attachmentUrls;
+    }
+
+    public void setAttachmentUrls(String attachmentUrls) {
+        this.attachmentUrls = attachmentUrls;
     }
 
     public LocalDateTime getCreatedAt() {

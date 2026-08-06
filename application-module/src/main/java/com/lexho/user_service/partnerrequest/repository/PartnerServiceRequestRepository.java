@@ -23,7 +23,11 @@ public interface PartnerServiceRequestRepository extends JpaRepository<PartnerSe
     Optional<PartnerServiceRequestEntity> findByIdAndPartnerIdForUpdate(@Param("id") Long id, @Param("partnerId") Long partnerId);
     List<PartnerServiceRequestEntity> findByCartIdAndStatus(Long cartId, PartnerServiceRequestStatus status);
     List<PartnerServiceRequestEntity> findByCartId(Long cartId);
+    List<PartnerServiceRequestEntity> findBySubscriptionVisitIdAndStatus(Long subscriptionVisitId, PartnerServiceRequestStatus status);
+    List<PartnerServiceRequestEntity> findBySubscriptionVisitId(Long subscriptionVisitId);
     boolean existsByCartIdAndPartnerIdAndStatus(Long cartId, Long partnerId, PartnerServiceRequestStatus status);
+    boolean existsBySubscriptionVisitIdAndPartnerIdAndStatus(Long subscriptionVisitId, Long partnerId, PartnerServiceRequestStatus status);
     long countByCartIdAndStatus(Long cartId, PartnerServiceRequestStatus status);
+    long countBySubscriptionVisitIdAndStatus(Long subscriptionVisitId, PartnerServiceRequestStatus status);
     List<PartnerServiceRequestEntity> findByStatusAndExpiresAtBefore(PartnerServiceRequestStatus status, LocalDateTime expiresAt);
 }

@@ -22,6 +22,7 @@ import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerSettlementRefundRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
 import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -74,10 +75,13 @@ public class PartnerSettlementService {
         if (payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(bookingId).isPresent()) {
             return;
         }
-        PartnerOrder order = partnerOrderRepository.findById(bookingId).orElse(null);
+        PartnerOrder order = partnerOrderRepository.findByIdForUpdate(bookingId).orElse(null);
         if (order == null || order.getAssignedPartnerId() == null
                 || order.getStatus() != OrderStatus.COMPLETED
                 || order.getPaymentStatus() != PaymentStatus.SUCCESS) {
+            return;
+        }
+        if (payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(bookingId).isPresent()) {
             return;
         }
         BigDecimal gross = money(order.getAmount());
@@ -94,7 +98,11 @@ public class PartnerSettlementService {
         payout.setCurrency("INR");
         payout.setReversedAmount(BigDecimal.ZERO);
         payout.setStatus("PENDING");
-        payoutRepository.save(payout);
+        try {
+            payoutRepository.saveAndFlush(payout);
+        } catch (DataIntegrityViolationException ignored) {
+            // Another transaction already materialized the same booking payout.
+        }
     }
 
     @Transactional(readOnly = true)

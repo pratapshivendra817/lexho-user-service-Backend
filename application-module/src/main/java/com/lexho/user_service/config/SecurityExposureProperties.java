@@ -7,11 +7,12 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "app.security.exposure")
 public class SecurityExposureProperties {
 
-    private boolean exposeSwagger = true;
-    private boolean allowInternalOpen = true;
-    private boolean allowPublicCustomerRead = true;
-    private boolean allowPublicProviderOnboarding = true;
-    private boolean allowPublicAdminProfileContent = true;
+    private boolean exposeSwagger = false;
+    private boolean allowInternalOpen = false;
+    private boolean allowPublicCustomerRead = false;
+    private boolean allowPublicProviderOnboarding = false;
+    private boolean allowPublicAdminProfileContent = false;
+    private boolean allowPartnerRequestDevSeed = false;
 
     public boolean isExposeSwagger() {
         return exposeSwagger;
@@ -51,5 +52,13 @@ public class SecurityExposureProperties {
 
     public void setAllowPublicAdminProfileContent(boolean allowPublicAdminProfileContent) {
         this.allowPublicAdminProfileContent = allowPublicAdminProfileContent;
+    }
+
+    public boolean isAllowPartnerRequestDevSeed() {
+        return allowPartnerRequestDevSeed;
+    }
+
+    public void setAllowPartnerRequestDevSeed(boolean allowPartnerRequestDevSeed) {
+        this.allowPartnerRequestDevSeed = allowPartnerRequestDevSeed;
     }
 }

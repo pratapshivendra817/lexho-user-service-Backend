@@ -17,9 +17,12 @@ import com.lexho.user_service.lexhopartner.dto.DashboardStatsDto;
 import com.lexho.user_service.lexhopartner.dto.CreateWithdrawalRequest;
 import com.lexho.user_service.lexhopartner.dto.PartnerBankDetailsDto;
 import com.lexho.user_service.lexhopartner.dto.PartnerPayoutDto;
+import com.lexho.user_service.lexhopartner.dto.PartnerWarningCommentRequest;
+import com.lexho.user_service.lexhopartner.dto.PartnerWarningDisputeRequest;
 import com.lexho.user_service.lexhopartner.dto.PartnerWithdrawalDto;
 import com.lexho.user_service.lexhopartner.dto.UpdatePartnerBankDetailsRequest;
 import com.lexho.user_service.exception.BadRequestException;
+import com.lexho.user_service.lexhopartner.service.PartnerActivityFeedService;
 import com.lexho.user_service.lexhopartner.service.PartnerBannerService;
 import com.lexho.user_service.lexhopartner.service.PartnerDeviceTokenService;
 import com.lexho.user_service.lexhopartner.service.PartnerProfileService;
@@ -43,6 +46,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.Map;
@@ -60,19 +64,22 @@ public class LexhoPartnerController {
     private final PartnerSettlementService partnerSettlementService;
     private final PartnerDeviceTokenService partnerDeviceTokenService;
     private final PartnerOperationsService partnerOperationsService;
+    private final PartnerActivityFeedService partnerActivityFeedService;
 
     public LexhoPartnerController(PartnerProfileService partnerProfileService,
                                   PartnerOrderService partnerOrderService,
                                   PartnerBannerService partnerBannerService,
                                   PartnerSettlementService partnerSettlementService,
                                   PartnerDeviceTokenService partnerDeviceTokenService,
-                                  PartnerOperationsService partnerOperationsService) {
+                                  PartnerOperationsService partnerOperationsService,
+                                  PartnerActivityFeedService partnerActivityFeedService) {
         this.partnerProfileService = partnerProfileService;
         this.partnerOrderService = partnerOrderService;
         this.partnerBannerService = partnerBannerService;
         this.partnerSettlementService = partnerSettlementService;
         this.partnerDeviceTokenService = partnerDeviceTokenService;
         this.partnerOperationsService = partnerOperationsService;
+        this.partnerActivityFeedService = partnerActivityFeedService;
     }
 
     @GetMapping("/profile")
@@ -230,6 +237,46 @@ public class LexhoPartnerController {
         return ApiResponse.success("Warnings fetched", partnerOperationsService.warnings(partnerId));
     }
 
+    @GetMapping("/warnings/{warningId}")
+    @Operation(summary = "Get partner warning details")
+    public ApiResponse<Map<String, Object>> warning(@RequestAttribute("userId") Long partnerId,
+                                                    @PathVariable Long warningId) {
+        return ApiResponse.success("Warning fetched", partnerOperationsService.warningDetail(partnerId, warningId));
+    }
+
+    @PatchMapping("/warnings/{warningId}/acknowledge")
+    @Operation(summary = "Acknowledge partner warning")
+    public ApiResponse<Map<String, Object>> acknowledgeWarning(@RequestAttribute("userId") Long partnerId,
+                                                               @PathVariable Long warningId) {
+        return ApiResponse.success("Warning acknowledged",
+                partnerOperationsService.acknowledgeWarning(partnerId, warningId));
+    }
+
+    @PostMapping("/warnings/{warningId}/dispute")
+    @Operation(summary = "Dispute partner warning")
+    public ApiResponse<Map<String, Object>> disputeWarning(@RequestAttribute("userId") Long partnerId,
+                                                           @PathVariable Long warningId,
+                                                           @Valid @RequestBody PartnerWarningDisputeRequest request) {
+        return ApiResponse.success("Warning dispute submitted",
+                partnerOperationsService.disputeWarning(partnerId, warningId, request.reason(), request.attachmentUrls()));
+    }
+
+    @PostMapping("/warnings/{warningId}/comments")
+    @Operation(summary = "Add warning dispute comment")
+    public ApiResponse<Map<String, Object>> warningComment(@RequestAttribute("userId") Long partnerId,
+                                                           @PathVariable Long warningId,
+                                                           @Valid @RequestBody PartnerWarningCommentRequest request) {
+        return ApiResponse.success("Warning comment added",
+                partnerOperationsService.addWarningComment(partnerId, warningId, request));
+    }
+
+    @GetMapping("/warnings/{warningId}/stream")
+    @Operation(summary = "Stream warning updates")
+    public SseEmitter warningStream(@RequestAttribute("userId") Long partnerId,
+                                    @PathVariable Long warningId) {
+        return partnerOperationsService.warningStream(partnerId, warningId);
+    }
+
     @GetMapping("/payouts/{payoutId}")
     @Operation(summary = "Get partner payout details")
     public ApiResponse<PartnerPayoutDto> payout(@RequestAttribute("userId") Long partnerId,
@@ -271,6 +318,15 @@ public class LexhoPartnerController {
     public ApiResponse<Map<String, Object>> withdrawalBalance(@RequestAttribute("userId") Long partnerId) {
         return ApiResponse.success("Withdrawable balance fetched",
                 Map.of("currency", "INR", "withdrawableAmount", partnerSettlementService.withdrawableBalance(partnerId)));
+    }
+
+    @GetMapping("/inbox/activity")
+    @Operation(summary = "Get unified partner inbox and activity feed")
+    public ApiResponse<PageResponseDto<Map<String, Object>>> activityFeed(@RequestAttribute("userId") Long partnerId,
+                                                                          @RequestParam(defaultValue = "0") int page,
+                                                                          @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("Partner activity feed fetched",
+                partnerActivityFeedService.activity(partnerId, page, size));
     }
 
     private LocalDate parseDate(String value) {

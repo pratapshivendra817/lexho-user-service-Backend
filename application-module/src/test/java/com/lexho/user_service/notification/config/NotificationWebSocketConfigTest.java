@@ -2,48 +2,51 @@ package com.lexho.user_service.notification.config;
 
 import com.lexho.user_service.chat.config.ChatStompAuthChannelInterceptor;
 import org.junit.jupiter.api.Test;
-import org.springframework.messaging.simp.config.ChannelRegistration;
-import org.springframework.messaging.simp.config.MessageBrokerRegistry;
-import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
-import org.springframework.web.socket.config.annotation.StompWebSocketEndpointRegistration;
+import org.springframework.mock.env.MockEnvironment;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 class NotificationWebSocketConfigTest {
 
     @Test
-    void shouldRegisterEndpointsBrokerAndInboundInterceptor() {
-        ChatStompAuthChannelInterceptor interceptor = mock(ChatStompAuthChannelInterceptor.class);
-        NotificationWebSocketConfig config = new NotificationWebSocketConfig(interceptor);
-        StompEndpointRegistry registry = mock(StompEndpointRegistry.class);
-        StompWebSocketEndpointRegistration registration = mock(StompWebSocketEndpointRegistration.class);
-        MessageBrokerRegistry brokerRegistry = mock(MessageBrokerRegistry.class);
-        ChannelRegistration channelRegistration = mock(ChannelRegistration.class);
+    void websocketOriginsUseExplicitPropertyWhenConfigured() {
+        NotificationWebSocketConfig config = new NotificationWebSocketConfig(
+                mock(ChatStompAuthChannelInterceptor.class),
+                new MockEnvironment()
+                        .withProperty("app.security.websocket.allowed-origins",
+                                "https://admin.lexho.com, https://ops.lexho.com"));
 
-        when(registry.addEndpoint("/ws-notifications")).thenReturn(registration);
-        when(registry.addEndpoint("/ws/admin/notifications")).thenReturn(registration);
-        when(registry.addEndpoint("/ws/customer/bookings")).thenReturn(registration);
-        when(registry.addEndpoint("/ws/customer/bookings/{bookingId}")).thenReturn(registration);
-        when(registry.addEndpoint("/ws/admin/bookings/{bookingId}")).thenReturn(registration);
-        when(registry.addEndpoint("/ws-chat")).thenReturn(registration);
-        when(registration.setAllowedOriginPatterns("*")).thenReturn(registration);
+        assertThat(config.resolveAllowedOrigins())
+                .containsExactly("https://admin.lexho.com", "https://ops.lexho.com");
+    }
 
-        config.registerStompEndpoints(registry);
-        config.configureMessageBroker(brokerRegistry);
-        config.configureClientInboundChannel(channelRegistration);
+    @Test
+    void websocketOriginsFallBackToHttpCorsOrigins() {
+        NotificationWebSocketConfig config = new NotificationWebSocketConfig(
+                mock(ChatStompAuthChannelInterceptor.class),
+                new MockEnvironment()
+                        .withProperty("app.security.cors.allowed-origins",
+                                "https://customer.lexho.com, https://partner.lexho.com"));
 
-        verify(registry).addEndpoint("/ws-notifications");
-        verify(registry).addEndpoint("/ws/admin/notifications");
-        verify(registry).addEndpoint("/ws/customer/bookings");
-        verify(registry).addEndpoint("/ws/customer/bookings/{bookingId}");
-        verify(registry).addEndpoint("/ws/admin/bookings/{bookingId}");
-        verify(registry).addEndpoint("/ws-chat");
-        verify(registration, org.mockito.Mockito.times(6)).setAllowedOriginPatterns("*");
-        verify(brokerRegistry).enableSimpleBroker("/topic", "/queue");
-        verify(brokerRegistry).setApplicationDestinationPrefixes("/app");
-        verify(brokerRegistry).setUserDestinationPrefix("/user");
-        verify(channelRegistration).interceptors(interceptor);
+        assertThat(config.resolveAllowedOrigins())
+                .containsExactly("https://customer.lexho.com", "https://partner.lexho.com");
+    }
+
+    @Test
+    void websocketOriginsFallBackToLocalDevelopmentDefaults() {
+        NotificationWebSocketConfig config = new NotificationWebSocketConfig(
+                mock(ChatStompAuthChannelInterceptor.class),
+                new MockEnvironment());
+
+        assertThat(config.resolveAllowedOrigins())
+                .containsExactly("http://localhost:3000", "http://localhost:5173", "http://localhost:4200");
+    }
+
+    @Test
+    void parseAllowedOriginsRemovesBlanksAndDuplicates() {
+        assertThat(NotificationWebSocketConfig.parseAllowedOrigins(
+                " https://admin.lexho.com,,https://admin.lexho.com, https://customer.lexho.com "))
+                .containsExactly("https://admin.lexho.com", "https://customer.lexho.com");
     }
 }

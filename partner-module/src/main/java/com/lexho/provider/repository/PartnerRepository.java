@@ -21,6 +21,8 @@ public interface PartnerRepository extends JpaRepository<Partner, Long> {
 
     List<Partner> findTop6ByAvailableTrueOrderByRatingDesc();
 
+    long countByAvailableTrue();
+
     List<Partner> findTop6ByCategoryIdAndAvailableTrueOrderByRatingDesc(Long categoryId);
 
     @Query("""

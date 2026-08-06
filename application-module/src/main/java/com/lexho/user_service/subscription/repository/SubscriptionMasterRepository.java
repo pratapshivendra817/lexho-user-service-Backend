@@ -11,6 +11,7 @@ import java.util.Optional;
 
 public interface SubscriptionMasterRepository extends JpaRepository<SubscriptionMaster, Long> {
     List<SubscriptionMaster> findByCustomerIdOrderByIdDesc(Long customerId);
+    List<SubscriptionMaster> findByStatusOrderByIdDesc(SubscriptionStatus status);
     Page<SubscriptionMaster> findByOrderByIdDesc(Pageable pageable);
     Page<SubscriptionMaster> findByCustomerIdOrderByIdDesc(Long customerId, Pageable pageable);
     Page<SubscriptionMaster> findByStatusOrderByIdDesc(SubscriptionStatus status, Pageable pageable);

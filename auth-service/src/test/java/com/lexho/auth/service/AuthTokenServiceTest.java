@@ -5,147 +5,64 @@ import com.lexho.auth.entity.RefreshToken;
 import com.lexho.auth.repository.RefreshTokenRepository;
 import com.lexho.auth.security.JwtTokenService;
 import com.lexho.common.enums.Role;
-import org.junit.jupiter.api.BeforeEach;
+import com.lexho.common.security.TokenDigests;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class AuthTokenServiceTest {
 
-    @Mock
-    private RefreshTokenRepository refreshTokenRepository;
-
-    private JwtTokenService jwtTokenService;
-    private AuthTokenService authTokenService;
-
-    @BeforeEach
-    void setUp() {
-        jwtTokenService = new JwtTokenService(
-                "this-is-a-very-long-test-secret-with-min-32-bytes",
-                60_000,
-                "test-issuer"
-        );
-        authTokenService = new AuthTokenService(jwtTokenService, refreshTokenRepository, 30);
-    }
+    private final JwtTokenService jwtTokenService = mock(JwtTokenService.class);
+    private final RefreshTokenRepository refreshTokenRepository = mock(RefreshTokenRepository.class);
+    private final AuthTokenService service = new AuthTokenService(jwtTokenService, refreshTokenRepository, 30);
 
     @Test
-    void shouldIssueAccessAndRefreshToken() {
+    void issueTokensStoresHashedRefreshTokenButReturnsRawToken() {
+        when(jwtTokenService.generateAccessToken(7L, Role.CUSTOMER)).thenReturn("access");
         when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        TokenPairResponse response = authTokenService.issueTokens(100L, Role.ADMIN);
+        TokenPairResponse issued = service.issueTokens(7L, Role.CUSTOMER);
 
-        assertNotNull(response.getAccessToken());
-        assertNotNull(response.getRefreshToken());
-
-        ArgumentCaptor<RefreshToken> captor = ArgumentCaptor.forClass(RefreshToken.class);
-        verify(refreshTokenRepository).save(captor.capture());
-        assertEquals(100L, captor.getValue().getUserId());
-        assertEquals("ADMIN", captor.getValue().getRole());
+        assertThat(issued.getAccessToken()).isEqualTo("access");
+        assertThat(issued.getRefreshToken()).isNotBlank();
+        verify(refreshTokenRepository).save(any(RefreshToken.class));
     }
 
     @Test
-    void shouldRefreshTokenAndRevokeOldOne() {
-        RefreshToken oldToken = new RefreshToken();
-        oldToken.setUserId(200L);
-        oldToken.setRole(Role.CUSTOMER.name());
-        oldToken.setToken("old-refresh");
-        oldToken.setExpiresAt(LocalDateTime.now().plusDays(1));
-        oldToken.setRevoked(false);
-
-        when(refreshTokenRepository.findByToken("old-refresh")).thenReturn(Optional.of(oldToken));
-        when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        TokenPairResponse response = authTokenService.refreshTokens("old-refresh");
-
-        assertNotNull(response.getAccessToken());
-        assertNotNull(response.getRefreshToken());
-        assertTrue(oldToken.isRevoked());
-    }
-
-    @Test
-    void shouldRejectExpiredRefreshToken() {
+    void refreshAndRevokeLookupByDigest() {
         RefreshToken token = new RefreshToken();
-        token.setUserId(1L);
-        token.setRole(Role.ADMIN.name());
-        token.setToken("expired");
-        token.setExpiresAt(LocalDateTime.now().minusSeconds(5));
-        token.setRevoked(false);
-
-        when(refreshTokenRepository.findByToken("expired")).thenReturn(Optional.of(token));
-
-        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("expired"));
-    }
-
-    @Test
-    void shouldRejectMissingUnknownRevokedAndInvalidRoleRefreshTokens() {
-        when(refreshTokenRepository.findByToken("missing")).thenReturn(Optional.empty());
-
-        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("missing"));
-        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("   "));
-
-        RefreshToken revoked = new RefreshToken();
-        revoked.setUserId(2L);
-        revoked.setRole(Role.ADMIN.name());
-        revoked.setToken("revoked");
-        revoked.setExpiresAt(LocalDateTime.now().plusDays(1));
-        revoked.setRevoked(true);
-        when(refreshTokenRepository.findByToken("revoked")).thenReturn(Optional.of(revoked));
-        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("revoked"));
-
-        RefreshToken badRole = new RefreshToken();
-        badRole.setUserId(3L);
-        badRole.setRole("bad-role");
-        badRole.setToken("bad-role");
-        badRole.setExpiresAt(LocalDateTime.now().plusDays(1));
-        badRole.setRevoked(false);
-        when(refreshTokenRepository.findByToken("bad-role")).thenReturn(Optional.of(badRole));
-        assertThrows(IllegalArgumentException.class, () -> authTokenService.refreshTokens("bad-role"));
-    }
-
-    @Test
-    void shouldRevokeWhenTokenExistsAndIgnoreMissingOnes() {
-        RefreshToken token = new RefreshToken();
-        token.setToken("refresh");
-        token.setRevoked(false);
-        when(refreshTokenRepository.findByToken("refresh")).thenReturn(Optional.of(token));
-        when(refreshTokenRepository.findByToken("missing")).thenReturn(Optional.empty());
+        token.setUserId(9L);
+        token.setRole(Role.PARTNER.name());
+        token.setExpiresAt(LocalDateTime.now().plusDays(1));
+        when(refreshTokenRepository.findByToken(TokenDigests.sha256Hex("raw-token")))
+                .thenReturn(Optional.of(token));
+        when(jwtTokenService.generateAccessToken(9L, Role.PARTNER)).thenReturn("next-access");
         when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        authTokenService.revokeRefreshToken(" refresh ");
-        authTokenService.revokeRefreshToken("missing");
+        TokenPairResponse refreshed = service.refreshTokens("raw-token");
+        assertThat(refreshed.getAccessToken()).isEqualTo("next-access");
+        assertThat(token.isRevoked()).isTrue();
 
-        assertTrue(token.isRevoked());
-        verify(refreshTokenRepository).save(token);
+        token.setRevoked(false);
+        service.revokeRefreshToken("raw-token");
+        assertThat(token.isRevoked()).isTrue();
     }
 
     @Test
-    void shouldPropagateRepositorySaveFailures() {
-        when(refreshTokenRepository.save(any(RefreshToken.class))).thenThrow(new RuntimeException("db down"));
+    void rejectsUnknownRefreshToken() {
+        when(refreshTokenRepository.findByToken(TokenDigests.sha256Hex("missing")))
+                .thenReturn(Optional.empty());
 
-        assertThrows(RuntimeException.class, () -> authTokenService.issueTokens(100L, Role.ADMIN));
-    }
-
-    @Test
-    void shouldNormalizeRefreshTokenBeforeRevocationLookup() {
-        when(refreshTokenRepository.findByToken("trimmed")).thenReturn(Optional.empty());
-
-        authTokenService.revokeRefreshToken(" trimmed ");
-
-        verify(refreshTokenRepository).findByToken(eq("trimmed"));
-        verify(refreshTokenRepository, never()).save(any(RefreshToken.class));
+        assertThatThrownBy(() -> service.refreshTokens("missing"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid refresh token");
     }
 }

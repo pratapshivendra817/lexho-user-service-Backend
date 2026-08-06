@@ -1,23 +1,25 @@
 package com.lexho.user_service.lexho.service;
 
 import com.lexho.common.enums.Role;
+import com.lexho.common.security.TokenDigests;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.lexho.dto.LexhoDtos;
+import com.lexho.user_service.lexho.entity.LexhoOtpChallenge;
 import com.lexho.user_service.lexho.entity.LexhoRefreshToken;
 import com.lexho.user_service.lexho.entity.LexhoUserProfile;
+import com.lexho.user_service.lexho.repository.LexhoOtpChallengeRepository;
 import com.lexho.user_service.lexho.repository.LexhoRefreshTokenRepository;
 import com.lexho.user_service.lexho.repository.LexhoUserProfileRepository;
 import com.lexho.user_service.util.JwtUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -25,11 +27,11 @@ public class LexhoAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(LexhoAuthService.class);
 
-    private final Map<String, OtpRecord> otpStore = new ConcurrentHashMap<>();
-    private final Map<String, Long> throttleStore = new ConcurrentHashMap<>();
     private final JwtUtil jwtUtil;
     private final LexhoUserProfileRepository profileRepository;
     private final LexhoRefreshTokenRepository refreshTokenRepository;
+    private final LexhoOtpChallengeRepository otpChallengeRepository;
+    private final PasswordEncoder passwordEncoder;
 
     @Value("${lexho.auth.otp.expiry-seconds:300}")
     private long otpExpirySeconds;
@@ -37,36 +39,53 @@ public class LexhoAuthService {
     @Value("${lexho.auth.otp.resend-after-seconds:30}")
     private long resendAfterSeconds;
 
+    @Value("${lexho.auth.otp.max-attempts:5}")
+    private int otpMaxAttempts;
+
     @Value("${lexho.auth.refresh-token.expiry-days:30}")
     private long refreshTokenExpiryDays;
 
-    @Value("${lexho.auth.otp.log-to-console:true}")
+    @Value("${lexho.auth.otp.log-to-console:false}")
     private boolean logOtpToConsole;
 
     public LexhoAuthService(
             JwtUtil jwtUtil,
             LexhoUserProfileRepository profileRepository,
-            LexhoRefreshTokenRepository refreshTokenRepository
+            LexhoRefreshTokenRepository refreshTokenRepository,
+            LexhoOtpChallengeRepository otpChallengeRepository,
+            PasswordEncoder passwordEncoder
     ) {
         this.jwtUtil = jwtUtil;
         this.profileRepository = profileRepository;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.otpChallengeRepository = otpChallengeRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
+    @Transactional
     public String sendOtp(String mobile, String requestedRole) {
         Role role = resolveRole(requestedRole);
-        String otpScope = otpScope(mobile, role);
-        long now = System.currentTimeMillis();
-        purgeExpired(now, otpScope);
-
-        Long throttleUntil = throttleStore.get(otpScope);
-        if (throttleUntil != null && throttleUntil > now) {
-            throw new BadRequestException("Please wait before requesting OTP again");
-        }
+        LocalDateTime now = LocalDateTime.now();
+        otpChallengeRepository.findTopByMobileAndRoleAndConsumedAtIsNullOrderByCreatedAtDesc(mobile, role.name())
+                .ifPresent(existing -> {
+                    if (existing.getExpiresAt().isAfter(now)
+                            && existing.getCreatedAt().plusSeconds(resendAfterSeconds).isAfter(now)) {
+                        throw new BadRequestException("Please wait before requesting OTP again");
+                    }
+                    if (existing.getExpiresAt().isBefore(now) || existing.getAttempts() >= otpMaxAttempts) {
+                        existing.setConsumedAt(now);
+                        otpChallengeRepository.save(existing);
+                    }
+                });
 
         String otp = String.valueOf(ThreadLocalRandom.current().nextInt(100000, 1000000));
-        otpStore.put(otpScope, new OtpRecord(otp, now + (otpExpirySeconds * 1000)));
-        throttleStore.put(otpScope, now + (resendAfterSeconds * 1000));
+        LexhoOtpChallenge challenge = new LexhoOtpChallenge();
+        challenge.setMobile(mobile);
+        challenge.setRole(role.name());
+        challenge.setOtpHash(passwordEncoder.encode(otp));
+        challenge.setExpiresAt(now.plusSeconds(otpExpirySeconds));
+        challenge.setAttempts(0);
+        otpChallengeRepository.save(challenge);
         if (logOtpToConsole) {
             log.info("Lexho OTP for mobile={} role={} otp={}", mobile, role.name(), otp);
         }
@@ -76,15 +95,34 @@ public class LexhoAuthService {
     @Transactional
     public LexhoDtos.AuthVerifyResponse verifyOtp(String mobile, String otp, String requestedRole) {
         Role role = resolveRole(requestedRole);
-        String otpScope = otpScope(mobile, role);
-        long now = System.currentTimeMillis();
-        purgeExpired(now, otpScope);
+        LocalDateTime now = LocalDateTime.now();
+        LexhoOtpChallenge challenge = otpChallengeRepository
+                .findTopByMobileAndRoleAndConsumedAtIsNullOrderByCreatedAtDesc(mobile, role.name())
+                .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
 
-        OtpRecord record = otpStore.get(otpScope);
-        if (record == null || !record.otp().equals(otp)) {
+        if (challenge.getExpiresAt().isBefore(now)) {
+            challenge.setConsumedAt(now);
+            otpChallengeRepository.save(challenge);
             throw new BadRequestException("Invalid or expired OTP");
         }
-        otpStore.remove(otpScope);
+        if (challenge.getAttempts() >= otpMaxAttempts) {
+            challenge.setConsumedAt(now);
+            otpChallengeRepository.save(challenge);
+            throw new BadRequestException("Maximum OTP attempts exceeded");
+        }
+        if (!passwordEncoder.matches(otp, challenge.getOtpHash())) {
+            challenge.setAttempts(challenge.getAttempts() + 1);
+            if (challenge.getAttempts() >= otpMaxAttempts) {
+                challenge.setConsumedAt(now);
+                otpChallengeRepository.save(challenge);
+                throw new BadRequestException("Maximum OTP attempts exceeded");
+            }
+            otpChallengeRepository.save(challenge);
+            throw new BadRequestException("Invalid or expired OTP");
+        }
+
+        challenge.setConsumedAt(now);
+        otpChallengeRepository.save(challenge);
 
         LexhoUserProfile profile = profileRepository.findByMobile(mobile).orElseGet(() -> {
             LexhoUserProfile created = new LexhoUserProfile();
@@ -98,17 +136,16 @@ public class LexhoAuthService {
         } else if (profile.getRole() == Role.ADMIN && role != Role.ADMIN) {
             throw new BadRequestException("Role mismatch for this account");
         } else if (profile.getRole() != role) {
-            // Allow OTP-auth users to switch between CUSTOMER and PARTNER using the same mobile.
             profile.setRole(role);
         }
         profileRepository.save(profile);
 
         String accessToken = jwtUtil.generateToken(profile.getId(), profile.getMobile(), role);
-        String refreshTokenValue = UUID.randomUUID().toString() + "." + UUID.randomUUID();
+        String refreshTokenValue = UUID.randomUUID() + "." + UUID.randomUUID();
 
         LexhoRefreshToken refreshToken = new LexhoRefreshToken();
         refreshToken.setUserId(profile.getId());
-        refreshToken.setToken(refreshTokenValue);
+        refreshToken.setToken(hashRefreshToken(refreshTokenValue));
         refreshToken.setExpiresAt(LocalDateTime.now().plusDays(refreshTokenExpiryDays));
         refreshToken.setRevoked(false);
         refreshTokenRepository.save(refreshToken);
@@ -129,7 +166,7 @@ public class LexhoAuthService {
 
     @Transactional
     public String refreshToken(String refreshTokenValue) {
-        LexhoRefreshToken refreshToken = refreshTokenRepository.findByToken(refreshTokenValue)
+        LexhoRefreshToken refreshToken = refreshTokenRepository.findByToken(hashRefreshToken(refreshTokenValue))
                 .orElseThrow(() -> new BadRequestException("Invalid refresh token"));
         if (refreshToken.isRevoked() || refreshToken.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new BadRequestException("Refresh token expired or revoked");
@@ -143,7 +180,7 @@ public class LexhoAuthService {
 
     @Transactional
     public void logout(String refreshTokenValue) {
-        refreshTokenRepository.findByToken(refreshTokenValue).ifPresent(token -> {
+        refreshTokenRepository.findByToken(hashRefreshToken(refreshTokenValue)).ifPresent(token -> {
             token.setRevoked(true);
             refreshTokenRepository.save(token);
         });
@@ -151,17 +188,6 @@ public class LexhoAuthService {
 
     public long getResendAfterSeconds() {
         return resendAfterSeconds;
-    }
-
-    private void purgeExpired(long now, String scopeKey) {
-        OtpRecord record = otpStore.get(scopeKey);
-        if (record != null && record.expiresAtEpochMs() <= now) {
-            otpStore.remove(scopeKey);
-        }
-        Long throttleUntil = throttleStore.get(scopeKey);
-        if (throttleUntil != null && throttleUntil <= now) {
-            throttleStore.remove(scopeKey);
-        }
     }
 
     private Role resolveRole(String requestedRole) {
@@ -179,9 +205,7 @@ public class LexhoAuthService {
         }
     }
 
-    private String otpScope(String mobile, Role role) {
-        return mobile + ":" + role.name();
+    private String hashRefreshToken(String refreshTokenValue) {
+        return TokenDigests.sha256Hex(refreshTokenValue);
     }
-
-    private record OtpRecord(String otp, long expiresAtEpochMs) {}
 }

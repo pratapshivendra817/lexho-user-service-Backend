@@ -84,6 +84,18 @@ PREPARE stmt_partner_verification FROM @sql_partner_verification;
 EXECUTE stmt_partner_verification;
 DEALLOCATE PREPARE stmt_partner_verification;
 
+CREATE TABLE IF NOT EXISTS orders (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NULL,
+    total_amount DOUBLE NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'CREATED',
+    payment_status VARCHAR(20) NULL,
+    address VARCHAR(255) NULL,
+    scheduled_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
 SET @has_orders_table := (
     SELECT COUNT(*)
     FROM information_schema.tables

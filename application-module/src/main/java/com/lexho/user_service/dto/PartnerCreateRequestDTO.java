@@ -1,16 +1,53 @@
 package com.lexho.user_service.dto;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
+
 public class PartnerCreateRequestDTO {
 
+    @NotBlank
+    @Size(max = 120)
     private String name;
+
+    @NotNull
+    @Positive
     private Long categoryId;
+
+    @NotNull
+    @Positive
     private Long subCategoryId;
+
+    @NotNull
+    @DecimalMin("0.0")
+    @DecimalMax("5.0")
     private Double rating;
+
+    @NotNull
+    @PositiveOrZero
     private Long totalReviews;
+
+    @NotNull
+    @Positive
     private Double price;
+
+    @NotNull
     private Boolean available;
+
+    @NotNull
+    @PositiveOrZero
     private Integer experience;
+
+    @Size(max = 500)
     private String image;
+
+    @NotBlank
+    @Pattern(regexp = "APPROVED|PENDING|REJECTED")
     private String verificationStatus;
 
     public String getName() {

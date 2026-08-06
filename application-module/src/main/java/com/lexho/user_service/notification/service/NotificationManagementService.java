@@ -62,6 +62,15 @@ public class NotificationManagementService {
     private static final String WARNING_NOTIFICATION_TITLE = "New Warning Issued";
     private static final String WARNING_NOTIFICATION_MESSAGE =
             "A new warning has been issued to your account. Tap to view the details.";
+    private static final String WARNING_DISPUTE_UNDER_REVIEW_TITLE = "Warning Dispute Under Review";
+    private static final String WARNING_DISPUTE_UNDER_REVIEW_MESSAGE =
+            "Your warning dispute is under review. Tap to view the latest update.";
+    private static final String WARNING_DISPUTE_APPROVED_TITLE = "Warning Dispute Approved";
+    private static final String WARNING_DISPUTE_APPROVED_MESSAGE =
+            "Your warning dispute has been approved. Tap to view the latest update.";
+    private static final String WARNING_DISPUTE_REJECTED_TITLE = "Warning Dispute Rejected";
+    private static final String WARNING_DISPUTE_REJECTED_MESSAGE =
+            "Your warning dispute has been rejected. Tap to view the latest update.";
 
     private final NotificationRepository notificationRepository;
     private final NotificationLogRepository notificationLogRepository;
@@ -160,6 +169,14 @@ public class NotificationManagementService {
     public void createPartnerWarningNotification(Long partnerId, Long warningId, String reason) {
         createWarningNotification(partnerId, warningId, ChannelType.IN_APP);
         createWarningNotification(partnerId, warningId, ChannelType.PUSH);
+    }
+
+    @Transactional
+    @CacheEvict(value = "notificationUnreadCount", key = "#partnerId")
+    public void createPartnerWarningDisputeStatusNotification(Long partnerId, Long warningId, String disputeStatus) {
+        String normalized = disputeStatus == null ? "" : disputeStatus.trim().toUpperCase(Locale.ROOT);
+        createWarningDisputeStatusNotification(partnerId, warningId, normalized, ChannelType.IN_APP);
+        createWarningDisputeStatusNotification(partnerId, warningId, normalized, ChannelType.PUSH);
     }
 
     public NotificationPageResponse<NotificationResponse> getCustomerNotifications(int page, int size) {
@@ -426,6 +443,58 @@ public class NotificationManagementService {
         }
         Notification saved = notificationRepository.save(notification);
         publishDispatch(saved);
+    }
+
+    private void createWarningDisputeStatusNotification(Long partnerId,
+                                                        Long warningId,
+                                                        String disputeStatus,
+                                                        ChannelType channelType) {
+        Notification notification = new Notification();
+        notification.setUserId(partnerId);
+        notification.setUserType(NotificationUserType.PARTNER);
+        notification.setTitle(warningDisputeTitle(disputeStatus));
+        notification.setMessage(warningDisputeMessage(disputeStatus));
+        notification.setNotificationType(NotificationType.SYSTEM);
+        notification.setChannelType(channelType);
+        notification.setPriority(NotificationPriority.HIGH);
+        notification.setReferenceId(warningId);
+        notification.setReferenceType("WARNING");
+        notification.setRedirectType("WARNING");
+        notification.setRedirectValue(String.valueOf(warningId));
+        notification.setRetryCount(0);
+        notification.setDeleted(false);
+        if (channelType == ChannelType.IN_APP) {
+            notification.setScheduledTime(null);
+            notification.setStatus(NotificationStatus.SENT);
+            notification.setSentAt(LocalDateTime.now());
+        } else {
+            notification.setStatus(NotificationStatus.QUEUED);
+        }
+        if (isRecentDuplicate(notification)) {
+            log.warn("Duplicate warning dispute notification skipped. partnerId={}, warningId={}, status={}, channel={}",
+                    partnerId, warningId, disputeStatus, channelType);
+            return;
+        }
+        Notification saved = notificationRepository.save(notification);
+        publishDispatch(saved);
+    }
+
+    private String warningDisputeTitle(String disputeStatus) {
+        return switch (disputeStatus) {
+            case "UNDER_REVIEW" -> WARNING_DISPUTE_UNDER_REVIEW_TITLE;
+            case "APPROVED" -> WARNING_DISPUTE_APPROVED_TITLE;
+            case "REJECTED" -> WARNING_DISPUTE_REJECTED_TITLE;
+            default -> "Warning Dispute Updated";
+        };
+    }
+
+    private String warningDisputeMessage(String disputeStatus) {
+        return switch (disputeStatus) {
+            case "UNDER_REVIEW" -> WARNING_DISPUTE_UNDER_REVIEW_MESSAGE;
+            case "APPROVED" -> WARNING_DISPUTE_APPROVED_MESSAGE;
+            case "REJECTED" -> WARNING_DISPUTE_REJECTED_MESSAGE;
+            default -> "Your warning dispute has been updated. Tap to view the latest update.";
+        };
     }
 
     private NotificationPageResponse<NotificationResponse> byUser(int page, int size, Long userId) {

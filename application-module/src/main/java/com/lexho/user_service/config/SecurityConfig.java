@@ -27,11 +27,14 @@ import java.util.StringTokenizer;
 public class SecurityConfig {
 
     private final JwtFilter jwtFilter;
+    private final InternalApiTokenFilter internalApiTokenFilter;
     private final Environment environment;
 
     public SecurityConfig(JwtFilter jwtFilter,
+                          InternalApiTokenFilter internalApiTokenFilter,
                           Environment environment) {
         this.jwtFilter = jwtFilter;
+        this.internalApiTokenFilter = internalApiTokenFilter;
         this.environment = environment;
     }
 
@@ -63,11 +66,12 @@ public class SecurityConfig {
                             "/health", "/health/readiness", "/health/liveness",
                             "/api/health", "/api/health/ping", "/api/health/readiness", "/api/health/liveness",
                             "/ping",
-                            "/actuator/health", "/actuator/info", "/actuator/prometheus", "/actuator/metrics"
+                            "/actuator/health", "/actuator/info"
                     ).permitAll();
+                    auth.requestMatchers("/internal/**").hasRole("INTERNAL");
                     auth.requestMatchers("/ws-notifications/**", "/ws/admin/notifications/**", "/ws/customer/bookings/**", "/ws-chat/**").permitAll();
                     auth.requestMatchers("/uploads/**", "/images/**").permitAll();
-                    auth.requestMatchers("/otp/**", "/auth/**", "/api/otp/**", "/api/auth/**").permitAll();
+                    auth.requestMatchers("/otp/**", "/auth/**", "/api/otp/**", "/api/auth/**", "/api/v1/auth/**").permitAll();
                     auth.requestMatchers(HttpMethod.POST, "/api/payments/webhook", "/api/payments/webhook/razorpay",
                             "/api/v1/webhooks/razorpay").permitAll();
                     auth.requestMatchers("/api/admin/login", "/api/admin/verify-otp").permitAll();
@@ -81,14 +85,7 @@ public class SecurityConfig {
                         ).permitAll();
                     }
 
-                    if (isAllowInternalOpen()) {
-                        auth.requestMatchers("/internal/bookings/**").permitAll();
-                        auth.requestMatchers("/internal/auth/**").permitAll();
-                    }
-
-                    if (isAllowPublicAdminProfileContent()) {
-                        auth.requestMatchers("/api/admin/profile-content").permitAll();
-                    }
+                    auth.requestMatchers(HttpMethod.GET, "/api/admin/profile-content", "/api/v1/admin/profile-content").permitAll();
 
                     if (isAllowPublicProviderOnboarding()) {
                         auth.requestMatchers("/api/partner/onboarding").permitAll();
@@ -101,6 +98,12 @@ public class SecurityConfig {
                         auth.requestMatchers(HttpMethod.GET, "/api/customer/home/sections", "/api/customer/home/sections/**").permitAll();
                         auth.requestMatchers(HttpMethod.GET, "/api/customer/services", "/api/customer/services/**").permitAll();
                         auth.requestMatchers(HttpMethod.GET, "/api/customer/profile-content").permitAll();
+                        auth.requestMatchers(HttpMethod.POST,
+                                "/api/customer/location/reverse-geocode",
+                                "/api/v1/customer/location/reverse-geocode",
+                                "/api/customer/location/serviceability/check",
+                                "/api/v1/customer/location/serviceability/check"
+                        ).permitAll();
                     }
 
                     auth.requestMatchers("/api/customer/**").hasRole("CUSTOMER");
@@ -112,6 +115,7 @@ public class SecurityConfig {
                     auth.requestMatchers("/api/v1/admin/**").hasRole("ADMIN");
                     auth.anyRequest().authenticated();
                 })
+                .addFilterBefore(internalApiTokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -160,22 +164,15 @@ public class SecurityConfig {
     }
 
     private boolean isExposeSwagger() {
-        return environment.getProperty("app.security.exposure.expose-swagger", Boolean.class, true);
-    }
-
-    private boolean isAllowInternalOpen() {
-        return environment.getProperty("app.security.exposure.allow-internal-open", Boolean.class, true);
+        return environment.getProperty("app.security.exposure.expose-swagger", Boolean.class, false);
     }
 
     private boolean isAllowPublicCustomerRead() {
-        return environment.getProperty("app.security.exposure.allow-public-customer-read", Boolean.class, true);
+        return environment.getProperty("app.security.exposure.allow-public-customer-read", Boolean.class, false);
     }
 
     private boolean isAllowPublicProviderOnboarding() {
-        return environment.getProperty("app.security.exposure.allow-public-partner-onboarding", Boolean.class, true);
+        return environment.getProperty("app.security.exposure.allow-public-partner-onboarding", Boolean.class, false);
     }
 
-    private boolean isAllowPublicAdminProfileContent() {
-        return environment.getProperty("app.security.exposure.allow-public-admin-profile-content", Boolean.class, true);
-    }
 }

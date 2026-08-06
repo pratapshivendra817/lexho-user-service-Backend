@@ -103,6 +103,7 @@ class HealthControllerTest {
                 .containsEntry("redis", "DOWN")
                 .containsEntry("paymentGateway", "DOWN")
                 .containsEntry("notificationService", "DOWN");
+        assertThat(response.getBody().toString()).doesNotContain("db down");
     }
 
     private static <T> ObjectProvider<T> provider(T value) {

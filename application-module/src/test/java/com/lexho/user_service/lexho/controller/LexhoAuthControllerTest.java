@@ -38,7 +38,9 @@ class LexhoAuthControllerTest {
 
         mockMvc.perform(post("/otp/send").contentType("application/json")
                         .content("{\"mobile\":\"9999999999\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.otp").value("123456"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.mobile").value("9999999999"))
+                .andExpect(jsonPath("$.data.otp").doesNotExist());
         mockMvc.perform(post("/otp/verify").contentType("application/json")
                         .content("{\"mobile\":\"9999999999\",\"otp\":\"123456\",\"role\":\"CUSTOMER\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.token").value("access"));
@@ -48,6 +50,11 @@ class LexhoAuthControllerTest {
         mockMvc.perform(post("/api/auth/refresh").contentType("application/json")
                         .content("{\"refreshToken\":\"refresh\",\"deviceId\":\"d1\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.accessToken").value("new-access"));
+        mockMvc.perform(post("/api/v1/auth/refresh").contentType("application/json")
+                        .content("{\"refreshToken\":\"refresh\",\"deviceId\":\"d1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.accessToken").value("new-access"))
+                .andExpect(jsonPath("$.token").value("new-access"));
         mockMvc.perform(post("/auth/logout").contentType("application/json")
                         .content("{\"refreshToken\":\"refresh\"}"))
                 .andExpect(status().isOk());

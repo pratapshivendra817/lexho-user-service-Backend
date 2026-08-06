@@ -31,7 +31,7 @@ public class SectionItem {
     @Column(length = 255)
     private String subtitle;
 
-    @Column(length = 255)
+    @Column(name = "`value`", length = 255)
     private String value;
 
     @Column(nullable = false, length = 255)

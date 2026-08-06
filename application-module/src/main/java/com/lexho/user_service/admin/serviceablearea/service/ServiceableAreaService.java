@@ -7,6 +7,8 @@ import com.lexho.user_service.admin.serviceablearea.dto.ServiceableAreaUpsertReq
 import com.lexho.user_service.admin.serviceablearea.entity.ServiceableAreaEntity;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import jakarta.persistence.EntityManager;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,11 +31,20 @@ public class ServiceableAreaService {
 
     private final ServiceableAreaRepository serviceableAreaRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final EntityManager entityManager;
 
     public ServiceableAreaService(ServiceableAreaRepository serviceableAreaRepository,
                                   JdbcTemplate jdbcTemplate) {
+        this(serviceableAreaRepository, jdbcTemplate, null);
+    }
+
+    @Autowired
+    public ServiceableAreaService(ServiceableAreaRepository serviceableAreaRepository,
+                                  JdbcTemplate jdbcTemplate,
+                                  EntityManager entityManager) {
         this.serviceableAreaRepository = serviceableAreaRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.entityManager = entityManager;
     }
 
     @Transactional(readOnly = true)
@@ -112,24 +123,24 @@ public class ServiceableAreaService {
     }
 
     private void syncServiceabilityRule(ServiceableAreaEntity entity) {
-        jdbcTemplate.update("""
-                INSERT INTO serviceability_rules
-                    (id, name, city, state, pincode, city_id, zone_id, polygon_json, active, deleted, created_at, updated_at)
-                VALUES
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    name = VALUES(name),
-                    city = VALUES(city),
-                    state = VALUES(state),
-                    pincode = VALUES(pincode),
-                    city_id = VALUES(city_id),
-                    zone_id = VALUES(zone_id),
-                    polygon_json = VALUES(polygon_json),
-                    active = VALUES(active),
-                    deleted = VALUES(deleted),
-                    updated_at = VALUES(updated_at)
+        if (entityManager != null) {
+            entityManager.flush();
+        }
+        int updated = jdbcTemplate.update("""
+                UPDATE serviceability_rules
+                SET name = ?,
+                    city = ?,
+                    state = ?,
+                    pincode = ?,
+                    city_id = ?,
+                    zone_id = ?,
+                    polygon_json = ?,
+                    active = ?,
+                    deleted = ?,
+                    created_at = ?,
+                    updated_at = ?
+                WHERE id = ?
                 """,
-                entity.getId(),
                 entity.getName(),
                 entity.getCity(),
                 entity.getState(),
@@ -140,7 +151,31 @@ public class ServiceableAreaService {
                 entity.isActive(),
                 entity.isDeleted(),
                 entity.getCreatedAt(),
-                entity.getUpdatedAt());
+                entity.getUpdatedAt(),
+                entity.getId());
+        if (updated == 0) {
+            jdbcTemplate.update("""
+                    INSERT INTO serviceability_rules
+                        (id, name, city, state, pincode, city_id, zone_id, polygon_json, active, deleted, created_at, updated_at)
+                    VALUES
+                        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    entity.getId(),
+                    entity.getName(),
+                    entity.getCity(),
+                    entity.getState(),
+                    entity.getPincode(),
+                    entity.getCityId(),
+                    entity.getZoneId(),
+                    entity.getPolygonJson(),
+                    entity.isActive(),
+                    entity.isDeleted(),
+                    entity.getCreatedAt(),
+                    entity.getUpdatedAt());
+        }
+        if (entityManager != null) {
+            entityManager.clear();
+        }
     }
 
     private Pageable pageable(int page, int size, String sortBy, String sortDir) {

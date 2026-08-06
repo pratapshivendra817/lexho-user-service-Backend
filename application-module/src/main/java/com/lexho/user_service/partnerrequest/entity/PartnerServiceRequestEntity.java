@@ -29,6 +29,12 @@ public class PartnerServiceRequestEntity {
     @Column(name = "cart_id", nullable = false)
     private Long cartId;
 
+    @Column(name = "subscription_id")
+    private Long subscriptionId;
+
+    @Column(name = "subscription_visit_id")
+    private Long subscriptionVisitId;
+
     @Column(name = "customer_id", nullable = false)
     private Long customerId;
 
@@ -106,6 +112,10 @@ public class PartnerServiceRequestEntity {
     public void setCartId(Long cartId) { this.cartId = cartId; }
     public Long getCustomerId() { return customerId; }
     public void setCustomerId(Long customerId) { this.customerId = customerId; }
+    public Long getSubscriptionId() { return subscriptionId; }
+    public void setSubscriptionId(Long subscriptionId) { this.subscriptionId = subscriptionId; }
+    public Long getSubscriptionVisitId() { return subscriptionVisitId; }
+    public void setSubscriptionVisitId(Long subscriptionVisitId) { this.subscriptionVisitId = subscriptionVisitId; }
     public Long getServiceId() { return serviceId; }
     public void setServiceId(Long serviceId) { this.serviceId = serviceId; }
     public String getServiceType() { return serviceType; }

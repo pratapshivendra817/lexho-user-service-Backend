@@ -3,9 +3,17 @@ package com.lexho.user_service.admin.service;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
 import java.lang.management.ManagementFactory;
+import java.sql.Connection;
+import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -15,16 +23,25 @@ public class AdminMonitoringService {
 
     private final AdminDashboardService adminDashboardService;
     private final MeterRegistry meterRegistry;
+    private final ObjectProvider<DataSource> dataSourceProvider;
+    private final ObjectProvider<StringRedisTemplate> redisTemplateProvider;
 
     public AdminMonitoringService(AdminDashboardService adminDashboardService,
-                                  MeterRegistry meterRegistry) {
+                                  MeterRegistry meterRegistry,
+                                  ObjectProvider<DataSource> dataSourceProvider,
+                                  ObjectProvider<StringRedisTemplate> redisTemplateProvider) {
         this.adminDashboardService = adminDashboardService;
         this.meterRegistry = meterRegistry;
+        this.dataSourceProvider = dataSourceProvider;
+        this.redisTemplateProvider = redisTemplateProvider;
     }
 
     public Map<String, Object> dashboard() {
         Map<String, Object> dashboard = new LinkedHashMap<>(adminDashboardService.dashboardStats());
         dashboard.put("status", "UP");
+        dashboard.put("apiHealth", "UP");
+        dashboard.put("redisHealth", checkRedis());
+        dashboard.put("databaseHealth", checkDatabase());
         dashboard.put("timestamp", OffsetDateTime.now().toString());
         dashboard.put("uptimeSeconds", ManagementFactory.getRuntimeMXBean().getUptime() / 1000L);
         dashboard.put("apiResponseTimeMs", timerMeanMillis("http.server.requests"));
@@ -52,5 +69,46 @@ public class AdminMonitoringService {
     private double counterValue(String name) {
         Counter counter = meterRegistry.find(name).counter();
         return counter == null ? 0d : counter.count();
+    }
+
+    private String checkDatabase() {
+        DataSource dataSource = dataSourceProvider.getIfAvailable();
+        if (dataSource == null) {
+            return "DOWN";
+        }
+
+        Connection connection = null;
+        try {
+            connection = DataSourceUtils.getConnection(dataSource);
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("SELECT 1");
+            }
+            return "UP";
+        } catch (Exception exception) {
+            return "DOWN";
+        } finally {
+            if (connection != null) {
+                DataSourceUtils.releaseConnection(connection, dataSource);
+            }
+        }
+    }
+
+    private String checkRedis() {
+        try {
+            StringRedisTemplate redisTemplate = redisTemplateProvider.getIfAvailable();
+            if (redisTemplate == null) {
+                return "DOWN";
+            }
+            RedisConnectionFactory connectionFactory = redisTemplate.getConnectionFactory();
+            if (connectionFactory == null) {
+                return "DOWN";
+            }
+            try (RedisConnection connection = connectionFactory.getConnection()) {
+                String ping = connection.ping();
+                return "PONG".equalsIgnoreCase(ping) ? "UP" : "DOWN";
+            }
+        } catch (Exception exception) {
+            return "DOWN";
+        }
     }
 }

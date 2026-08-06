@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.time.LocalDateTime;
@@ -111,6 +112,21 @@ class PartnerOrderServiceTest {
         assertThat(newOrders.content()).hasSize(1);
         assertThat(history.content()).hasSize(1);
         assertThat(history.content().get(0).id()).isEqualTo(7L);
+    }
+
+    @Test
+    void newOrdersFallsBackToSafeSortFieldForUnknownInput() {
+        PartnerOrder order = order(7L, OrderStatus.CREATED, null);
+        when(partnerOrderRepository.findByStatusInAndAssignedPartnerIdIsNull(any(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(order)));
+
+        partnerOrderService.getNewOrders(0, 20, "drop table orders", "asc");
+
+        org.mockito.ArgumentCaptor<Pageable> pageableCaptor = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+        verify(partnerOrderRepository).findByStatusInAndAssignedPartnerIdIsNull(any(), pageableCaptor.capture());
+        Sort.Order sortOrder = pageableCaptor.getValue().getSort().getOrderFor("createdAt");
+        assertThat(sortOrder).isNotNull();
+        assertThat(sortOrder.getDirection()).isEqualTo(Sort.Direction.ASC);
     }
 
     @Test

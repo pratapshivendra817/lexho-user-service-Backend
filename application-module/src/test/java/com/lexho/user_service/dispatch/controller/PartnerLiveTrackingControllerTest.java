@@ -1,9 +1,13 @@
 package com.lexho.user_service.dispatch.controller;
 
+import com.lexho.booking.repository.OrderRepository;
+import com.lexho.common.enums.OrderStatus;
 import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
+import com.lexho.user_service.exception.BadRequestException;
+import com.lexho.user_service.security.SecurityUtils;
 import com.lexho.user_service.dispatch.service.TrackingLifecycleService;
 import com.lexho.user_service.dispatch.service.TrackingLifecycleState;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -18,8 +22,10 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -31,14 +37,70 @@ class PartnerLiveTrackingControllerTest {
     private PartnerShiftRepository shiftRepository;
     @Mock
     private TrackingLifecycleService lifecycleService;
+    @Mock
+    private SecurityUtils securityUtils;
+    @Mock
+    private OrderRepository orderRepository;
 
     private PartnerLiveTrackingController controller;
 
     @BeforeEach
     void setUp() {
         controller = new PartnerLiveTrackingController(
-                locationRepository, shiftRepository, lifecycleService,
+                locationRepository, shiftRepository, lifecycleService, securityUtils, orderRepository,
                 new SimpleMeterRegistry(), 1L, 99_000L, 1L, 100.0d);
+    }
+
+    @Test
+    void trackingAccessAllowsAdminPartnerSelfAndAssignedCustomer() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("ADMIN"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(1L));
+        invoke("assertTrackingAccessAllowed", 77L);
+
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(77L));
+        invoke("assertTrackingAccessAllowed", 77L);
+
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("CUSTOMER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(55L));
+        when(orderRepository.existsByUserIdAndAssignedPartnerIdAndStatusIn(55L, 77L,
+                Set.of(
+                        OrderStatus.PARTNER_ASSIGNED,
+                        OrderStatus.PARTNER_ACCEPTED,
+                        OrderStatus.PREPARING,
+                        OrderStatus.OUT_FOR_DELIVERY,
+                        OrderStatus.ARRIVED,
+                        OrderStatus.PARTNER_REACHED,
+                        OrderStatus.SERVICE_STARTED,
+                        OrderStatus.SERVICE_IN_PROGRESS
+                ))).thenReturn(true);
+        invoke("assertTrackingAccessAllowed", 77L);
+    }
+
+    @Test
+    void trackingAccessRejectsForeignPartnerAndUnassignedCustomer() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(11L));
+        assertThatThrownBy(() -> invoke("assertTrackingAccessAllowed", 77L))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("not allowed");
+
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("CUSTOMER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(55L));
+        when(orderRepository.existsByUserIdAndAssignedPartnerIdAndStatusIn(55L, 77L,
+                Set.of(
+                        OrderStatus.PARTNER_ASSIGNED,
+                        OrderStatus.PARTNER_ACCEPTED,
+                        OrderStatus.PREPARING,
+                        OrderStatus.OUT_FOR_DELIVERY,
+                        OrderStatus.ARRIVED,
+                        OrderStatus.PARTNER_REACHED,
+                        OrderStatus.SERVICE_STARTED,
+                        OrderStatus.SERVICE_IN_PROGRESS
+                ))).thenReturn(false);
+        assertThatThrownBy(() -> invoke("assertTrackingAccessAllowed", 77L))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("not allowed");
     }
 
     @Test

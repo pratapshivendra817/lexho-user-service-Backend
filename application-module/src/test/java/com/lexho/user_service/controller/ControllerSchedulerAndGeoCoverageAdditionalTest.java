@@ -19,6 +19,7 @@ import com.lexho.user_service.chat.enums.ChatEventType;
 import com.lexho.user_service.chat.enums.ChatMessageType;
 import com.lexho.user_service.chat.model.ChatActor;
 import com.lexho.user_service.chat.service.ChatService;
+import com.lexho.user_service.config.SecurityExposureProperties;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.geo.config.GeoEventRabbitListenerConfig;
 import com.lexho.user_service.geo.events.GeoEventConsumers;
@@ -124,7 +125,9 @@ class ControllerSchedulerAndGeoCoverageAdditionalTest {
     void partnerRequestControllerDelegatesAllEndpointsAndRateLimitsActions() {
         PartnerRequestService service = mock(PartnerRequestService.class);
         ApiRateLimiterService rateLimiterService = mock(ApiRateLimiterService.class);
-        PartnerRequestController controller = new PartnerRequestController(service, rateLimiterService);
+        SecurityExposureProperties exposureProperties = new SecurityExposureProperties();
+        exposureProperties.setAllowPartnerRequestDevSeed(true);
+        PartnerRequestController controller = new PartnerRequestController(service, rateLimiterService, exposureProperties);
         PartnerStatusUpdateRequest statusRequest = new PartnerStatusUpdateRequest();
         statusRequest.setIsOnline(true);
         PartnerStatusResponse statusResponse = new PartnerStatusResponse();

@@ -5,7 +5,10 @@ import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.dto.PartnerCreateRequestDTO;
 import com.lexho.user_service.dto.PartnerResponseDTO;
+import jakarta.validation.Valid;
+import com.lexho.user_service.security.SecurityUtils;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,14 +25,16 @@ import java.util.List;
 public class PartnerController {
 
     private final PartnerRepository repo;
+    private final SecurityUtils securityUtils;
 
-    public PartnerController(PartnerRepository repo) {
+    public PartnerController(PartnerRepository repo, SecurityUtils securityUtils) {
         this.repo = repo;
+        this.securityUtils = securityUtils;
     }
 
     @PostMapping
     @PreAuthorize("hasRole('PARTNER')")
-    public ApiResponse<PartnerResponseDTO> create(@RequestBody PartnerCreateRequestDTO request) {
+    public ApiResponse<PartnerResponseDTO> create(@Valid @RequestBody PartnerCreateRequestDTO request) {
         if (request == null) {
             return ApiResponse.failure("Partner request is required");
         }
@@ -64,6 +69,7 @@ public class PartnerController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('PARTNER','ADMIN')")
     public ApiResponse<PartnerResponseDTO> getById(@PathVariable Long id) {
+        assertPartnerAccess(id);
         Partner p = repo.findById(id).orElse(null);
         if (p == null) {
             return ApiResponse.failure("Partner not found");
@@ -74,6 +80,7 @@ public class PartnerController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('PARTNER')")
     public ApiResponse<String> delete(@PathVariable Long id) {
+        assertPartnerAccess(id);
         if (!repo.existsById(id)) {
             return ApiResponse.failure("Partner not found");
         }
@@ -98,5 +105,17 @@ public class PartnerController {
 
     private PartnerResponseDTO toDto(Partner partner) {
         return PartnerResponseDTO.from(partner);
+    }
+
+    private void assertPartnerAccess(Long partnerId) {
+        String role = securityUtils.getCurrentRole().orElse("");
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            return;
+        }
+        Long currentUserId = securityUtils.getCurrentUserId()
+                .orElseThrow(() -> new AccessDeniedException("You are not allowed to access this partner"));
+        if (!currentUserId.equals(partnerId)) {
+            throw new AccessDeniedException("You are not allowed to access this partner");
+        }
     }
 }

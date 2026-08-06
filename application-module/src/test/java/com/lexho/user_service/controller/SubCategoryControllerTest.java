@@ -4,14 +4,16 @@ import com.lexho.catalog.entity.ServiceCategory;
 import com.lexho.catalog.entity.SubCategory;
 import com.lexho.catalog.repository.SubCategoryRepository;
 import com.lexho.user_service.dto.SubCategoryCreateRequestDTO;
+import com.lexho.user_service.exception.BadRequestException;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -54,13 +56,9 @@ class SubCategoryControllerTest {
     }
 
     @Test
-    void createShouldHandleNullBodyWithoutNpe() {
-        when(repository.save(any(SubCategory.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        var response = controller.create(null);
-
-        assertNull(response.getName());
-        assertNull(response.getCategoryId());
+    void createShouldRejectNullBodyWithoutSaving() {
+        assertThrows(BadRequestException.class, () -> controller.create(null));
+        verify(repository, never()).save(any(SubCategory.class));
     }
 
     private SubCategory subCategory() {

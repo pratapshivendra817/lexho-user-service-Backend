@@ -39,7 +39,10 @@ class SecurityConfigExecutionTest {
                 .withProperty("app.security.exposure.allow-public-partner-onboarding", "true")
                 .withProperty("app.security.exposure.allow-public-admin-profile-content", "true");
 
-        SecurityConfig securityConfig = new SecurityConfig(mock(JwtFilter.class), environment);
+        SecurityConfig securityConfig = new SecurityConfig(
+                mock(JwtFilter.class),
+                mock(InternalApiTokenFilter.class),
+                environment);
         AuthenticationManagerBuilder authenticationManagerBuilder =
                 new AuthenticationManagerBuilder(objectPostProcessor);
         Map<Class<?>, Object> sharedObjects = new HashMap<>();

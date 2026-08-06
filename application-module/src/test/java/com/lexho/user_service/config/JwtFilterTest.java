@@ -37,11 +37,11 @@ class JwtFilterTest {
     @BeforeEach
     void setUp() {
         environment = new MockEnvironment()
-                .withProperty("app.security.exposure.expose-swagger", "true")
-                .withProperty("app.security.exposure.allow-internal-open", "true")
-                .withProperty("app.security.exposure.allow-public-customer-read", "true")
-                .withProperty("app.security.exposure.allow-public-partner-onboarding", "true")
-                .withProperty("app.security.exposure.allow-public-admin-profile-content", "true");
+                .withProperty("app.security.exposure.expose-swagger", "false")
+                .withProperty("app.security.exposure.allow-internal-open", "false")
+                .withProperty("app.security.exposure.allow-public-customer-read", "false")
+                .withProperty("app.security.exposure.allow-public-partner-onboarding", "false")
+                .withProperty("app.security.exposure.allow-public-admin-profile-content", "false");
         filter = new JwtFilter(jwtUtil, new ObjectMapper(), adminRepository, environment);
     }
 
@@ -55,10 +55,8 @@ class JwtFilterTest {
             "/", "/error", "/favicon.ico", "/ping", "/health", "/health/readiness",
             "/api/health", "/api/health/ping", "/actuator/health", "/api/payments/webhook",
             "/otp/send", "/auth/login", "/api/otp/send", "/api/auth/login", "/uploads/a.png",
-            "/images/a.png", "/api/admin/login", "/swagger-ui/index.html", "/v3/api-docs",
-            "/internal/auth/user", "/internal/bookings/1", "/api/categories", "/api/banners",
-            "/api/customer/banners", "/api/customer/home/sections", "/api/customer/services",
-            "/api/customer/profile-content", "/api/admin/profile-content", "/api/partner/onboarding",
+            "/images/a.png", "/api/admin/login", "/internal/auth/user", "/internal/bookings/1",
+            "/api/admin/profile-content", "/api/v1/admin/profile-content",
             "/ws-notifications"
     })
     void shouldNotFilterConfiguredPublicPaths(String path) {
@@ -71,17 +69,16 @@ class JwtFilterTest {
     void shouldSkipOptionsButProtectPrivateAndDisabledExposurePaths() {
         assertThat(filter.shouldNotFilter(request("OPTIONS", "/api/private"))).isTrue();
         assertThat(filter.shouldNotFilter(request("GET", "/api/private"))).isFalse();
-        environment.setProperty("app.security.exposure.expose-swagger", "false");
-        environment.setProperty("app.security.exposure.allow-internal-open", "false");
-        environment.setProperty("app.security.exposure.allow-public-customer-read", "false");
-        environment.setProperty("app.security.exposure.allow-public-partner-onboarding", "false");
-        environment.setProperty("app.security.exposure.allow-public-admin-profile-content", "false");
-
-        assertThat(filter.shouldNotFilter(request("GET", "/swagger-ui/index.html"))).isFalse();
-        assertThat(filter.shouldNotFilter(request("GET", "/internal/auth/user"))).isFalse();
-        assertThat(filter.shouldNotFilter(request("GET", "/api/customer/services"))).isFalse();
-        assertThat(filter.shouldNotFilter(request("GET", "/api/admin/profile-content"))).isFalse();
-        assertThat(filter.shouldNotFilter(request("GET", "/api/partner/onboarding"))).isFalse();
+        environment.setProperty("app.security.exposure.expose-swagger", "true");
+        environment.setProperty("app.security.exposure.allow-public-customer-read", "true");
+        environment.setProperty("app.security.exposure.allow-public-partner-onboarding", "true");
+        assertThat(filter.shouldNotFilter(request("GET", "/swagger-ui/index.html"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("GET", "/internal/auth/user"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("GET", "/api/customer/services"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("GET", "/api/admin/profile-content"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("GET", "/api/v1/admin/profile-content"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("PUT", "/api/admin/profile-content"))).isFalse();
+        assertThat(filter.shouldNotFilter(request("GET", "/api/partner/onboarding"))).isTrue();
     }
 
     @Test
@@ -97,40 +94,16 @@ class JwtFilterTest {
     }
 
     @Test
-    void openDevelopmentAdminCreatesAdminAuthentication() throws Exception {
-        MockHttpServletRequest request = request("GET", "/api/admin/dashboard");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        filter.doFilterInternal(request, response, chain);
-
-        assertThat(request.getAttribute("userId")).isEqualTo(-2L);
-        assertThat(request.getAttribute("role")).isEqualTo("ADMIN");
-        assertThat(SecurityContextHolder.getContext().getAuthentication().getAuthorities())
-                .extracting(Object::toString).containsExactly("ROLE_ADMIN");
-        verify(chain).doFilter(request, response);
-    }
-
-    @Test
-    void internalTokenCreatesAdminAndCustomerIdentitiesWhenOpenModeDisabled() throws Exception {
-        environment.setProperty("app.security.exposure.allow-internal-open", "false");
+    void internalTokenDoesNotBypassJwtAuthenticationForApiNamespaces() throws Exception {
         environment.setProperty("INTERNAL_API_TOKEN", "secret");
         MockHttpServletRequest admin = request("GET", "/api/admin/dashboard");
         admin.addHeader("X-Internal-Token", "secret");
         MockHttpServletResponse adminResponse = new MockHttpServletResponse();
 
         filter.doFilterInternal(admin, adminResponse, chain);
-        assertThat(admin.getAttribute("userId")).isEqualTo(-1L);
 
-        SecurityContextHolder.clearContext();
-        MockHttpServletRequest customer = request("GET", "/api/customer/cart");
-        customer.addHeader("X-Internal-Token", "secret");
-        MockHttpServletResponse customerResponse = new MockHttpServletResponse();
-        filter.doFilterInternal(customer, customerResponse, chain);
-
-        assertThat(customer.getAttribute("userId")).isEqualTo(-3L);
-        assertThat(customer.getAttribute("mobile")).isEqualTo("9999999999");
-        verify(chain).doFilter(admin, adminResponse);
-        verify(chain).doFilter(customer, customerResponse);
+        assertThat(adminResponse.getStatus()).isEqualTo(401);
+        verifyNoInteractions(chain);
     }
 
     @Test

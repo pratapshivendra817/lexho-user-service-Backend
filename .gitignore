@@ -48,6 +48,9 @@ logs/
 .idea/
 *.iml
 uploads/
+bearer_token.txt
+tok_*.json
+lan_req_*.json
 resp_*.json
 b_*.json
 t_*.json

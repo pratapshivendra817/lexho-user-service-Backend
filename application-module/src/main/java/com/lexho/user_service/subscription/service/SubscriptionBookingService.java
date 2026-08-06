@@ -5,6 +5,7 @@ import com.lexho.booking.entity.OrderItem;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
+import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.audit.service.AuditLogService;
@@ -54,6 +55,7 @@ public class SubscriptionBookingService {
     private final LexhoAddressRepository addressRepository;
     private final SubscriptionPricingService subscriptionPricingService;
     private final OrderRepository orderRepository;
+    private final GeoFenceValidationService geoFenceValidationService;
 
     @Autowired(required = false)
     private AuditLogService auditLogService;
@@ -64,7 +66,8 @@ public class SubscriptionBookingService {
                                       AdminServiceEntityRepository serviceRepository,
                                       LexhoAddressRepository addressRepository,
                                       SubscriptionPricingService subscriptionPricingService,
-                                      OrderRepository orderRepository) {
+                                      OrderRepository orderRepository,
+                                      GeoFenceValidationService geoFenceValidationService) {
         this.subscriptionMasterRepository = subscriptionMasterRepository;
         this.subscriptionFrequencyRepository = subscriptionFrequencyRepository;
         this.subscriptionVisitRepository = subscriptionVisitRepository;
@@ -72,6 +75,7 @@ public class SubscriptionBookingService {
         this.addressRepository = addressRepository;
         this.subscriptionPricingService = subscriptionPricingService;
         this.orderRepository = orderRepository;
+        this.geoFenceValidationService = geoFenceValidationService;
     }
 
     @Transactional
@@ -90,6 +94,11 @@ public class SubscriptionBookingService {
                 .orElse(null);
         if (address == null) {
             throw new SubscriptionValidationException("Address does not belong to logged-in customer");
+        }
+        try {
+            geoFenceValidationService.validateBookingAddress(address);
+        } catch (RuntimeException ex) {
+            throw new SubscriptionValidationException(ex.getMessage());
         }
 
         String serviceType = resolveServiceType(request, service);

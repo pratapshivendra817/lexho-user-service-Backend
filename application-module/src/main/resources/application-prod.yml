@@ -3,17 +3,31 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+    hikari:
+      pool-name: ${DB_POOL_NAME:lexho-hikari}
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${DB_POOL_CONNECTION_TIMEOUT_MS:30000}
+      validation-timeout: ${DB_POOL_VALIDATION_TIMEOUT_MS:5000}
+      idle-timeout: ${DB_POOL_IDLE_TIMEOUT_MS:600000}
+      max-lifetime: ${DB_POOL_MAX_LIFETIME_MS:1800000}
+      keepalive-time: ${DB_POOL_KEEPALIVE_TIME_MS:300000}
   jpa:
     hibernate:
       ddl-auto: validate
     properties:
       hibernate:
         format_sql: false
+        jdbc:
+          time_zone: UTC
     show-sql: false
   flyway:
     enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: ${APP_SHUTDOWN_TIMEOUT:30s}
 
 server:
+  shutdown: graceful
   forward-headers-strategy: framework
   error:
     include-message: never
@@ -46,12 +60,15 @@ app:
   security:
     cors:
       allowed-origins: ${APP_ALLOWED_CORS_ORIGINS}
+    websocket:
+      allowed-origins: ${APP_ALLOWED_WS_ORIGINS:${APP_ALLOWED_CORS_ORIGINS}}
     exposure:
       expose-swagger: false
       allow-internal-open: false
       allow-public-customer-read: false
       allow-public-partner-onboarding: false
       allow-public-admin-profile-content: false
+      allow-partner-request-dev-seed: false
   push:
     fcm:
       enabled: ${APP_PUSH_FCM_ENABLED:false}

@@ -11,13 +11,19 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @partner_table_exists := (
+    SELECT COUNT(*) FROM information_schema.tables
+    WHERE table_schema = DATABASE()
+      AND table_name = 'partner'
+);
+
 SET @partner_total_reviews_exists := (
     SELECT COUNT(*) FROM information_schema.columns
     WHERE table_schema = DATABASE()
       AND table_name = 'partner'
       AND column_name = 'total_reviews'
 );
-SET @sql := IF(@partner_total_reviews_exists = 0,
+SET @sql := IF(@partner_table_exists = 1 AND @partner_total_reviews_exists = 0,
     'ALTER TABLE partner ADD COLUMN total_reviews BIGINT NOT NULL DEFAULT 0',
     'SELECT 1');
 PREPARE stmt FROM @sql;

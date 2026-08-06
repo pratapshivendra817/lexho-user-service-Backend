@@ -2,9 +2,16 @@ package com.lexho.user_service.subscription.service;
 
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
+import com.lexho.user_service.config.DispatchProperties;
+import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
+import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
+import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dispatch.repository.PartnerServiceSkillRepository;
+import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import com.lexho.user_service.lexho.entity.LexhoAddress;
+import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
 import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
 import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.subscription.dto.AdminPartnerAssignRequest;
@@ -27,9 +34,9 @@ import com.lexho.user_service.subscription.repository.SubscriptionVisitRepositor
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -54,8 +61,29 @@ class AdminSubscriptionManagementServiceTest {
     @Mock SubscriptionVisitPartnerAssignmentRepository visitPartnerAssignmentRepository;
     @Mock PartnerProfileRepository partnerProfileRepository;
     @Mock PartnerServiceSkillRepository partnerServiceSkillRepository;
+    @Mock LexhoAddressRepository lexhoAddressRepository;
+    @Mock PartnerShiftRepository partnerShiftRepository;
+    @Mock CurrentPartnerLocationRepository currentPartnerLocationRepository;
 
-    @InjectMocks AdminSubscriptionManagementService service;
+    private AdminSubscriptionManagementService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new AdminSubscriptionManagementService(
+                subscriptionMasterRepository,
+                subscriptionFrequencyRepository,
+                subscriptionVisitRepository,
+                serviceRepository,
+                subscriptionPartnerAssignmentRepository,
+                visitPartnerAssignmentRepository,
+                partnerProfileRepository,
+                partnerServiceSkillRepository,
+                lexhoAddressRepository,
+                partnerShiftRepository,
+                currentPartnerLocationRepository,
+                dispatchProperties()
+        );
+    }
 
     @Test
     void listShouldSelectAllRepositoryBranchesAndMapVisitCounts() {
@@ -152,9 +180,13 @@ class AdminSubscriptionManagementServiceTest {
     void assignPartnerShouldCreateAssignmentAndNormalizeReason() {
         SubscriptionMaster subscription = subscription(10L);
         PartnerProfile partner = partner(20L, "Partner");
+        LexhoAddress address = address();
         when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
         when(partnerProfileRepository.findById(20L)).thenReturn(Optional.of(partner));
         when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(20L, 5L)).thenReturn(true);
+        when(lexhoAddressRepository.findById(8L)).thenReturn(Optional.of(address));
+        when(partnerShiftRepository.findByPartnerId(20L)).thenReturn(Optional.of(activeShift(20L)));
+        when(currentPartnerLocationRepository.findByPartnerId(20L)).thenReturn(Optional.of(location(20L, 28.4599, 77.0270)));
         when(subscriptionPartnerAssignmentRepository.findBySubscriptionId(10L))
                 .thenReturn(Optional.empty(), Optional.of(assignment(10L, 20L)));
         when(visitPartnerAssignmentRepository.findBySubscriptionIdOrderByVisitIdAsc(10L)).thenReturn(List.of());
@@ -173,6 +205,9 @@ class AdminSubscriptionManagementServiceTest {
     void replacePartnerShouldRequireExistingAssignment() {
         SubscriptionMaster subscription = subscription(10L);
         PartnerProfile partner = partner(21L, "Replacement");
+        when(lexhoAddressRepository.findById(8L)).thenReturn(Optional.of(address()));
+        when(partnerShiftRepository.findByPartnerId(21L)).thenReturn(Optional.of(activeShift(21L)));
+        when(currentPartnerLocationRepository.findByPartnerId(21L)).thenReturn(Optional.of(location(21L, 28.4599, 77.0270)));
         when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
         when(partnerProfileRepository.findById(21L)).thenReturn(Optional.of(partner));
         when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(21L, 5L)).thenReturn(true);
@@ -188,6 +223,9 @@ class AdminSubscriptionManagementServiceTest {
         SubscriptionVisit visit = visit(100L, VisitStatus.SCHEDULED);
         PartnerProfile partner = partner(20L, null);
         partner.setFullName("Full Name");
+        when(lexhoAddressRepository.findById(8L)).thenReturn(Optional.of(address()));
+        when(partnerShiftRepository.findByPartnerId(20L)).thenReturn(Optional.of(activeShift(20L)));
+        when(currentPartnerLocationRepository.findByPartnerId(20L)).thenReturn(Optional.of(location(20L, 28.4599, 77.0270)));
         when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
         when(subscriptionVisitRepository.findByIdAndSubscriptionId(100L, 10L)).thenReturn(Optional.of(visit));
         when(partnerProfileRepository.findById(20L)).thenReturn(Optional.of(partner));
@@ -245,6 +283,35 @@ class AdminSubscriptionManagementServiceTest {
     }
 
     @Test
+    void assignPartnerShouldRejectOfflineFarAndSlowPartners() {
+        SubscriptionMaster subscription = subscription(10L);
+        when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
+        when(lexhoAddressRepository.findById(8L)).thenReturn(Optional.of(address()));
+
+        PartnerProfile offline = partner(30L, "Offline");
+        offline.setOnline(false);
+        when(partnerProfileRepository.findById(30L)).thenReturn(Optional.of(offline));
+        assertThrows(BadRequestException.class,
+                () -> service.assignPartner(10L, new AdminPartnerAssignRequest(30L, null)));
+
+        PartnerProfile far = partner(31L, "Far");
+        when(partnerProfileRepository.findById(31L)).thenReturn(Optional.of(far));
+        when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(31L, 5L)).thenReturn(true);
+        when(partnerShiftRepository.findByPartnerId(31L)).thenReturn(Optional.of(activeShift(31L)));
+        when(currentPartnerLocationRepository.findByPartnerId(31L)).thenReturn(Optional.of(location(31L, 28.5000, 77.1000)));
+        assertThrows(BadRequestException.class,
+                () -> service.assignPartner(10L, new AdminPartnerAssignRequest(31L, null)));
+
+        PartnerProfile slow = partner(32L, "Slow");
+        when(partnerProfileRepository.findById(32L)).thenReturn(Optional.of(slow));
+        when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(32L, 5L)).thenReturn(true);
+        when(partnerShiftRepository.findByPartnerId(32L)).thenReturn(Optional.of(activeShift(32L)));
+        when(currentPartnerLocationRepository.findByPartnerId(32L)).thenReturn(Optional.of(location(32L, 28.4830, 77.0266)));
+        assertThrows(BadRequestException.class,
+                () -> service.assignPartner(10L, new AdminPartnerAssignRequest(32L, null)));
+    }
+
+    @Test
     void missingSubscriptionShouldFailAllLookupBasedOperations() {
         when(subscriptionMasterRepository.findById(404L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> service.detail(404L));
@@ -285,7 +352,44 @@ class AdminSubscriptionManagementServiceTest {
         PartnerProfile partner = new PartnerProfile();
         partner.setId(id);
         partner.setName(name);
+        partner.setOnline(true);
+        partner.setVerified(true);
         return partner;
+    }
+
+    private static LexhoAddress address() {
+        LexhoAddress address = new LexhoAddress();
+        address.setLatitude(BigDecimal.valueOf(28.4595));
+        address.setLongitude(BigDecimal.valueOf(77.0266));
+        return address;
+    }
+
+    private static PartnerShiftEntity activeShift(Long partnerId) {
+        PartnerShiftEntity shift = new PartnerShiftEntity();
+        shift.setPartnerId(partnerId);
+        shift.setOnline(true);
+        shift.setActiveJobsCount(0);
+        shift.setMaxActiveJobs(3);
+        shift.setShiftStart(java.time.LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(java.time.LocalDateTime.now().plusHours(1));
+        return shift;
+    }
+
+    private static CurrentPartnerLocationEntity location(Long partnerId, double lat, double lng) {
+        CurrentPartnerLocationEntity location = new CurrentPartnerLocationEntity();
+        location.setPartnerId(partnerId);
+        location.setLatitude(BigDecimal.valueOf(lat));
+        location.setLongitude(BigDecimal.valueOf(lng));
+        return location;
+    }
+
+    private static DispatchProperties dispatchProperties() {
+        DispatchProperties properties = new DispatchProperties();
+        properties.getPartner().setInitialSearchRadiusKm(1.0d);
+        properties.getPartner().setMaxSearchRadiusKm(2.0d);
+        properties.getBooking().setMaxEtaMinutes(15);
+        properties.getBooking().setPreDispatchMinutes(30);
+        return properties;
     }
 
     private static SubscriptionPartnerAssignment assignment(Long subscriptionId, Long partnerId) {

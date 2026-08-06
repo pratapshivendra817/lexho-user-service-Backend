@@ -28,6 +28,7 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
         requireProperty("spring.datasource.url", missing);
         requireProperty("spring.datasource.username", missing);
         requireProperty("spring.datasource.password", missing);
+        rejectInsecureJdbcUrl();
         requireProperty("security.jwt.secret", missing);
         rejectDefaultJwtSecret();
 
@@ -73,10 +74,22 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
     private void rejectDefaultJwtSecret() {
         String jwtSecret = environment.getProperty("security.jwt.secret", "");
         if (jwtSecret.length() < 32
+                || jwtSecret.contains("dev-only-local-jwt-secret")
                 || jwtSecret.contains("change-this")
                 || jwtSecret.contains("replace-with")
                 || "12345678901234567890123456789012".equals(jwtSecret)) {
             throw new IllegalStateException("security.jwt.secret must be a production-grade secret with at least 32 characters");
+        }
+    }
+
+    private void rejectInsecureJdbcUrl() {
+        String jdbcUrl = environment.getProperty("spring.datasource.url", "");
+        String normalized = jdbcUrl.toLowerCase();
+        if (normalized.contains("usessl=false")
+                || normalized.contains("sslmode=disabled")
+                || normalized.contains("sslmode=preferred")
+                || normalized.contains("allowpublickeyretrieval=true")) {
+            throw new IllegalStateException("spring.datasource.url must require TLS-safe MySQL settings in production");
         }
     }
 
@@ -107,6 +120,7 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
         requireFalse("app.security.exposure.allow-public-customer-read");
         requireFalse("app.security.exposure.allow-public-partner-onboarding");
         requireFalse("app.security.exposure.allow-public-admin-profile-content");
+        requireFalse("app.security.exposure.allow-partner-request-dev-seed");
         requireFalse("admin.auth.infrastructure.allow-in-memory-otp-fallback");
         requireFalse("admin.auth.infrastructure.allow-in-memory-rate-limit-fallback");
         requireFalse("admin.auth.infrastructure.allow-console-otp-delivery-fallback");

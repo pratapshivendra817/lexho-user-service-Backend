@@ -57,6 +57,9 @@ public interface AdminServiceEntityRepository extends JpaRepository<AdminService
 
     List<AdminServiceEntity> findByCategory_IdAndDeletedFalse(Long categoryId);
     List<AdminServiceEntity> findByDeletedFalseAndActiveTrue();
+    long countByDeletedFalse();
+    long countByDeletedFalseAndActiveTrue();
+    long countByDeletedFalseAndActiveFalse();
 
     @Query("""
             SELECT COALESCE(s.categoryName, 'UNKNOWN'), COUNT(s)

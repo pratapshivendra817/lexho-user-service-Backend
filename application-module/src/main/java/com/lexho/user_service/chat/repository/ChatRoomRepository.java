@@ -20,9 +20,9 @@ public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
             select r from ChatRoom r
             where r.deleted = false
               and (
-                (:participantType = com.lexho.user_service.chat.enums.ChatParticipantType.CUSTOMER and r.customerId = :participantId)
+                (:#{#participantType.name()} = 'CUSTOMER' and r.customerId = :participantId)
                 or
-                (:participantType = com.lexho.user_service.chat.enums.ChatParticipantType.PARTNER and r.partnerId = :participantId)
+                (:#{#participantType.name()} = 'PARTNER' and r.partnerId = :participantId)
               )
             """)
     Page<ChatRoom> findVisibleRooms(@Param("participantType") ChatParticipantType participantType,

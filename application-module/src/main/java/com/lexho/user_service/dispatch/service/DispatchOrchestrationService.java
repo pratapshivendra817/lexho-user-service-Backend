@@ -8,6 +8,7 @@ import com.lexho.common.enums.OrderStatus;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
+import com.lexho.user_service.config.DispatchProperties;
 import com.lexho.user_service.dispatch.entity.BookingEventEntity;
 import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
@@ -35,13 +36,13 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class DispatchOrchestrationService {
     public static final int INSTANT_SLA_MINUTES = 30;
     public static final int PARTNER_RESPONSE_WINDOW_MINUTES = 2;
     private static final double ETA_SPEED_KMPH = 25.0;
-    private static final int DEFAULT_SCHEDULED_PRE_DISPATCH_MINUTES = 30;
     private static final ZoneId APPLICATION_ZONE = ZoneId.systemDefault();
 
     private final OrderRepository orderRepository;
@@ -57,7 +58,7 @@ public class DispatchOrchestrationService {
     private final BookingEventRepository bookingEventRepository;
     private final DispatchScoringPolicy dispatchScoringPolicy;
     private final ObjectMapper objectMapper;
-    private final int scheduledPreDispatchMinutes;
+    private final DispatchProperties dispatchProperties;
     private final TrackingLifecycleService trackingLifecycleService;
 
     public DispatchOrchestrationService(OrderRepository orderRepository,
@@ -74,7 +75,7 @@ public class DispatchOrchestrationService {
                                         DispatchScoringPolicy dispatchScoringPolicy,
                                         ObjectMapper objectMapper,
                                         TrackingLifecycleService trackingLifecycleService,
-                                        @org.springframework.beans.factory.annotation.Value("${app.dispatch.scheduled.pre-dispatch-minutes:30}") int scheduledPreDispatchMinutes) {
+                                        DispatchProperties dispatchProperties) {
         this.orderRepository = orderRepository;
         this.lexhoAddressRepository = lexhoAddressRepository;
         this.serviceableAreaRepository = serviceableAreaRepository;
@@ -89,7 +90,7 @@ public class DispatchOrchestrationService {
         this.dispatchScoringPolicy = dispatchScoringPolicy;
         this.objectMapper = objectMapper;
         this.trackingLifecycleService = trackingLifecycleService;
-        this.scheduledPreDispatchMinutes = Math.max(5, Math.min(240, scheduledPreDispatchMinutes));
+        this.dispatchProperties = dispatchProperties;
     }
 
     @Async
@@ -114,21 +115,7 @@ public class DispatchOrchestrationService {
         }
 
         startPartnerSearch(context);
-
-        List<PartnerShiftEntity> onlineShifts = findOnlineShifts(context.pincode());
-        if (onlineShifts.isEmpty()) {
-            saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ONLINE_PARTNER"));
-            return 0;
-        }
-
-        List<Candidate> eligible = findEligibleCandidates(context, onlineShifts);
-        if (eligible.isEmpty()) {
-            saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
-            return 0;
-        }
-
-        eligible.sort(dispatchScoringPolicy.comparator(context.pincode()));
-        int created = createPartnerRequests(context, eligible);
+        int created = dispatchAttemptsForOrder(context);
         finishDispatch(context, created);
         return created;
     }
@@ -194,7 +181,7 @@ public class DispatchOrchestrationService {
         saveEvent(context.orderId(), "DISPATCH_DEFERRED", Map.of(
                 "reason", "PRE_ARRIVAL_WINDOW_NOT_REACHED",
                 "scheduledAt", context.scheduledAt(),
-                "activationMinutesBefore", scheduledPreDispatchMinutes
+                "activationMinutesBefore", getScheduledPreDispatchMinutes()
         ));
         return true;
     }
@@ -210,19 +197,61 @@ public class DispatchOrchestrationService {
         }
     }
 
-    private List<PartnerShiftEntity> findOnlineShifts(String pincode) {
-        List<String> searchPincodes = new ArrayList<>();
-        searchPincodes.add(pincode);
-        pincodeAdjacencyRepository.findBySourcePincodeAndActiveTrueOrderByPriorityAsc(pincode)
-                .forEach(a -> searchPincodes.add(a.getAdjacentPincode()));
-        return partnerShiftRepository.findByCurrentPincodeInAndOnlineTrue(searchPincodes);
+    private int dispatchAttemptsForOrder(DispatchContext context) {
+        List<PartnerServiceRequestEntity> existingRequests = partnerServiceRequestRepository.findByCartId(context.orderId());
+        Set<Long> requestedPartnerIds = existingRequests.stream()
+                .map(PartnerServiceRequestEntity::getPartnerId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        int currentAttempt = existingRequests.stream()
+                .map(PartnerServiceRequestEntity::getDispatchAttempt)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(0);
+
+        List<Candidate> initialEligible = findEligibleCandidates(context, getInitialSearchRadiusKm(), requestedPartnerIds);
+        if (!initialEligible.isEmpty()) {
+            initialEligible.sort(dispatchScoringPolicy.comparator(context.pincode()));
+            return createPartnerRequests(context, initialEligible, currentAttempt + 1);
+        }
+
+        if (getMaxSearchRadiusKm() <= getInitialSearchRadiusKm()) {
+            saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
+            return 0;
+        }
+
+        saveEvent(context.orderId(), "PARTNER_SEARCH_RADIUS_EXPANDED", Map.of(
+                "fromRadiusKm", getInitialSearchRadiusKm(),
+                "toRadiusKm", getMaxSearchRadiusKm()
+        ));
+        List<Candidate> expandedEligible = findEligibleCandidates(context, getMaxSearchRadiusKm(), requestedPartnerIds);
+        if (expandedEligible.isEmpty()) {
+            saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
+            return 0;
+        }
+        expandedEligible.sort(dispatchScoringPolicy.comparator(context.pincode()));
+        return createPartnerRequests(context, expandedEligible, Math.max(2, currentAttempt + 1));
     }
 
-    private List<Candidate> findEligibleCandidates(DispatchContext context, List<PartnerShiftEntity> onlineShifts) {
+    private List<Candidate> findEligibleCandidates(DispatchContext context,
+                                                   double radiusKm,
+                                                   Set<Long> excludedPartnerIds) {
+        List<Long> nearbyPartnerIds = findNearbyPartnerIds(context, radiusKm);
+        if (nearbyPartnerIds.isEmpty()) {
+            return List.of();
+        }
+        List<PartnerShiftEntity> onlineShifts = partnerShiftRepository.findByPartnerIdInAndDeletedFalse(nearbyPartnerIds).stream()
+                .filter(shift -> shift.isOnline() && !shift.isDeleted())
+                .filter(shift -> !excludedPartnerIds.contains(shift.getPartnerId()))
+                .toList();
+        if (onlineShifts.isEmpty()) {
+            return List.of();
+        }
+
         Map<Long, Partner> partnersById = findPartnersById(onlineShifts);
         List<Candidate> eligible = new ArrayList<>();
         for (PartnerShiftEntity shift : onlineShifts) {
-            candidateForShift(context, partnersById, shift).ifPresent(eligible::add);
+            candidateForShift(context, partnersById, shift, radiusKm).ifPresent(eligible::add);
         }
         return eligible;
     }
@@ -236,15 +265,17 @@ public class DispatchOrchestrationService {
         return partnersById;
     }
 
-    private Optional<Candidate> candidateForShift(DispatchContext context, Map<Long, Partner> partnersById,
-                                                  PartnerShiftEntity shift) {
+    private Optional<Candidate> candidateForShift(DispatchContext context,
+                                                  Map<Long, Partner> partnersById,
+                                                  PartnerShiftEntity shift,
+                                                  double radiusKm) {
         Partner partner = partnersById.get(shift.getPartnerId());
         if (!isEligiblePartner(context, partner, shift)) {
             return Optional.empty();
         }
         BigDecimal distance = calculateDistanceKm(context.address(), shift.getPartnerId());
         int etaMinutes = estimateEtaMinutes(distance);
-        if (!isDispatchableByDistance(context, distance, etaMinutes)) {
+        if (!isDispatchable(context, distance, etaMinutes, radiusKm)) {
             return Optional.empty();
         }
         return Optional.of(new Candidate(shift, partner, distance, etaMinutes));
@@ -253,6 +284,7 @@ public class DispatchOrchestrationService {
     private boolean isEligiblePartner(DispatchContext context, Partner partner, PartnerShiftEntity shift) {
         return partner != null
                 && Boolean.TRUE.equals(partner.getAvailable())
+                && isApprovedPartner(partner)
                 && hasRequiredSkill(partner, context.resolvedSubServiceId(), context.requestedCategoryId())
                 && shift.getActiveJobsCount() < shift.getMaxActiveJobs()
                 && isShiftActive(shift);
@@ -266,13 +298,13 @@ public class DispatchOrchestrationService {
         return !currentTime.isBefore(shift.getShiftStart()) && !currentTime.isAfter(shift.getShiftEnd());
     }
 
-    private boolean isDispatchableByDistance(DispatchContext context, BigDecimal distance, int etaMinutes) {
-        return dispatchScoringPolicy.isWithinDispatchRadius(distance)
-                && (!context.instant() || etaMinutes <= INSTANT_SLA_MINUTES);
+    private boolean isDispatchable(DispatchContext context, BigDecimal distance, int etaMinutes, double radiusKm) {
+        return dispatchScoringPolicy.isWithinDispatchRadius(distance, radiusKm)
+                && etaMinutes <= getMaxEtaMinutes()
+                && (!context.instant() || dispatchScoringPolicy.isWithinDispatchRadius(distance, getMaxSearchRadiusKm()));
     }
 
-    private int createPartnerRequests(DispatchContext context, List<Candidate> eligible) {
-        int dispatchAttempt = (int) partnerServiceRequestRepository.findByCartId(context.orderId()).stream().count() + 1;
+    private int createPartnerRequests(DispatchContext context, List<Candidate> eligible, int dispatchAttempt) {
         int created = 0;
         for (Candidate candidate : eligible.stream().limit(5).toList()) {
             if (hasPendingRequest(context.orderId(), candidate.partner().getId())) {
@@ -340,6 +372,9 @@ public class DispatchOrchestrationService {
     @Transactional
     public void markPartnerAccepted(Long orderId, Long partnerId, Integer etaMinutesAtAcceptance) {
         Order order = orderRepository.findByIdForUpdate(orderId).orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        if (order.getAssignedPartnerId() != null && !order.getAssignedPartnerId().equals(partnerId)) {
+            throw new BadRequestException("Order is already assigned to another partner");
+        }
         boolean instant = BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType());
         if (instant) {
             order.setStatus(OrderStatus.PARTNER_ASSIGNED);
@@ -368,6 +403,50 @@ public class DispatchOrchestrationService {
     }
 
     @Transactional
+    public int retryDispatch(Long orderId) {
+        Order order = orderRepository.findById(orderId).orElse(null);
+        if (order == null || order.getUserId() == null) {
+            return 0;
+        }
+        PartnerServiceRequestEntity dispatchSnapshot = partnerServiceRequestRepository.findByCartId(orderId).stream()
+                .max(Comparator.comparing(PartnerServiceRequestEntity::getCreatedAt))
+                .orElse(null);
+        if (dispatchSnapshot == null) {
+            return 0;
+        }
+        LexhoAddress retryAddress = snapshotAddress(dispatchSnapshot);
+        ResolvedService resolvedService = resolveRequestedService(dispatchSnapshot.getServiceId());
+        DispatchContext context = buildDispatchContext(
+                order,
+                retryAddress,
+                dispatchSnapshot.getQuantity(),
+                dispatchSnapshot.getScheduledTime(),
+                resolvedService
+        );
+        startPartnerSearch(context);
+        Set<Long> requestedPartnerIds = partnerServiceRequestRepository.findByCartId(orderId).stream()
+                .map(PartnerServiceRequestEntity::getPartnerId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        List<Candidate> expandedEligible = findEligibleCandidates(context, getMaxSearchRadiusKm(), requestedPartnerIds);
+        if (expandedEligible.isEmpty()) {
+            saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
+            return 0;
+        }
+        expandedEligible.sort(dispatchScoringPolicy.comparator(context.pincode()));
+        int nextAttempt = partnerServiceRequestRepository.findByCartId(orderId).stream()
+                .map(PartnerServiceRequestEntity::getDispatchAttempt)
+                .filter(Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(0) + 1;
+        int created = createPartnerRequests(context, expandedEligible, Math.max(2, nextAttempt));
+        if (created > 0) {
+            saveEvent(orderId, "PARTNER_SEARCH_RADIUS_EXPANDED", Map.of("toRadiusKm", getMaxSearchRadiusKm()));
+        }
+        return created;
+    }
+
+    @Transactional
     public void saveEvent(Long orderId, String eventType, Object payload) {
         BookingEventEntity event = new BookingEventEntity();
         event.setBookingId(orderId);
@@ -378,7 +457,8 @@ public class DispatchOrchestrationService {
 
     @Transactional
     public OrderStatus transitionOrderStatus(Long orderId, OrderStatus targetStatus) {
-        Order order = orderRepository.findById(orderId).orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
         OrderStatus current = order.getStatus();
         if (current == null) {
             current = OrderStatus.BOOKING_CREATED;
@@ -442,11 +522,15 @@ public class DispatchOrchestrationService {
 
     public int estimateEtaMinutes(BigDecimal distanceKm) {
         if (distanceKm == null) {
-            return 20;
+            return getMaxEtaMinutes() + 1;
         }
         double hours = distanceKm.doubleValue() / ETA_SPEED_KMPH;
         int minutes = (int) Math.ceil(hours * 60.0);
         return Math.max(minutes, 1);
+    }
+
+    public int maxEtaMinutes() {
+        return getMaxEtaMinutes();
     }
 
     public record Candidate(PartnerShiftEntity shift, Partner partner, BigDecimal distance, int etaMinutes) {}
@@ -469,7 +553,7 @@ public class DispatchOrchestrationService {
         if (scheduledAt == null) {
             return true;
         }
-        LocalDateTime activationAt = scheduledAt.minusMinutes(scheduledPreDispatchMinutes);
+        LocalDateTime activationAt = scheduledAt.minusMinutes(getScheduledPreDispatchMinutes());
         return !now().isBefore(activationAt);
     }
 
@@ -537,5 +621,76 @@ public class DispatchOrchestrationService {
         }
         return requestedCategoryId != null
                 && partnerServiceSkillRepository.existsByPartnerIdAndCategoryId(partner.getId(), requestedCategoryId);
+    }
+
+    private List<Long> findNearbyPartnerIds(DispatchContext context, double radiusKm) {
+        if (context.address().getLatitude() == null || context.address().getLongitude() == null) {
+            return List.of();
+        }
+        return currentPartnerLocationRepository.findNearbyPartnerIds(
+                context.address().getLatitude().doubleValue(),
+                context.address().getLongitude().doubleValue(),
+                radiusKm,
+                200
+        );
+    }
+
+    private boolean isApprovedPartner(Partner partner) {
+        String verificationStatus = partner.getVerificationStatus();
+        if (verificationStatus == null || verificationStatus.isBlank()) {
+            return false;
+        }
+        String normalized = verificationStatus.trim().toUpperCase(Locale.ROOT);
+        return "APPROVED".equals(normalized) || "VERIFIED".equals(normalized);
+    }
+
+    private double getInitialSearchRadiusKm() {
+        return Math.max(0.1d, Math.min(getMaxSearchRadiusKm(), dispatchProperties.getPartner().getInitialSearchRadiusKm()));
+    }
+
+    private double getMaxSearchRadiusKm() {
+        return Math.max(0.1d, Math.min(25.0d, dispatchProperties.getPartner().getMaxSearchRadiusKm()));
+    }
+
+    private int getMaxEtaMinutes() {
+        return Math.max(1, Math.min(120, dispatchProperties.getBooking().getMaxEtaMinutes()));
+    }
+
+    private int getScheduledPreDispatchMinutes() {
+        return Math.max(5, Math.min(240, dispatchProperties.getBooking().getPreDispatchMinutes()));
+    }
+
+    private DispatchContext buildDispatchContext(Order order,
+                                                 LexhoAddress address,
+                                                 Integer quantity,
+                                                 LocalDateTime scheduledAt,
+                                                 ResolvedService resolvedService) {
+        return new DispatchContext(
+                order.getId(),
+                order.getUserId(),
+                quantity == null ? 1 : quantity,
+                scheduledAt,
+                order,
+                address,
+                normalizePincode(address.getPincode()),
+                resolvedService.subServiceId(),
+                categoryId(resolvedService.service()),
+                BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType()),
+                BookingType.SCHEDULED.name().equalsIgnoreCase(order.getBookingType())
+        );
+    }
+
+    private LexhoAddress snapshotAddress(PartnerServiceRequestEntity snapshot) {
+        if (snapshot.getLatitude() == null || snapshot.getLongitude() == null || snapshot.getTargetPincode() == null) {
+            throw new BadRequestException("Dispatch snapshot is incomplete");
+        }
+        LexhoAddress address = new LexhoAddress();
+        address.setHouseNo(snapshot.getFullAddress());
+        address.setArea(snapshot.getFullAddress());
+        address.setCity(snapshot.getCity());
+        address.setPincode(snapshot.getTargetPincode());
+        address.setLatitude(snapshot.getLatitude());
+        address.setLongitude(snapshot.getLongitude());
+        return address;
     }
 }

@@ -1,6 +1,7 @@
 package com.lexho.user_service.subscription.service;
 
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
@@ -37,12 +38,13 @@ class SubscriptionBookingLifecycleTest {
     @Mock LexhoAddressRepository addressRepository;
     @Mock SubscriptionPricingService pricingService;
     @Mock OrderRepository orderRepository;
+    @Mock GeoFenceValidationService geoFenceValidationService;
     private SubscriptionBookingService service;
 
     @BeforeEach
     void setUp() {
         service = new SubscriptionBookingService(masterRepository, frequencyRepository, visitRepository,
-                serviceRepository, addressRepository, pricingService, orderRepository);
+                serviceRepository, addressRepository, pricingService, orderRepository, geoFenceValidationService);
     }
 
     @Test

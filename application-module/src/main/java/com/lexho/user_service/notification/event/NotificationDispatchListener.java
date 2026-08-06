@@ -7,6 +7,7 @@ import com.lexho.notification.enums.NotificationUserType;
 import com.lexho.user_service.notification.service.EmailNotificationService;
 import com.lexho.user_service.notification.service.FcmPushService;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import com.lexho.user_service.notification.service.PushTokenService;
 import com.lexho.user_service.notification.service.SmsNotificationService;
 import org.slf4j.Logger;
@@ -32,6 +33,7 @@ public class NotificationDispatchListener {
     private final FcmPushService fcmPushService;
     private final EmailNotificationService emailNotificationService;
     private final SmsNotificationService smsNotificationService;
+    private final NotificationRealtimeService notificationRealtimeService;
     private final SimpMessagingTemplate messagingTemplate;
 
     public NotificationDispatchListener(NotificationManagementService notificationManagementService,
@@ -39,12 +41,14 @@ public class NotificationDispatchListener {
                                         FcmPushService fcmPushService,
                                         EmailNotificationService emailNotificationService,
                                         SmsNotificationService smsNotificationService,
+                                        NotificationRealtimeService notificationRealtimeService,
                                         SimpMessagingTemplate messagingTemplate) {
         this.notificationManagementService = notificationManagementService;
         this.pushTokenService = pushTokenService;
         this.fcmPushService = fcmPushService;
         this.emailNotificationService = emailNotificationService;
         this.smsNotificationService = smsNotificationService;
+        this.notificationRealtimeService = notificationRealtimeService;
         this.messagingTemplate = messagingTemplate;
     }
 
@@ -104,6 +108,8 @@ public class NotificationDispatchListener {
         );
         messagingTemplate.convertAndSend("/topic/notifications/" + notification.getUserId(), payload);
         messagingTemplate.convertAndSend("/topic/admin/notifications", payload);
+        notificationRealtimeService.publish(notification.getUserId(), "notification-created", payload);
+        notificationRealtimeService.publishAdmin("notification-created", payload);
     }
 
     private void dispatchPush(Notification notification) {

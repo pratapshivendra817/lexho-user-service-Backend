@@ -6,10 +6,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 
 @Component
 public class InternalApiTokenFilter extends OncePerRequestFilter {
@@ -44,6 +48,7 @@ public class InternalApiTokenFilter extends OncePerRequestFilter {
         String provided = request.getHeader(INTERNAL_HEADER);
 
         if (configured == null || configured.isBlank() || provided == null || !configured.equals(provided)) {
+            SecurityContextHolder.clearContext();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
             response.setCharacterEncoding("UTF-8");
@@ -51,6 +56,16 @@ public class InternalApiTokenFilter extends OncePerRequestFilter {
             return;
         }
 
-        filterChain.doFilter(request, response);
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                "internal-service",
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_INTERNAL"))
+        );
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 }

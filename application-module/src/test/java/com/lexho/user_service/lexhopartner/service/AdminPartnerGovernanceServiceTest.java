@@ -10,12 +10,16 @@ import com.lexho.user_service.dispatch.service.PartnerSkillService;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexhopartner.entity.PartnerDocument;
+import com.lexho.user_service.lexhopartner.entity.PartnerPenalty;
 import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.lexhopartner.entity.PartnerWithdrawalRequest;
 import com.lexho.user_service.lexhopartner.entity.VerificationStatus;
 import com.lexho.user_service.lexhopartner.repository.PartnerDocumentRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
+import com.lexho.user_service.notification.service.NotificationManagementService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -43,7 +47,11 @@ class AdminPartnerGovernanceServiceTest {
     @Mock PartnerSkillService partnerSkillService;
     @Mock PayoutRepository payoutRepository;
     @Mock PartnerWithdrawalRequestRepository withdrawalRepository;
+    @Mock PartnerPenaltyRepository partnerPenaltyRepository;
+    @Mock PartnerWarningCommentRepository partnerWarningCommentRepository;
     @Mock AuditLogService auditLogService;
+    @Mock NotificationManagementService notificationManagementService;
+    @Mock PartnerWarningRealtimeService partnerWarningRealtimeService;
     @InjectMocks AdminPartnerGovernanceService service;
 
     @Test
@@ -91,6 +99,45 @@ class AdminPartnerGovernanceServiceTest {
         assertEquals("PAID", response.get("status"));
         assertNotNull(withdrawal.getProcessedAt());
         assertThrows(BadRequestException.class, () -> service.updateWithdrawalStatus(2L, "bad", null));
+    }
+
+    @Test
+    void warningDisputesAndReviewShouldMapAndPersistDecision() {
+        PartnerPenalty warning = new PartnerPenalty();
+        ReflectionTestUtils.setField(warning, "id", 44L);
+        warning.setPartnerId(10L);
+        warning.setStatus("WARNING");
+        warning.setReason("document mismatch");
+        warning.setDisputeStatus("OPEN");
+        warning.setDisputeReason("already submitted correction");
+        when(partnerPenaltyRepository.findWarningDisputes(eq("OPEN"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(warning)));
+        when(partnerPenaltyRepository.findByIdAndPartnerId(44L, 10L)).thenReturn(Optional.of(warning));
+        when(partnerPenaltyRepository.save(warning)).thenReturn(warning);
+
+        Map<String, Object> disputes = service.warningDisputes("OPEN", -1, 500);
+        Map<String, Object> reviewed = service.reviewWarningDispute(10L, 44L, " approved ", " valid dispute ", 99L);
+
+        assertEquals(1L, disputes.get("totalElements"));
+        assertEquals("APPROVED", reviewed.get("disputeStatus"));
+        assertEquals("RESOLVED", reviewed.get("warningStatus"));
+        assertEquals("valid dispute", reviewed.get("disputeReviewNote"));
+        verify(auditLogService).log(99L, "ADMIN", "WARNING_DISPUTE_APPROVED", "PARTNER_WARNING", "44", null, " valid dispute ");
+        verify(notificationManagementService).createPartnerWarningDisputeStatusNotification(10L, 44L, "APPROVED");
+        verify(partnerWarningCommentRepository).save(any());
+        verify(partnerWarningRealtimeService).publish(eq(10L), eq(44L), eq("warning-review"), any(Map.class));
+    }
+
+    @Test
+    void reviewWarningDisputeShouldRejectMissingDispute() {
+        PartnerPenalty warning = new PartnerPenalty();
+        ReflectionTestUtils.setField(warning, "id", 45L);
+        warning.setPartnerId(10L);
+        warning.setStatus("WARNING");
+        when(partnerPenaltyRepository.findByIdAndPartnerId(45L, 10L)).thenReturn(Optional.of(warning));
+
+        assertThrows(BadRequestException.class,
+                () -> service.reviewWarningDispute(10L, 45L, "REJECTED", "not applicable", 99L));
     }
 
     @Test

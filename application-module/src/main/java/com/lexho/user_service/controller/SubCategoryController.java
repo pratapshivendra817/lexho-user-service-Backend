@@ -5,6 +5,8 @@ import com.lexho.catalog.entity.SubCategory;
 import com.lexho.catalog.repository.SubCategoryRepository;
 import com.lexho.user_service.dto.SubCategoryCreateRequestDTO;
 import com.lexho.user_service.dto.SubCategoryResponseDTO;
+import com.lexho.user_service.exception.BadRequestException;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,7 +27,10 @@ public class SubCategoryController {
     }
 
     @PostMapping
-    public SubCategoryResponseDTO create(@RequestBody SubCategoryCreateRequestDTO request) {
+    public SubCategoryResponseDTO create(@Valid @RequestBody SubCategoryCreateRequestDTO request) {
+        if (request == null) {
+            throw new BadRequestException("Subcategory request is required");
+        }
         return toDto(repo.save(toEntity(request)));
     }
 
@@ -38,9 +43,6 @@ public class SubCategoryController {
 
     private SubCategory toEntity(SubCategoryCreateRequestDTO request) {
         SubCategory subCategory = new SubCategory();
-        if (request == null) {
-            return subCategory;
-        }
         subCategory.setName(request.getName());
         subCategory.setIcon(request.getIcon());
         if (request.getCategoryId() != null) {

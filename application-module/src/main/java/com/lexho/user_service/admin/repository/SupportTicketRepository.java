@@ -26,6 +26,29 @@ public interface SupportTicketRepository extends JpaRepository<SupportTicket, Lo
                                @Param("priority") String priority,
                                Pageable pageable);
 
+    @Query("""
+            SELECT t FROM SupportTicket t
+            WHERE (:search IS NULL OR LOWER(t.subject) LIKE LOWER(CONCAT('%', :search, '%'))
+                   OR LOWER(t.message) LIKE LOWER(CONCAT('%', :search, '%')))
+              AND (:status IS NULL OR LOWER(t.status) = LOWER(:status))
+              AND (:priority IS NULL OR LOWER(t.priority) = LOWER(:priority))
+              AND (
+                    (:partnerTickets = true AND t.categoryId LIKE 'PARTNER:%')
+                    OR (:partnerTickets = false AND (t.categoryId IS NULL OR t.categoryId NOT LIKE 'PARTNER:%'))
+                  )
+              AND (
+                    :categoryId IS NULL
+                    OR (:partnerTickets = true AND LOWER(t.categoryId) = LOWER(CONCAT('PARTNER:', :categoryId)))
+                    OR (:partnerTickets = false AND LOWER(t.categoryId) = LOWER(:categoryId))
+                  )
+            """)
+    Page<SupportTicket> searchByRequesterType(@Param("search") String search,
+                                              @Param("status") String status,
+                                              @Param("categoryId") String categoryId,
+                                              @Param("priority") String priority,
+                                              @Param("partnerTickets") boolean partnerTickets,
+                                              Pageable pageable);
+
     List<SupportTicket> findByUserIdOrderByCreatedAtDesc(Long userId);
 
     Page<SupportTicket> findByUserIdOrderByCreatedAtDesc(Long userId, Pageable pageable);
@@ -33,4 +56,23 @@ public interface SupportTicketRepository extends JpaRepository<SupportTicket, Lo
     Page<SupportTicket> findByUserIdAndStatusIgnoreCaseOrderByCreatedAtDesc(Long userId, String status, Pageable pageable);
 
     Optional<SupportTicket> findByUserIdAndId(Long userId, Long id);
+
+    Page<SupportTicket> findByUserIdAndCategoryIdStartingWithOrderByCreatedAtDesc(
+            Long userId,
+            String categoryPrefix,
+            Pageable pageable
+    );
+
+    Page<SupportTicket> findByUserIdAndStatusIgnoreCaseAndCategoryIdStartingWithOrderByCreatedAtDesc(
+            Long userId,
+            String status,
+            String categoryPrefix,
+            Pageable pageable
+    );
+
+    Optional<SupportTicket> findByUserIdAndIdAndCategoryIdStartingWith(
+            Long userId,
+            Long id,
+            String categoryPrefix
+    );
 }

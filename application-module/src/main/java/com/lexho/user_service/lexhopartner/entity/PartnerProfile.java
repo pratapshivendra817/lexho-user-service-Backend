@@ -9,6 +9,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -16,7 +17,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "partners", indexes = {
-        @Index(name = "idx_partners_mobile", columnList = "mobile_number", unique = true),
+        @Index(name = "idx_partners_mobile", columnList = "phone_number", unique = true),
         @Index(name = "idx_partners_email", columnList = "email"),
         @Index(name = "idx_partners_city", columnList = "city")
 })
@@ -27,10 +28,10 @@ public class PartnerProfile extends BaseEntity {
     @Id
     private Long id;
 
-    @Column(nullable = false, length = 120)
+    @Transient
     private String name;
 
-    @Column(name = "mobile_number", nullable = false, length = 20)
+    @Transient
     private String mobileNumber;
 
     @Column(length = 120)
@@ -42,25 +43,25 @@ public class PartnerProfile extends BaseEntity {
     @Column(length = 20)
     private String pincode;
 
-    @Column(length = 255)
+    @Column(name = "full_address", length = 500)
     private String address;
 
-    @Column(name = "service_category", length = 80)
+    @Transient
     private String serviceCategory;
 
-    @Column(nullable = false)
+    @Transient
     private Double rating = 0.0;
 
     @Column(name = "total_reviews", nullable = false)
     private Long totalReviews = 0L;
 
-    @Column(name = "profile_image", length = 1000)
+    @Transient
     private String profileImage;
 
-    @Column(name = "is_online", nullable = false)
+    @Transient
     private boolean online;
 
-    @Column(name = "is_verified", nullable = false)
+    @Transient
     private boolean verified;
 
     // Legacy required columns in existing partners schema
@@ -119,4 +120,71 @@ public class PartnerProfile extends BaseEntity {
 
     @Column(name = "bank_rejection_reason", length = 500)
     private String bankRejectionReason;
+
+    public String getName() {
+        return (name == null || name.isBlank()) ? fullName : name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+        this.fullName = name == null ? "" : name;
+    }
+
+    public String getMobileNumber() {
+        return (mobileNumber == null || mobileNumber.isBlank()) ? phoneNumber : mobileNumber;
+    }
+
+    public void setMobileNumber(String mobileNumber) {
+        this.mobileNumber = mobileNumber;
+        this.phoneNumber = mobileNumber == null ? "" : mobileNumber;
+    }
+
+    public String getServiceCategory() {
+        return serviceCategory;
+    }
+
+    public void setServiceCategory(String serviceCategory) {
+        this.serviceCategory = serviceCategory;
+    }
+
+    public Double getRating() {
+        return rating;
+    }
+
+    public void setRating(Double rating) {
+        this.rating = rating;
+    }
+
+    public String getProfileImage() {
+        return profileImage;
+    }
+
+    public void setProfileImage(String profileImage) {
+        this.profileImage = profileImage;
+    }
+
+    public boolean isOnline() {
+        return online;
+    }
+
+    public void setOnline(boolean online) {
+        this.online = online;
+    }
+
+    public boolean isVerified() {
+        return verified || kycStatus == KycStatus.VERIFIED || "APPROVED".equalsIgnoreCase(kycWorkflowStatus);
+    }
+
+    public void setVerified(boolean verified) {
+        this.verified = verified;
+        if (verified) {
+            this.kycStatus = KycStatus.VERIFIED;
+            this.kycWorkflowStatus = "APPROVED";
+        } else if (this.kycStatus == KycStatus.VERIFIED) {
+            this.kycStatus = KycStatus.PENDING;
+            if ("APPROVED".equalsIgnoreCase(this.kycWorkflowStatus)) {
+                this.kycWorkflowStatus = "PENDING";
+            }
+        }
+    }
 }

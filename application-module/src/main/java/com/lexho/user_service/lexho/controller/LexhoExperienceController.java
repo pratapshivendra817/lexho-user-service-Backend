@@ -2,6 +2,9 @@ package com.lexho.user_service.lexho.controller;
 
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.catalog.entity.ServiceCategory;
 import com.lexho.catalog.repository.CategoryRepository;
 import com.lexho.common.enums.PaymentStatus;
@@ -32,6 +35,7 @@ import com.lexho.user_service.dispatch.repository.BookingEventRepository;
 import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
 import com.lexho.user_service.cartconfig.service.CartConfigService;
+import com.lexho.user_service.customer.service.CustomerActivityFeedService;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.customer.service.SlotDateTimePolicy;
 import com.lexho.user_service.customer.service.CustomerCartSlotService;
@@ -62,7 +66,9 @@ import com.lexho.user_service.subscription.repository.SubscriptionMasterReposito
 import com.lexho.user_service.subscription.repository.SubscriptionVisitRepository;
 import com.lexho.user_service.notification.dto.NotificationPageResponse;
 import com.lexho.user_service.notification.dto.NotificationResponse;
+import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.support.service.SupportRealtimeService;
 import com.lexho.user_service.util.MediaUrlResolver;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -72,6 +78,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
 import java.security.SecureRandom;
@@ -84,10 +91,14 @@ import java.util.regex.Pattern;
 @RestController
 @Slf4j
 public class LexhoExperienceController {
+    private static final ObjectMapper SUPPORT_OBJECT_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
     private static final int BOOKING_CONTRACT_VERSION = 1;
     private static final SecureRandom REFERRAL_CODE_RANDOM = new SecureRandom();
     private static final char[] REFERRAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
     private static final int REFERRAL_CODE_LENGTH = 8;
+    private static final int MAX_SUPPORT_ATTACHMENTS = 10;
+    private static final int MAX_SUPPORT_ATTACHMENT_URL_LENGTH = 500;
 
     private final HomeService homeService;
     private final CartService cartService;
@@ -124,6 +135,15 @@ public class LexhoExperienceController {
 
     @Autowired(required = false)
     private AuditLogService auditLogService;
+
+    @Autowired(required = false)
+    private SupportRealtimeService supportRealtimeService;
+
+    @Autowired(required = false)
+    private NotificationRealtimeService notificationRealtimeService;
+
+    @Autowired(required = false)
+    private CustomerActivityFeedService customerActivityFeedService;
 
     public LexhoExperienceController(HomeService homeService,
                                      CartService cartService,
@@ -698,7 +718,7 @@ public class LexhoExperienceController {
     @PutMapping("/api/bookings/reschedule/{id}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> rescheduleBooking(@RequestAttribute("userId") Long userId,
                                                                               @PathVariable Long id,
-                                                                              @RequestBody LexhoDtos.RescheduleRequest request) {
+                                                                              @Valid @RequestBody LexhoDtos.RescheduleRequest request) {
         Order order = orderRepository.findById(id).orElseThrow(() -> new BadRequestException("Booking not found"));
         if (!Objects.equals(order.getUserId(), userId)) {
             throw new BadRequestException("You are not allowed to reschedule this booking");
@@ -728,7 +748,7 @@ public class LexhoExperienceController {
     @PostMapping("/api/bookings/{id}/reschedule")
     public ResponseEntity<ApiResponse<Map<String, Object>>> rescheduleBookingV2(@RequestAttribute("userId") Long userId,
                                                                                 @PathVariable Long id,
-                                                                                @RequestBody Map<String, String> request) {
+                                                                                @Valid @RequestBody LexhoDtos.RescheduleSlotRequest request) {
         Order order = orderRepository.findById(id).orElseThrow(() -> new BadRequestException("Booking not found"));
         if (!Objects.equals(order.getUserId(), userId)) {
             throw new BadRequestException("You are not allowed to reschedule this booking");
@@ -744,7 +764,7 @@ public class LexhoExperienceController {
             return ResponseEntity.ok(ApiResponse.success("Booking cannot be rescheduled in current state", payload));
         }
         String oldValue = order.getScheduledAt() == null ? null : utc(order.getScheduledAt());
-        LocalDateTime scheduledAt = parseScheduledAt(request.get("date"), request.get("slot"));
+        LocalDateTime scheduledAt = parseScheduledAt(request.date(), request.slot());
         order.setScheduledAt(scheduledAt);
         Order saved = orderRepository.save(order);
         payload.put("scheduledAt", utc(scheduledAt));
@@ -797,9 +817,34 @@ public class LexhoExperienceController {
     }
 
     @PutMapping("/api/partner/update-location")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> updateLocation(@RequestParam Long bookingId,
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateLocation(@RequestAttribute("userId") Long partnerId,
+                                                                           @RequestParam Long bookingId,
                                                                            @RequestParam Double latitude,
                                                                            @RequestParam Double longitude) {
+        Order order = orderRepository.findById(bookingId)
+                .orElseThrow(() -> new BadRequestException("Booking not found"));
+        if (!Objects.equals(order.getAssignedPartnerId(), partnerId)) {
+            throw new BadRequestException("You are not allowed to update this booking location");
+        }
+        validateCoordinates(latitude, longitude);
+
+        CurrentPartnerLocationEntity location = currentPartnerLocationRepository.findByPartnerIdAndDeletedFalse(partnerId)
+                .orElseGet(() -> {
+                    CurrentPartnerLocationEntity created = new CurrentPartnerLocationEntity();
+                    created.setPartnerId(partnerId);
+                    created.setCreatedBy("partner:" + partnerId);
+                    created.setLocationSeq(0L);
+                    return created;
+                });
+        location.setLatitude(BigDecimal.valueOf(latitude));
+        location.setLongitude(BigDecimal.valueOf(longitude));
+        location.setSource("GPS");
+        location.setDeleted(false);
+        location.setLastHeartbeatAt(LocalDateTime.now());
+        location.setLocationSeq(location.getLocationSeq() + 1);
+        location.setUpdatedBy("partner:" + partnerId);
+        currentPartnerLocationRepository.save(location);
+
         return ResponseEntity.ok(ApiResponse.success("Partner location updated", Map.of("bookingId", bookingId, "lat", latitude, "lng", longitude)));
     }
 
@@ -1043,6 +1088,30 @@ public class LexhoExperienceController {
         )));
     }
 
+    @GetMapping("/api/customer/notifications/stream")
+    public SseEmitter customerNotificationStream(@RequestAttribute("userId") Long userId) {
+        if (notificationRealtimeService == null) {
+            throw new BadRequestException("Notification realtime stream is not available");
+        }
+        return notificationRealtimeService.subscribe(userId);
+    }
+
+    @GetMapping("/api/customer/inbox/activity")
+    public ResponseEntity<Map<String, Object>> customerActivityFeed(@RequestAttribute("userId") Long userId,
+                                                                    @RequestParam(defaultValue = "1") int page,
+                                                                    @RequestParam(defaultValue = "20") int limit) {
+        if (customerActivityFeedService == null) {
+            throw new BadRequestException("Customer activity feed is not available");
+        }
+        Map<String, Object> payload = customerActivityFeedService.activity(userId, page, limit);
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Customer activity feed",
+                "data", payload.get("data"),
+                "meta", payload.get("meta")
+        ));
+    }
+
     @PostMapping("/api/referral/generate")
     public ResponseEntity<ApiResponse<Map<String, Object>>> generateReferral(@RequestAttribute("userId") Long userId) {
         LexhoReferralCode code = referralCodeRepository.findByUserId(userId).orElseGet(() -> {
@@ -1103,15 +1172,22 @@ public class LexhoExperienceController {
     @PostMapping("/api/support/create")
     public ResponseEntity<Map<String, Object>> createTicket(@RequestAttribute("userId") Long userId,
                                                             @Valid @RequestBody LexhoDtos.SupportCreateRequest request) {
+        String normalizedBookingId = normalizeSupportBookingId(userId, request.bookingId());
         SupportTicket ticket = new SupportTicket();
         ticket.setUserId(userId);
         ticket.setSubject(request.subject());
         ticket.setMessage(request.message());
         ticket.setStatus("OPEN");
-        ticket.setCategoryId(request.categoryId());
-        ticket.setBookingId(request.bookingId());
+        ticket.setCategoryId(blankToNull(request.categoryId()));
+        ticket.setBookingId(normalizedBookingId);
         ticket.setPriority(request.priority() == null || request.priority().isBlank() ? "MEDIUM" : request.priority().trim().toUpperCase(Locale.ROOT));
+        ticket.setAttachmentUrls(serializeAttachmentUrls(request.attachmentUrls()));
         SupportTicket saved = supportTicketRepository.save(ticket);
+        publishSupportEvent(saved, "ticket-created", Map.of(
+                "id", formatTicketId(saved.getId()),
+                "status", saved.getStatus(),
+                "updatedAt", String.valueOf(saved.getUpdatedAt())
+        ));
         return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Ticket created",
@@ -1123,8 +1199,88 @@ public class LexhoExperienceController {
                 "categoryId", saved.getCategoryId() == null ? "" : saved.getCategoryId(),
                 "bookingId", saved.getBookingId() == null ? "" : saved.getBookingId(),
                 "priority", saved.getPriority() == null ? "MEDIUM" : saved.getPriority(),
+                "attachmentUrls", deserializeAttachmentUrls(saved.getAttachmentUrls()),
                 "createdAt", String.valueOf(saved.getCreatedAt())
         )));
+    }
+
+    @PostMapping("/api/support/tickets/{ticketId}/reply")
+    public ResponseEntity<Map<String, Object>> replySupportTicket(@RequestAttribute("userId") Long userId,
+                                                                  @PathVariable String ticketId,
+                                                                  @Valid @RequestBody LexhoDtos.SupportReplyRequest request) {
+        SupportTicket ticket = requireCustomerTicket(userId, ticketId);
+        if ("CLOSED".equalsIgnoreCase(ticket.getStatus())) {
+            throw new BadRequestException("Closed tickets cannot be replied to. Reopen the ticket first.");
+        }
+        SupportTicketReply reply = new SupportTicketReply();
+        reply.setTicket(ticket);
+        reply.setAdminId(null);
+        reply.setSenderType("CUSTOMER");
+        reply.setMessage(request.message().trim());
+        reply.setAttachmentUrls(serializeAttachmentUrls(request.attachmentUrls()));
+        supportTicketReplyRepository.save(reply);
+        if ("RESOLVED".equalsIgnoreCase(ticket.getStatus())) {
+            ticket.setStatus("OPEN");
+            supportTicketRepository.save(ticket);
+        }
+        publishSupportEvent(ticket, "ticket-message", Map.of(
+                "ticketId", formatTicketId(ticket.getId()),
+                "status", ticket.getStatus(),
+                "message", Map.of(
+                        "sender", "CUSTOMER",
+                        "text", reply.getMessage(),
+                        "attachmentUrls", deserializeAttachmentUrls(reply.getAttachmentUrls()),
+                        "createdAt", String.valueOf(reply.getCreatedAt())
+                )
+        ));
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Reply added",
+                "data", Map.of(
+                        "ticketId", formatTicketId(ticket.getId()),
+                        "status", ticket.getStatus(),
+                        "message", Map.of(
+                                "sender", "CUSTOMER",
+                                "text", reply.getMessage(),
+                                "attachmentUrls", deserializeAttachmentUrls(reply.getAttachmentUrls()),
+                                "createdAt", String.valueOf(reply.getCreatedAt())
+                        )
+                )
+        ));
+    }
+
+    @PatchMapping("/api/support/tickets/{ticketId}/status")
+    public ResponseEntity<Map<String, Object>> updateSupportTicketStatus(@RequestAttribute("userId") Long userId,
+                                                                         @PathVariable String ticketId,
+                                                                         @Valid @RequestBody LexhoDtos.SupportStatusUpdateRequest request) {
+        SupportTicket ticket = requireCustomerTicket(userId, ticketId);
+        String normalized = request.status().trim().toUpperCase(Locale.ROOT);
+        if ("CLOSED".equals(normalized)) {
+            if ("CLOSED".equalsIgnoreCase(ticket.getStatus())) {
+                throw new BadRequestException("Ticket is already closed");
+            }
+            ticket.setStatus("CLOSED");
+        } else {
+            if (!Set.of("CLOSED", "RESOLVED").contains(ticket.getStatus() == null ? "" : ticket.getStatus().toUpperCase(Locale.ROOT))) {
+              throw new BadRequestException("Only closed or resolved tickets can be reopened");
+            }
+            ticket.setStatus("OPEN");
+        }
+        SupportTicket saved = supportTicketRepository.save(ticket);
+        publishSupportEvent(saved, "ticket-status", Map.of(
+                "id", formatTicketId(saved.getId()),
+                "status", saved.getStatus(),
+                "updatedAt", String.valueOf(saved.getUpdatedAt())
+        ));
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Ticket status updated",
+                "data", Map.of(
+                        "id", formatTicketId(saved.getId()),
+                        "status", saved.getStatus(),
+                        "updatedAt", String.valueOf(saved.getUpdatedAt())
+                )
+        ));
     }
 
     @GetMapping("/api/support/history")
@@ -1148,6 +1304,7 @@ public class LexhoExperienceController {
                         "categoryId", item.getCategoryId() == null ? "" : item.getCategoryId(),
                         "bookingId", item.getBookingId() == null ? "" : item.getBookingId(),
                         "priority", item.getPriority() == null ? "MEDIUM" : item.getPriority(),
+                        "attachmentUrls", deserializeAttachmentUrls(item.getAttachmentUrls()),
                         "createdAt", String.valueOf(item.getCreatedAt()),
                         "updatedAt", String.valueOf(item.getUpdatedAt())
                 ))
@@ -1177,14 +1334,16 @@ public class LexhoExperienceController {
                 "id", "MSG-1",
                 "sender", "CUSTOMER",
                 "message", ticket.getMessage(),
+                "attachmentUrls", deserializeAttachmentUrls(ticket.getAttachmentUrls()),
                 "createdAt", String.valueOf(ticket.getCreatedAt())
         ));
         for (int i = 0; i < replies.size(); i++) {
             SupportTicketReply reply = replies.get(i);
             messages.add(Map.of(
                     "id", "MSG-" + (i + 2),
-                    "sender", "SUPPORT",
+                    "sender", supportSender(reply),
                     "message", reply.getMessage(),
+                    "attachmentUrls", deserializeAttachmentUrls(reply.getAttachmentUrls()),
                     "createdAt", String.valueOf(reply.getCreatedAt())
             ));
         }
@@ -1193,10 +1352,23 @@ public class LexhoExperienceController {
                 "success", true,
                 "data", Map.of(
                         "id", formatTicketId(ticket.getId()),
+                        "subject", ticket.getSubject(),
                         "status", ticket.getStatus(),
+                        "bookingId", ticket.getBookingId() == null ? "" : ticket.getBookingId(),
+                        "priority", ticket.getPriority() == null ? "MEDIUM" : ticket.getPriority(),
                         "messages", messages
                 )
         ));
+    }
+
+    @GetMapping("/api/support/tickets/{ticketId}/stream")
+    public SseEmitter supportTicketStream(@RequestAttribute("userId") Long userId,
+                                          @PathVariable String ticketId) {
+        SupportTicket ticket = requireCustomerTicket(userId, ticketId);
+        if (supportRealtimeService == null) {
+            throw new BadRequestException("Support realtime stream is not available");
+        }
+        return supportRealtimeService.subscribe("CUSTOMER", userId, ticket.getId());
     }
 
     private List<Map<String, Object>> partnerData(int page,
@@ -1972,6 +2144,18 @@ public class LexhoExperienceController {
         return "";
     }
 
+    private void validateCoordinates(Double latitude, Double longitude) {
+        if (latitude == null || longitude == null) {
+            throw new BadRequestException("latitude and longitude are required");
+        }
+        if (latitude < -90d || latitude > 90d) {
+            throw new BadRequestException("latitude must be between -90 and 90");
+        }
+        if (longitude < -180d || longitude > 180d) {
+            throw new BadRequestException("longitude must be between -180 and 180");
+        }
+    }
+
     private Map<String, Object> mapFaqRow(SupportFaq faq) {
         return Map.of(
                 "id", faq.getFaqKey(),
@@ -1979,6 +2163,97 @@ public class LexhoExperienceController {
                 "answer", faq.getAnswer(),
                 "displayOrder", faq.getDisplayOrder()
         );
+    }
+
+    private SupportTicket requireCustomerTicket(Long userId, String ticketId) {
+        Long parsedId = parseTicketId(ticketId);
+        return supportTicketRepository.findByUserIdAndId(userId, parsedId)
+                .orElseThrow(() -> new BadRequestException("Ticket not found"));
+    }
+
+    private String normalizeSupportBookingId(Long userId, String bookingId) {
+        String normalized = blankToNull(bookingId);
+        if (normalized == null) {
+            return null;
+        }
+        Long resolvedBookingId = resolveBookingId(normalized);
+        if (resolvedBookingId == null) {
+            throw new BadRequestException("Invalid bookingId");
+        }
+        Order order = orderRepository.findById(resolvedBookingId)
+                .orElseThrow(() -> new BadRequestException("Booking not found"));
+        if (!Objects.equals(order.getUserId(), userId)) {
+            throw new BadRequestException("You are not allowed to link this booking");
+        }
+        return String.valueOf(resolvedBookingId);
+    }
+
+    private String supportSender(SupportTicketReply reply) {
+        String senderType = reply.getSenderType();
+        if (senderType == null || senderType.isBlank()) {
+            return "SUPPORT";
+        }
+        return senderType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private void publishSupportEvent(SupportTicket ticket, String eventName, Map<String, Object> payload) {
+        if (supportRealtimeService != null) {
+            supportRealtimeService.publish(ticket, "CUSTOMER", eventName, payload);
+        }
+    }
+
+    private List<String> deserializeAttachmentUrls(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<String> values = SUPPORT_OBJECT_MAPPER.readValue(rawValue, STRING_LIST_TYPE);
+            return values == null ? List.of() : values;
+        } catch (JsonProcessingException exception) {
+            log.warn("Failed to parse support attachment urls", exception);
+            return List.of();
+        }
+    }
+
+    private String serializeAttachmentUrls(List<String> attachmentUrls) {
+        List<String> sanitized = sanitizeAttachmentUrls(attachmentUrls);
+        if (sanitized.isEmpty()) {
+            return null;
+        }
+        try {
+            return SUPPORT_OBJECT_MAPPER.writeValueAsString(sanitized);
+        } catch (JsonProcessingException exception) {
+            throw new BadRequestException("Invalid attachmentUrls");
+        }
+    }
+
+    private List<String> sanitizeAttachmentUrls(List<String> attachmentUrls) {
+        if (attachmentUrls == null || attachmentUrls.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashSet<String> sanitized = new LinkedHashSet<>();
+        for (String value : attachmentUrls) {
+            String normalized = blankToNull(value);
+            if (normalized == null) {
+                continue;
+            }
+            if (normalized.length() > MAX_SUPPORT_ATTACHMENT_URL_LENGTH) {
+                throw new BadRequestException("attachmentUrl is too long");
+            }
+            sanitized.add(normalized);
+            if (sanitized.size() > MAX_SUPPORT_ATTACHMENTS) {
+                throw new BadRequestException("No more than 10 attachments are allowed");
+            }
+        }
+        return sanitized.isEmpty() ? List.of() : new ArrayList<>(sanitized);
+    }
+
+    private String blankToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String formatTicketId(Long id) {

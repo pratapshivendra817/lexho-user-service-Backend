@@ -1,6 +1,8 @@
 package com.lexho.user_service.partnerrequest.controller;
 
+import com.lexho.user_service.config.SecurityExposureProperties;
 import com.lexho.user_service.dto.ApiResponse;
+import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.partnerrequest.dto.PagedResponse;
 import com.lexho.user_service.partnerrequest.dto.PartnerIncomingRequestResponse;
 import com.lexho.user_service.partnerrequest.dto.PartnerRejectRequest;
@@ -28,11 +30,14 @@ public class PartnerRequestController {
 
     private final PartnerRequestService partnerRequestService;
     private final ApiRateLimiterService apiRateLimiterService;
+    private final SecurityExposureProperties securityExposureProperties;
 
     public PartnerRequestController(PartnerRequestService partnerRequestService,
-                                    ApiRateLimiterService apiRateLimiterService) {
+                                    ApiRateLimiterService apiRateLimiterService,
+                                    SecurityExposureProperties securityExposureProperties) {
         this.partnerRequestService = partnerRequestService;
         this.apiRateLimiterService = apiRateLimiterService;
+        this.securityExposureProperties = securityExposureProperties;
     }
 
     @PatchMapping("/me/status")
@@ -76,6 +81,9 @@ public class PartnerRequestController {
 
     @PatchMapping("/requests/dev/seed")
     public ApiResponse<PartnerIncomingRequestResponse> seedPendingForDev(@RequestAttribute("userId") Long partnerId) {
+        if (!securityExposureProperties.isAllowPartnerRequestDevSeed()) {
+            throw new ResourceNotFoundException("Endpoint not found");
+        }
         return ApiResponse.success("Dev pending request created", partnerRequestService.createDevPendingRequest(partnerId));
     }
 }

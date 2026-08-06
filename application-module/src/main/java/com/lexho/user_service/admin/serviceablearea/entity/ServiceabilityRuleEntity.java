@@ -66,4 +66,19 @@ public class ServiceabilityRuleEntity {
     public String getPolygonJson() { return polygonJson; }
     public boolean isActive() { return active; }
     public boolean isDeleted() { return deleted; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+
+    public void setId(Long id) { this.id = id; }
+    public void setName(String name) { this.name = name; }
+    public void setCity(String city) { this.city = city; }
+    public void setState(String state) { this.state = state; }
+    public void setPincode(String pincode) { this.pincode = pincode; }
+    public void setCityId(Long cityId) { this.cityId = cityId; }
+    public void setZoneId(Long zoneId) { this.zoneId = zoneId; }
+    public void setPolygonJson(String polygonJson) { this.polygonJson = polygonJson; }
+    public void setActive(boolean active) { this.active = active; }
+    public void setDeleted(boolean deleted) { this.deleted = deleted; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
 }

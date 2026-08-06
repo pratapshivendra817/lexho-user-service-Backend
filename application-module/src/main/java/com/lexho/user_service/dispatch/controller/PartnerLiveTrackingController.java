@@ -1,9 +1,13 @@
 package com.lexho.user_service.dispatch.controller;
 
+import com.lexho.booking.repository.OrderRepository;
+import com.lexho.common.enums.OrderStatus;
 import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
+import com.lexho.user_service.exception.BadRequestException;
+import com.lexho.user_service.security.SecurityUtils;
 import com.lexho.user_service.dispatch.service.TrackingLifecycleService;
 import com.lexho.user_service.dispatch.service.TrackingLifecycleState;
 import io.micrometer.core.instrument.Gauge;
@@ -19,8 +23,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.time.ZoneOffset;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -29,9 +35,22 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RestController
 @RequestMapping("/api/v1/partners/live")
 public class PartnerLiveTrackingController {
+    private static final Set<OrderStatus> CUSTOMER_TRACKABLE_STATUSES = EnumSet.of(
+            OrderStatus.PARTNER_ASSIGNED,
+            OrderStatus.PARTNER_ACCEPTED,
+            OrderStatus.PREPARING,
+            OrderStatus.OUT_FOR_DELIVERY,
+            OrderStatus.ARRIVED,
+            OrderStatus.PARTNER_REACHED,
+            OrderStatus.SERVICE_STARTED,
+            OrderStatus.SERVICE_IN_PROGRESS
+    );
+
     private final CurrentPartnerLocationRepository currentPartnerLocationRepository;
     private final PartnerShiftRepository partnerShiftRepository;
     private final TrackingLifecycleService trackingLifecycleService;
+    private final SecurityUtils securityUtils;
+    private final OrderRepository orderRepository;
     private final ExecutorService emitterExecutor = Executors.newCachedThreadPool();
     private final Map<Long, Snapshot> previousSnapshots = new ConcurrentHashMap<>();
     private final long idleSseMs;
@@ -44,6 +63,8 @@ public class PartnerLiveTrackingController {
     public PartnerLiveTrackingController(CurrentPartnerLocationRepository currentPartnerLocationRepository,
                                          PartnerShiftRepository partnerShiftRepository,
                                          TrackingLifecycleService trackingLifecycleService,
+                                         SecurityUtils securityUtils,
+                                         OrderRepository orderRepository,
                                          MeterRegistry meterRegistry,
                                          @Value("${app.tracking.sse.idle-ms:12000}") long idleSseMs,
                                          @Value("${app.tracking.sse.moving-ms:12000}") long movingSseMs,
@@ -52,6 +73,8 @@ public class PartnerLiveTrackingController {
         this.currentPartnerLocationRepository = currentPartnerLocationRepository;
         this.partnerShiftRepository = partnerShiftRepository;
         this.trackingLifecycleService = trackingLifecycleService;
+        this.securityUtils = securityUtils;
+        this.orderRepository = orderRepository;
         this.idleSseMs = Math.max(10_000L, Math.min(15_000L, idleSseMs));
         this.movingSseMs = Math.max(10_000L, Math.min(15_000L, movingSseMs));
         this.activeSseMs = Math.max(5_000L, Math.min(10_000L, activeSseMs));
@@ -62,9 +85,32 @@ public class PartnerLiveTrackingController {
     @GetMapping(value = "/{partnerId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @PreAuthorize("hasAnyRole('CUSTOMER','ADMIN','PARTNER')")
     public SseEmitter track(@PathVariable Long partnerId) {
+        assertTrackingAccessAllowed(partnerId);
         SseEmitter emitter = new SseEmitter(120_000L);
         emitterExecutor.submit(() -> streamPartnerLocation(partnerId, emitter));
         return emitter;
+    }
+
+    private void assertTrackingAccessAllowed(Long partnerId) {
+        String currentRole = securityUtils.getCurrentRole().orElse("");
+        Long currentUserId = securityUtils.getCurrentUserId()
+                .orElseThrow(() -> new BadRequestException("Authenticated user context is missing"));
+
+        if ("ADMIN".equalsIgnoreCase(currentRole)) {
+            return;
+        }
+        if ("PARTNER".equalsIgnoreCase(currentRole)) {
+            if (currentUserId.equals(partnerId)) {
+                return;
+            }
+            throw new BadRequestException("You are not allowed to access this partner location");
+        }
+        if ("CUSTOMER".equalsIgnoreCase(currentRole)
+                && orderRepository.existsByUserIdAndAssignedPartnerIdAndStatusIn(
+                currentUserId, partnerId, CUSTOMER_TRACKABLE_STATUSES)) {
+            return;
+        }
+        throw new BadRequestException("You are not allowed to access this partner location");
     }
 
     private void streamPartnerLocation(Long partnerId, SseEmitter emitter) {

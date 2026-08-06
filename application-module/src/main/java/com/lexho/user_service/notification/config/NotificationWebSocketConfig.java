@@ -2,30 +2,43 @@ package com.lexho.user_service.notification.config;
 
 import com.lexho.user_service.chat.config.ChatStompAuthChannelInterceptor;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.StringTokenizer;
+
 @Configuration
 @EnableWebSocketMessageBroker
 public class NotificationWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
-    private final ChatStompAuthChannelInterceptor chatStompAuthChannelInterceptor;
+    private static final String DEFAULT_ALLOWED_ORIGINS =
+            "http://localhost:3000,http://localhost:5173,http://localhost:4200";
 
-    public NotificationWebSocketConfig(ChatStompAuthChannelInterceptor chatStompAuthChannelInterceptor) {
+    private final ChatStompAuthChannelInterceptor chatStompAuthChannelInterceptor;
+    private final Environment environment;
+
+    public NotificationWebSocketConfig(ChatStompAuthChannelInterceptor chatStompAuthChannelInterceptor,
+                                       Environment environment) {
         this.chatStompAuthChannelInterceptor = chatStompAuthChannelInterceptor;
+        this.environment = environment;
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws-notifications").setAllowedOriginPatterns("*");
-        registry.addEndpoint("/ws/admin/notifications").setAllowedOriginPatterns("*");
-        registry.addEndpoint("/ws/customer/bookings").setAllowedOriginPatterns("*");
-        registry.addEndpoint("/ws/customer/bookings/{bookingId}").setAllowedOriginPatterns("*");
-        registry.addEndpoint("/ws/admin/bookings/{bookingId}").setAllowedOriginPatterns("*");
-        registry.addEndpoint("/ws-chat").setAllowedOriginPatterns("*");
+        String[] allowedOrigins = resolveAllowedOrigins();
+        registry.addEndpoint("/ws-notifications").setAllowedOrigins(allowedOrigins);
+        registry.addEndpoint("/ws/admin/notifications").setAllowedOrigins(allowedOrigins);
+        registry.addEndpoint("/ws/customer/bookings").setAllowedOrigins(allowedOrigins);
+        registry.addEndpoint("/ws/customer/bookings/{bookingId}").setAllowedOrigins(allowedOrigins);
+        registry.addEndpoint("/ws/admin/bookings/{bookingId}").setAllowedOrigins(allowedOrigins);
+        registry.addEndpoint("/ws-chat").setAllowedOrigins(allowedOrigins);
     }
 
     @Override
@@ -38,5 +51,29 @@ public class NotificationWebSocketConfig implements WebSocketMessageBrokerConfig
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
         registration.interceptors(chatStompAuthChannelInterceptor);
+    }
+
+    String[] resolveAllowedOrigins() {
+        String rawOrigins = environment.getProperty(
+                "app.security.websocket.allowed-origins",
+                environment.getProperty("app.security.cors.allowed-origins", DEFAULT_ALLOWED_ORIGINS)
+        );
+        return parseAllowedOrigins(rawOrigins).toArray(String[]::new);
+    }
+
+    static List<String> parseAllowedOrigins(String rawOrigins) {
+        if (rawOrigins == null || rawOrigins.isBlank()) {
+            return List.of();
+        }
+
+        LinkedHashSet<String> origins = new LinkedHashSet<>();
+        StringTokenizer tokenizer = new StringTokenizer(rawOrigins, ",");
+        while (tokenizer.hasMoreTokens()) {
+            String origin = tokenizer.nextToken().trim();
+            if (!origin.isEmpty()) {
+                origins.add(origin);
+            }
+        }
+        return new ArrayList<>(origins);
     }
 }

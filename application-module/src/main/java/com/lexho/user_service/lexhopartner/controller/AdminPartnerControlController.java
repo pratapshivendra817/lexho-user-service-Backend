@@ -181,6 +181,26 @@ public class AdminPartnerControlController {
                 partnerOperationsService.createWarning(partnerId, request.reason, adminId, sendNotification));
     }
 
+    @GetMapping("/warnings/disputes")
+    @Operation(summary = "List partner warning disputes")
+    public ApiResponse<Map<String, Object>> warningDisputes(@RequestParam(required = false) String disputeStatus,
+                                                            @RequestParam(defaultValue = "0") int page,
+                                                            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("Warning disputes fetched",
+                adminPartnerGovernanceService.warningDisputes(disputeStatus, page, size));
+    }
+
+    @PatchMapping("/{partnerId}/warnings/{warningId}/dispute")
+    @Operation(summary = "Review partner warning dispute")
+    public ApiResponse<Map<String, Object>> reviewWarningDispute(@PathVariable Long partnerId,
+                                                                 @PathVariable Long warningId,
+                                                                 @RequestAttribute(value = "userId", required = false) Long adminId,
+                                                                 @RequestBody WarningDisputeReviewRequest request) {
+        return ApiResponse.success("Warning dispute reviewed",
+                adminPartnerGovernanceService.reviewWarningDispute(
+                        partnerId, warningId, request.status, request.reviewNote, adminId));
+    }
+
     public static class SettlementStatusRequest {
         public String status;
         public String remarks;
@@ -215,5 +235,10 @@ public class AdminPartnerControlController {
     public static class WarningRequest {
         public String reason;
         public Boolean sendNotification;
+    }
+
+    public static class WarningDisputeReviewRequest {
+        public String status;
+        public String reviewNote;
     }
 }

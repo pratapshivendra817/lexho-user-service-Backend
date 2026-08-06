@@ -21,6 +21,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -122,7 +123,7 @@ public class Provider {
     @Column(name = "blocked_reason", length = 500)
     private String blockedReason;
 
-    @Column(name = "is_online", nullable = false)
+    @Transient
     private boolean online;
 
     @ManyToOne(fetch = FetchType.LAZY)

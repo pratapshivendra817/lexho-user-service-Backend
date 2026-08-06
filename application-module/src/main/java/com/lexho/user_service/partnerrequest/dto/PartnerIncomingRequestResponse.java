@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 public class PartnerIncomingRequestResponse {
     private Long requestId;
     private Long cartId;
+    private Long subscriptionId;
+    private Long subscriptionVisitId;
     private Long customerId;
     private Long serviceId;
     private String serviceType;
@@ -24,6 +26,10 @@ public class PartnerIncomingRequestResponse {
     public void setCartId(Long cartId) { this.cartId = cartId; }
     public Long getCustomerId() { return customerId; }
     public void setCustomerId(Long customerId) { this.customerId = customerId; }
+    public Long getSubscriptionId() { return subscriptionId; }
+    public void setSubscriptionId(Long subscriptionId) { this.subscriptionId = subscriptionId; }
+    public Long getSubscriptionVisitId() { return subscriptionVisitId; }
+    public void setSubscriptionVisitId(Long subscriptionVisitId) { this.subscriptionVisitId = subscriptionVisitId; }
     public Long getServiceId() { return serviceId; }
     public void setServiceId(Long serviceId) { this.serviceId = serviceId; }
     public String getServiceType() { return serviceType; }

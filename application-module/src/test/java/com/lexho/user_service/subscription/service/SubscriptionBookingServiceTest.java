@@ -1,6 +1,7 @@
 package com.lexho.user_service.subscription.service;
 
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.booking.entity.Order;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
@@ -60,13 +61,15 @@ class SubscriptionBookingServiceTest {
     private OrderRepository orderRepository;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private GeoFenceValidationService geoFenceValidationService;
 
     private SubscriptionBookingService service;
 
     @BeforeEach
     void setUp() {
         service = new SubscriptionBookingService(masterRepository, frequencyRepository, visitRepository,
-                serviceRepository, addressRepository, pricingService, orderRepository);
+                serviceRepository, addressRepository, pricingService, orderRepository, geoFenceValidationService);
         ReflectionTestUtils.setField(service, "auditLogService", auditLogService);
         lenient().when(pricingService.familySizeLabel(null)).thenReturn(null);
     }
@@ -134,6 +137,24 @@ class SubscriptionBookingServiceTest {
         assertThatThrownBy(() -> service.create(7L, request))
                 .isInstanceOf(SubscriptionValidationException.class)
                 .hasMessageContaining("does not belong");
+    }
+
+    @Test
+    void createRejectsAddressOutsideServiceableArea() {
+        CreateSubscriptionRequest request = request(List.of("MONDAY"), LocalDate.now().plusDays(1),
+                LocalDate.now().plusDays(7), "10:00", BigDecimal.ONE, null, null);
+        LexhoAddress address = new LexhoAddress();
+        address.setLatitude(BigDecimal.valueOf(28.4595));
+        address.setLongitude(BigDecimal.valueOf(77.0266));
+        when(serviceRepository.findByIdAndDeletedFalse(2L))
+                .thenReturn(Optional.of(adminService(true, "SUBSCRIPTION", "Cleaning")));
+        when(addressRepository.findByIdAndUserIdAndIsDeletedFalse(3L, 7L)).thenReturn(Optional.of(address));
+        doThrow(new RuntimeException("Selected address is outside supported service area"))
+                .when(geoFenceValidationService).validateBookingAddress(address);
+
+        assertThatThrownBy(() -> service.create(7L, request))
+                .isInstanceOf(SubscriptionValidationException.class)
+                .hasMessage("Selected address is outside supported service area");
     }
 
     @Test

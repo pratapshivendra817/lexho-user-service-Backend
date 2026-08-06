@@ -34,7 +34,10 @@ class SecurityConfigTest {
                 .withProperty(
                         "app.security.cors.allowed-origins",
                         "https://admin.lexho.com, https://customer.lexho.com");
-        SecurityConfig securityConfig = new SecurityConfig(mock(JwtFilter.class), environment);
+        SecurityConfig securityConfig = new SecurityConfig(
+                mock(JwtFilter.class),
+                mock(InternalApiTokenFilter.class),
+                environment);
 
         CorsConfiguration configuration = securityConfig.corsConfigurationSource()
                 .getCorsConfiguration(new org.springframework.mock.web.MockHttpServletRequest());
@@ -49,7 +52,10 @@ class SecurityConfigTest {
 
     @Test
     void corsConfigurationFallsBackToDefaultOriginsWhenPropertyMissing() {
-        SecurityConfig securityConfig = new SecurityConfig(mock(JwtFilter.class), new MockEnvironment());
+        SecurityConfig securityConfig = new SecurityConfig(
+                mock(JwtFilter.class),
+                mock(InternalApiTokenFilter.class),
+                new MockEnvironment());
 
         CorsConfiguration configuration = securityConfig.corsConfigurationSource()
                 .getCorsConfiguration(new org.springframework.mock.web.MockHttpServletRequest());
@@ -60,25 +66,36 @@ class SecurityConfigTest {
     }
 
     @Test
-    void environmentFlagsDefaultToTrueAndCanBeDisabled() {
-        SecurityConfig defaults = new SecurityConfig(mock(JwtFilter.class), new MockEnvironment());
-        SecurityConfig lockedDown = new SecurityConfig(mock(JwtFilter.class), new MockEnvironment()
-                .withProperty("app.security.exposure.expose-swagger", "false")
-                .withProperty("app.security.exposure.allow-internal-open", "false")
-                .withProperty("app.security.exposure.allow-public-customer-read", "false")
-                .withProperty("app.security.exposure.allow-public-partner-onboarding", "false")
-                .withProperty("app.security.exposure.allow-public-admin-profile-content", "false"));
+    void environmentFlagsDefaultToFalseAndCanBeEnabled() {
+        SecurityConfig defaults = new SecurityConfig(
+                mock(JwtFilter.class),
+                mock(InternalApiTokenFilter.class),
+                new MockEnvironment());
+        SecurityConfig exposed = new SecurityConfig(
+                mock(JwtFilter.class),
+                mock(InternalApiTokenFilter.class),
+                new MockEnvironment()
+                .withProperty("app.security.exposure.expose-swagger", "true")
+                .withProperty("app.security.exposure.allow-public-customer-read", "true")
+                .withProperty("app.security.exposure.allow-public-partner-onboarding", "true"));
 
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isExposeSwagger")).isTrue();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowInternalOpen")).isTrue();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowPublicCustomerRead")).isTrue();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowPublicProviderOnboarding")).isTrue();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowPublicAdminProfileContent")).isTrue();
+        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isExposeSwagger")).isFalse();
+        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowPublicCustomerRead")).isFalse();
+        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowPublicProviderOnboarding")).isFalse();
+        assertThat((boolean) ReflectionTestUtils.invokeMethod(exposed, "isExposeSwagger")).isTrue();
+        assertThat((boolean) ReflectionTestUtils.invokeMethod(exposed, "isAllowPublicCustomerRead")).isTrue();
+        assertThat((boolean) ReflectionTestUtils.invokeMethod(exposed, "isAllowPublicProviderOnboarding")).isTrue();
+    }
 
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(lockedDown, "isExposeSwagger")).isFalse();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(lockedDown, "isAllowInternalOpen")).isFalse();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(lockedDown, "isAllowPublicCustomerRead")).isFalse();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(lockedDown, "isAllowPublicProviderOnboarding")).isFalse();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(lockedDown, "isAllowPublicAdminProfileContent")).isFalse();
+    @Test
+    void publicCustomerBootstrapPathsStayEnabledThroughExposureToggle() {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("app.security.exposure.allow-public-customer-read", "true");
+        SecurityConfig securityConfig = new SecurityConfig(
+                mock(JwtFilter.class),
+                mock(InternalApiTokenFilter.class),
+                environment);
+
+        assertThat((boolean) ReflectionTestUtils.invokeMethod(securityConfig, "isAllowPublicCustomerRead")).isTrue();
     }
 }

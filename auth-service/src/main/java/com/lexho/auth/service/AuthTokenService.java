@@ -6,6 +6,7 @@ import com.lexho.auth.repository.RefreshTokenRepository;
 import com.lexho.auth.security.JwtTokenService;
 import com.lexho.auth.support.AuthRequestSupport;
 import com.lexho.common.enums.Role;
+import com.lexho.common.security.TokenDigests;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +39,7 @@ public class AuthTokenService {
 
     @Transactional
     public TokenPairResponse refreshTokens(String refreshTokenValue) {
-        RefreshToken token = refreshTokenRepository.findByToken(AuthRequestSupport.normalizeRefreshToken(refreshTokenValue))
+        RefreshToken token = refreshTokenRepository.findByToken(hashRefreshToken(refreshTokenValue))
                 .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token"));
 
         if (token.isRevoked() || token.getExpiresAt().isBefore(LocalDateTime.now())) {
@@ -51,7 +52,7 @@ public class AuthTokenService {
 
     @Transactional
     public void revokeRefreshToken(String refreshTokenValue) {
-        refreshTokenRepository.findByToken(AuthRequestSupport.normalizeRefreshToken(refreshTokenValue))
+        refreshTokenRepository.findByToken(hashRefreshToken(refreshTokenValue))
                 .ifPresent(this::revoke);
     }
 
@@ -60,7 +61,7 @@ public class AuthTokenService {
         RefreshToken token = new RefreshToken();
         token.setUserId(userId);
         token.setRole(role.name());
-        token.setToken(value);
+        token.setToken(hashRefreshToken(value));
         token.setExpiresAt(LocalDateTime.now().plusDays(refreshExpiryDays));
         token.setRevoked(false);
         refreshTokenRepository.save(token);
@@ -70,5 +71,9 @@ public class AuthTokenService {
     private void revoke(RefreshToken token) {
         token.setRevoked(true);
         refreshTokenRepository.save(token);
+    }
+
+    private String hashRefreshToken(String refreshTokenValue) {
+        return TokenDigests.sha256Hex(AuthRequestSupport.normalizeRefreshToken(refreshTokenValue));
     }
 }

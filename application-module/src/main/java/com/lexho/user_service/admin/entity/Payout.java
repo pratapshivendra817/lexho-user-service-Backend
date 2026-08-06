@@ -6,7 +6,9 @@ import java.time.LocalDateTime;
 import java.math.BigDecimal;
 
 @Entity
-@Table(name = "payouts")
+@Table(name = "payouts", uniqueConstraints = {
+        @UniqueConstraint(name = "uq_payouts_reference_booking", columnNames = "reference_booking_id")
+})
 public class Payout {
 
     @Id

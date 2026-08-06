@@ -10,6 +10,7 @@ import com.lexho.user_service.admin.entity.AdminCategoryEntity;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
+import com.lexho.user_service.config.DispatchProperties;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import com.lexho.user_service.dispatch.repository.BookingEventRepository;
 import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
@@ -36,6 +37,8 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -91,7 +94,7 @@ class DispatchOrchestrationSkillFilterTest {
                 dispatchScoringPolicy,
                 objectMapper,
                 trackingLifecycleService,
-                30
+                dispatchProperties()
         );
     }
 
@@ -152,9 +155,11 @@ class DispatchOrchestrationSkillFilterTest {
         address.setCity("City");
         address.setState("State");
         address.setPincode("560001");
+        address.setLatitude(java.math.BigDecimal.valueOf(12.9716));
+        address.setLongitude(java.math.BigDecimal.valueOf(77.5946));
         when(lexhoAddressRepository.findByIdAndUserId(700L, 500L)).thenReturn(Optional.of(address));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("560001")).thenReturn(true);
-        when(pincodeAdjacencyRepository.findBySourcePincodeAndActiveTrueOrderByPriorityAsc("560001")).thenReturn(List.of());
+        when(currentPartnerLocationRepository.findNearbyPartnerIds(anyDouble(), anyDouble(), eq(1.0d), eq(200))).thenReturn(List.of(1L, 2L));
 
         PartnerShiftEntity shiftRaj = new PartnerShiftEntity();
         shiftRaj.setPartnerId(1L);
@@ -173,7 +178,7 @@ class DispatchOrchestrationSkillFilterTest {
         shiftAman.setMaxActiveJobs(3);
         shiftAman.setShiftStart(LocalDateTime.now().minusHours(1));
         shiftAman.setShiftEnd(LocalDateTime.now().plusHours(1));
-        when(partnerShiftRepository.findByCurrentPincodeInAndOnlineTrue(List.of("560001"))).thenReturn(List.of(shiftRaj, shiftAman));
+        when(partnerShiftRepository.findByPartnerIdInAndDeletedFalse(List.of(1L, 2L))).thenReturn(List.of(shiftRaj, shiftAman));
 
         Partner raj = new Partner();
         raj.setId(1L);
@@ -192,6 +197,18 @@ class DispatchOrchestrationSkillFilterTest {
         aman.setSubCategoryId(null);
         when(partnerRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(raj, aman));
 
+        com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity rajLocation =
+                new com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity();
+        rajLocation.setPartnerId(1L);
+        rajLocation.setLatitude(java.math.BigDecimal.valueOf(12.9717));
+        rajLocation.setLongitude(java.math.BigDecimal.valueOf(77.5947));
+        com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity amanLocation =
+                new com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity();
+        amanLocation.setPartnerId(2L);
+        amanLocation.setLatitude(java.math.BigDecimal.valueOf(12.9718));
+        amanLocation.setLongitude(java.math.BigDecimal.valueOf(77.5948));
+        lenient().when(currentPartnerLocationRepository.findByPartnerId(1L)).thenReturn(Optional.of(rajLocation));
+        lenient().when(currentPartnerLocationRepository.findByPartnerId(2L)).thenReturn(Optional.of(amanLocation));
         AdminCategoryEntity category = new AdminCategoryEntity();
         setId(category, categoryId);
         AdminServiceEntity service = new AdminServiceEntity();
@@ -199,7 +216,7 @@ class DispatchOrchestrationSkillFilterTest {
         service.setCategory(category);
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(subServiceId)).thenReturn(Optional.of(service));
 
-        when(dispatchScoringPolicy.isWithinDispatchRadius(any())).thenReturn(true);
+        when(dispatchScoringPolicy.isWithinDispatchRadius(any(), anyDouble())).thenReturn(true);
         when(dispatchScoringPolicy.comparator("560001"))
                 .thenReturn(Comparator.comparing(c -> c.partner().getId()));
         when(partnerServiceRequestRepository.findByCartId(9001L)).thenReturn(List.of());
@@ -220,4 +237,13 @@ class DispatchOrchestrationSkillFilterTest {
     }
 
     private record BaseData(Order order, LexhoAddress address, Partner raj, Partner aman) {}
+
+    private static DispatchProperties dispatchProperties() {
+        DispatchProperties properties = new DispatchProperties();
+        properties.getPartner().setInitialSearchRadiusKm(1.0d);
+        properties.getPartner().setMaxSearchRadiusKm(2.0d);
+        properties.getBooking().setMaxEtaMinutes(15);
+        properties.getBooking().setPreDispatchMinutes(30);
+        return properties;
+    }
 }

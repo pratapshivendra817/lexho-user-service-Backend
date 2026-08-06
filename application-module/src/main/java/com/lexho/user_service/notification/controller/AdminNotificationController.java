@@ -11,11 +11,13 @@ import com.lexho.user_service.notification.dto.NotificationSendResponse;
 import com.lexho.user_service.notification.dto.NotificationStatsResponse;
 import com.lexho.user_service.notification.exception.NotificationValidationException;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Locale;
 
@@ -37,6 +40,9 @@ public class AdminNotificationController {
     private static final Logger log = LoggerFactory.getLogger(AdminNotificationController.class);
 
     private final NotificationManagementService notificationManagementService;
+
+    @Autowired(required = false)
+    private NotificationRealtimeService notificationRealtimeService;
 
     public AdminNotificationController(NotificationManagementService notificationManagementService) {
         this.notificationManagementService = notificationManagementService;
@@ -95,6 +101,15 @@ public class AdminNotificationController {
     @Operation(summary = "Get notification dashboard stats")
     public ResponseEntity<NotificationStatsResponse> stats() {
         return ResponseEntity.ok(notificationManagementService.getStats());
+    }
+
+    @GetMapping("/stream")
+    @Operation(summary = "Stream admin notifications in real time")
+    public SseEmitter stream() {
+        if (notificationRealtimeService == null) {
+            throw new NotificationValidationException("Admin notification realtime stream is not available");
+        }
+        return notificationRealtimeService.subscribeAdmin();
     }
 
     private NotificationUserType normalizeUserType(String userType) {

@@ -15,6 +15,8 @@ import java.util.Optional;
 public interface SubscriptionVisitRepository extends JpaRepository<SubscriptionVisit, Long> {
     List<SubscriptionVisit> findBySubscriptionIdOrderByVisitDateAscIdAsc(Long subscriptionId);
     List<SubscriptionVisit> findBySubscriptionIdInOrderBySubscriptionIdAscVisitDateAscIdAsc(Collection<Long> subscriptionIds);
+    List<SubscriptionVisit> findBySubscriptionIdInAndStatusInOrderByVisitDateAscIdAsc(Collection<Long> subscriptionIds,
+                                                                                       Collection<VisitStatus> statuses);
     Optional<SubscriptionVisit> findByIdAndSubscriptionId(Long id, Long subscriptionId);
     boolean existsBySubscriptionIdAndVisitDateAndIdNot(Long subscriptionId, LocalDate visitDate, Long id);
 

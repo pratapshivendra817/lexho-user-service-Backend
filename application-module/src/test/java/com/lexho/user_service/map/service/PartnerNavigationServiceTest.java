@@ -15,7 +15,9 @@ import com.lexho.user_service.map.dto.NavigationRouteRequest;
 import com.lexho.user_service.map.dto.NavigationRouteResponse;
 import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
+import com.lexho.user_service.security.SecurityUtils;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -45,6 +47,7 @@ class PartnerNavigationServiceTest {
     private final CustomerAddressRepository customerAddressRepository = mock(CustomerAddressRepository.class);
     private final LexhoAddressRepository lexhoAddressRepository = mock(LexhoAddressRepository.class);
     private final NavigationEtaTrackingRegistry navigationEtaTrackingRegistry = mock(NavigationEtaTrackingRegistry.class);
+    private final SecurityUtils securityUtils = mock(SecurityUtils.class);
 
     private final PartnerNavigationService service = new PartnerNavigationService(
             directionsClient,
@@ -56,7 +59,8 @@ class PartnerNavigationServiceTest {
             customerCurrentLocationRepository,
             customerAddressRepository,
             lexhoAddressRepository,
-            navigationEtaTrackingRegistry
+            navigationEtaTrackingRegistry,
+            securityUtils
     );
 
     @Test
@@ -94,6 +98,7 @@ class PartnerNavigationServiceTest {
 
     @Test
     void etaForBookingUsesPartnerRequestCoordinates() {
+        mockCustomer(17L);
         Order order = new Order();
         order.setId(88L);
         order.setUserId(17L);
@@ -129,6 +134,7 @@ class PartnerNavigationServiceTest {
 
     @Test
     void etaForBookingFallsBackToCustomerCurrentLocation() {
+        mockCustomer(19L);
         Order order = new Order();
         order.setId(90L);
         order.setUserId(19L);
@@ -158,6 +164,7 @@ class PartnerNavigationServiceTest {
 
     @Test
     void etaForBookingRecalculatesWhenPartnerHasDeviatedFromCachedPath() {
+        mockPartner(25L);
         Order order = new Order();
         order.setId(92L);
         order.setUserId(20L);
@@ -195,6 +202,7 @@ class PartnerNavigationServiceTest {
 
     @Test
     void etaForBookingRejectsUnassignedPartner() {
+        mockCustomer(19L);
         Order order = new Order();
         order.setId(91L);
         order.setUserId(19L);
@@ -203,5 +211,73 @@ class PartnerNavigationServiceTest {
         assertThatThrownBy(() -> service.etaForBooking(91L))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("No partner assigned");
+    }
+
+    @Test
+    void etaForBookingRejectsForeignCustomer() {
+        mockCustomer(99L);
+        Order order = new Order();
+        order.setId(93L);
+        order.setUserId(19L);
+        order.setAssignedPartnerId(24L);
+        when(orderRepository.findById(93L)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> service.etaForBooking(93L))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("not allowed");
+    }
+
+    @Test
+    void etaForBookingRejectsForeignPartner() {
+        mockPartner(77L);
+        Order order = new Order();
+        order.setId(94L);
+        order.setUserId(19L);
+        order.setAssignedPartnerId(24L);
+        when(orderRepository.findById(94L)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> service.etaForBooking(94L))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessageContaining("not allowed");
+    }
+
+    @Test
+    void etaForBookingAllowsAdmin() {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("ADMIN"));
+        Order order = new Order();
+        order.setId(95L);
+        order.setUserId(19L);
+        order.setAssignedPartnerId(24L);
+        when(orderRepository.findById(95L)).thenReturn(Optional.of(order));
+
+        CurrentPartnerLocationEntity partnerLocation = new CurrentPartnerLocationEntity();
+        partnerLocation.setPartnerId(24L);
+        partnerLocation.setLatitude(BigDecimal.valueOf(28.60));
+        partnerLocation.setLongitude(BigDecimal.valueOf(77.18));
+        when(partnerLocationRepository.findByPartnerIdAndDeletedFalse(24L)).thenReturn(Optional.of(partnerLocation));
+        when(partnerServiceRequestRepository.findByCartId(95L)).thenReturn(List.of());
+
+        CustomerCurrentLocation customerLocation = new CustomerCurrentLocation();
+        customerLocation.setCustomerId(19L);
+        customerLocation.setLatitude(BigDecimal.valueOf(28.65));
+        customerLocation.setLongitude(BigDecimal.valueOf(77.25));
+        when(customerCurrentLocationRepository.findByCustomerId(19L)).thenReturn(Optional.of(customerLocation));
+        when(cacheService.get(any())).thenReturn(Optional.empty());
+        when(directionsClient.fetchBestRoute(28.60, 77.18, 28.65, 77.25))
+                .thenReturn(new MapboxDirectionsClient.RouteResult(8.8, 20, "polyline-2", "MAPBOX", true, 1));
+
+        NavigationRouteResponse response = service.etaForBooking(95L);
+
+        assertThat(response.bookingId()).isEqualTo(95L);
+    }
+
+    private void mockCustomer(Long userId) {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("CUSTOMER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(userId));
+    }
+
+    private void mockPartner(Long userId) {
+        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(userId));
     }
 }

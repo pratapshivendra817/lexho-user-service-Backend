@@ -1,5 +1,6 @@
 package com.lexho.user_service.partnerrequest.controller;
 
+import com.lexho.user_service.config.SecurityExposureProperties;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.GlobalExceptionHandler;
 import com.lexho.user_service.partnerrequest.dto.PartnerRequestActionResponse;
@@ -30,12 +31,18 @@ class PartnerRequestControllerTest {
     private PartnerRequestService partnerRequestService;
     @Mock
     private ApiRateLimiterService apiRateLimiterService;
+    @Mock
+    private SecurityExposureProperties securityExposureProperties;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        PartnerRequestController controller = new PartnerRequestController(partnerRequestService, apiRateLimiterService);
+        PartnerRequestController controller = new PartnerRequestController(
+                partnerRequestService,
+                apiRateLimiterService,
+                securityExposureProperties
+        );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -71,4 +78,3 @@ class PartnerRequestControllerTest {
                 .andExpect(jsonPath("$.message").value("request is not pending"));
     }
 }
-

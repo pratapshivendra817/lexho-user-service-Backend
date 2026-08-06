@@ -14,6 +14,7 @@ import com.lexho.user_service.partnerrequest.model.PartnerServiceRequestStatus;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
+import com.lexho.user_service.subscription.service.SubscriptionAutoDispatchService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -48,6 +49,8 @@ class PartnerRequestServiceTest {
     private OrderRepository orderRepository;
     @Mock
     private PartnerLeaveRepository partnerLeaveRepository;
+    @Mock
+    private SubscriptionAutoDispatchService subscriptionAutoDispatchService;
 
     @InjectMocks
     private PartnerRequestService partnerRequestService;
@@ -62,6 +65,10 @@ class PartnerRequestServiceTest {
 
         when(partnerServiceRequestRepository.findByIdAndPartnerIdForUpdate(11L, 7L)).thenReturn(Optional.of(request));
         when(partnerServiceRequestRepository.save(any(PartnerServiceRequestEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(orderRepository.findByIdForUpdate(1001L)).thenReturn(Optional.of(new Order()));
+        when(partnerServiceRequestRepository.countByCartIdAndStatus(1001L, PartnerServiceRequestStatus.PENDING)).thenReturn(0L);
+        when(partnerServiceRequestRepository.countByCartIdAndStatus(1001L, PartnerServiceRequestStatus.ACCEPTED)).thenReturn(0L);
+        when(dispatchOrchestrationService.retryDispatch(1001L)).thenReturn(0);
 
         InstantBookingUnavailableException ex = assertThrows(
                 InstantBookingUnavailableException.class,
@@ -169,6 +176,7 @@ class PartnerRequestServiceTest {
         when(partnerServiceRequestRepository.countByCartIdAndStatus(400L, PartnerServiceRequestStatus.PENDING)).thenReturn(0L);
         when(partnerServiceRequestRepository.countByCartIdAndStatus(400L, PartnerServiceRequestStatus.ACCEPTED)).thenReturn(0L);
         when(partnerServiceRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(dispatchOrchestrationService.retryDispatch(400L)).thenReturn(0);
 
         var response = partnerRequestService.reject(7L, 40L, rejection);
 
@@ -201,6 +209,48 @@ class PartnerRequestServiceTest {
                 org.mockito.ArgumentMatchers.eq(PartnerServiceRequestStatus.PENDING), any())).thenReturn(List.of(expired));
         assertThat(partnerRequestService.expirePendingRequests()).isEqualTo(1);
         assertThat(expired.getStatus()).isEqualTo(PartnerServiceRequestStatus.EXPIRED);
+    }
+
+    @Test
+    void acceptShouldCompleteSubscriptionRequestAndRejectPeers() {
+        PartnerServiceRequestEntity accepted = request(80L, 7L, PartnerServiceRequestStatus.PENDING);
+        accepted.setSubscriptionId(500L);
+        accepted.setSubscriptionVisitId(600L);
+        PartnerServiceRequestEntity peer = request(81L, 8L, PartnerServiceRequestStatus.PENDING);
+        peer.setSubscriptionId(500L);
+        peer.setSubscriptionVisitId(600L);
+
+        when(partnerServiceRequestRepository.findByIdAndPartnerIdForUpdate(80L, 7L)).thenReturn(Optional.of(accepted));
+        when(partnerServiceRequestRepository.findBySubscriptionVisitIdAndStatus(600L, PartnerServiceRequestStatus.PENDING))
+                .thenReturn(List.of(accepted, peer));
+        when(partnerServiceRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = partnerRequestService.accept(7L, 80L);
+
+        assertThat(response.getStatus()).isEqualTo(PartnerServiceRequestStatus.ACCEPTED);
+        assertThat(peer.getStatus()).isEqualTo(PartnerServiceRequestStatus.REJECTED);
+        verify(subscriptionAutoDispatchService).markPartnerAccepted(500L, 600L, 7L);
+        verify(dispatchOrchestrationService, never()).markPartnerAccepted(any(), any(), any());
+    }
+
+    @Test
+    void rejectShouldRetrySubscriptionDispatchWhenNoPendingRequestsRemain() {
+        PartnerServiceRequestEntity request = request(90L, 7L, PartnerServiceRequestStatus.PENDING);
+        request.setSubscriptionId(501L);
+        request.setSubscriptionVisitId(601L);
+        PartnerRejectRequest rejection = new PartnerRejectRequest();
+        rejection.setReason("busy");
+
+        when(partnerServiceRequestRepository.findByIdAndPartnerId(90L, 7L)).thenReturn(Optional.of(request));
+        when(partnerServiceRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(partnerServiceRequestRepository.countBySubscriptionVisitIdAndStatus(601L, PartnerServiceRequestStatus.PENDING)).thenReturn(0L);
+        when(partnerServiceRequestRepository.countBySubscriptionVisitIdAndStatus(601L, PartnerServiceRequestStatus.ACCEPTED)).thenReturn(0L);
+
+        var response = partnerRequestService.reject(7L, 90L, rejection);
+
+        assertThat(response.getStatus()).isEqualTo(PartnerServiceRequestStatus.REJECTED);
+        verify(subscriptionAutoDispatchService).retryDispatch(501L, 601L);
+        verify(dispatchOrchestrationService, never()).markPartnerRejected(any(), any());
     }
 
     @Test

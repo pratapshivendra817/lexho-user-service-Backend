@@ -22,7 +22,7 @@ public class RefreshToken {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(nullable = false, unique = true, length = 255)
+    @Column(nullable = false, unique = true, length = 64)
     private String token;
 
     @Column(nullable = false, length = 20)
@@ -117,7 +117,7 @@ public class RefreshToken {
         return "RefreshToken{"
                 + "id=" + id
                 + ", userId=" + userId
-                + ", token='" + token + '\''
+                + ", token='[REDACTED]'"
                 + ", role='" + role + '\''
                 + ", expiresAt=" + expiresAt
                 + ", revoked=" + revoked

@@ -9,7 +9,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
-import jakarta.persistence.Lob;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -56,8 +55,7 @@ public class ReviewEntity {
     @Column(name = "review_comment", length = 1000)
     private String reviewComment;
 
-    @Lob
-    @Column(name = "review_images")
+    @Column(name = "review_images", columnDefinition = "LONGTEXT")
     private String reviewImages;
 
     @Enumerated(EnumType.STRING)

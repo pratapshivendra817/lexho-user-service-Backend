@@ -29,4 +29,25 @@ public class PartnerPenalty extends BaseEntity {
 
     @Column(name = "created_by_admin_id")
     private Long createdByAdminId;
+
+    @Column(name = "acknowledged_at")
+    private java.time.LocalDateTime acknowledgedAt;
+
+    @Column(name = "dispute_status", length = 30)
+    private String disputeStatus;
+
+    @Column(name = "dispute_reason", length = 1000)
+    private String disputeReason;
+
+    @Column(name = "disputed_at")
+    private java.time.LocalDateTime disputedAt;
+
+    @Column(name = "dispute_review_note", length = 1000)
+    private String disputeReviewNote;
+
+    @Column(name = "dispute_reviewed_by_admin_id")
+    private Long disputeReviewedByAdminId;
+
+    @Column(name = "dispute_reviewed_at")
+    private java.time.LocalDateTime disputeReviewedAt;
 }

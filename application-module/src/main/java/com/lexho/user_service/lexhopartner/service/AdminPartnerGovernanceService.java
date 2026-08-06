@@ -9,12 +9,17 @@ import com.lexho.user_service.dispatch.service.PartnerSkillService;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexhopartner.entity.PartnerDocument;
+import com.lexho.user_service.lexhopartner.entity.PartnerPenalty;
 import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
+import com.lexho.user_service.lexhopartner.entity.PartnerWarningComment;
 import com.lexho.user_service.lexhopartner.entity.VerificationStatus;
 import com.lexho.user_service.lexhopartner.repository.PartnerDocumentRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.lexhopartner.entity.PartnerWithdrawalRequest;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
+import com.lexho.user_service.notification.service.NotificationManagementService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +36,11 @@ public class AdminPartnerGovernanceService {
     private final PartnerSkillService partnerSkillService;
     private final PayoutRepository payoutRepository;
     private final PartnerWithdrawalRequestRepository withdrawalRepository;
+    private final PartnerPenaltyRepository partnerPenaltyRepository;
+    private final PartnerWarningCommentRepository partnerWarningCommentRepository;
     private final AuditLogService auditLogService;
+    private final NotificationManagementService notificationManagementService;
+    private final PartnerWarningRealtimeService partnerWarningRealtimeService;
 
     public AdminPartnerGovernanceService(PartnerProfileRepository partnerProfileRepository,
                                          PartnerDocumentRepository partnerDocumentRepository,
@@ -39,14 +48,22 @@ public class AdminPartnerGovernanceService {
                                          PartnerSkillService partnerSkillService,
                                          PayoutRepository payoutRepository,
                                          PartnerWithdrawalRequestRepository withdrawalRepository,
-                                         AuditLogService auditLogService) {
+                                         PartnerPenaltyRepository partnerPenaltyRepository,
+                                         AuditLogService auditLogService,
+                                         PartnerWarningCommentRepository partnerWarningCommentRepository,
+                                         NotificationManagementService notificationManagementService,
+                                         PartnerWarningRealtimeService partnerWarningRealtimeService) {
         this.partnerProfileRepository = partnerProfileRepository;
         this.partnerDocumentRepository = partnerDocumentRepository;
         this.partnerShiftRepository = partnerShiftRepository;
         this.partnerSkillService = partnerSkillService;
         this.payoutRepository = payoutRepository;
         this.withdrawalRepository = withdrawalRepository;
+        this.partnerPenaltyRepository = partnerPenaltyRepository;
+        this.partnerWarningCommentRepository = partnerWarningCommentRepository;
         this.auditLogService = auditLogService;
+        this.notificationManagementService = notificationManagementService;
+        this.partnerWarningRealtimeService = partnerWarningRealtimeService;
     }
 
     @Transactional(readOnly = true)
@@ -91,6 +108,57 @@ public class AdminPartnerGovernanceService {
                 "totalElements", result.getTotalElements(),
                 "totalPages", result.getTotalPages()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> warningDisputes(String disputeStatus, int page, int size) {
+        var result = partnerPenaltyRepository.findWarningDisputes(
+                disputeStatus == null || disputeStatus.isBlank() ? null : disputeStatus.trim(),
+                PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100))
+        );
+        return Map.of(
+                "items", result.getContent().stream().map(this::toWarningDisputeRow).toList(),
+                "page", result.getNumber(),
+                "size", result.getSize(),
+                "totalElements", result.getTotalElements(),
+                "totalPages", result.getTotalPages()
+        );
+    }
+
+    @Transactional
+    public Map<String, Object> reviewWarningDispute(Long partnerId,
+                                                    Long warningId,
+                                                    String status,
+                                                    String reviewNote,
+                                                    Long adminId) {
+        String normalized = requireStatus(status, java.util.Set.of("UNDER_REVIEW", "APPROVED", "REJECTED"));
+        PartnerPenalty warning = partnerPenaltyRepository.findByIdAndPartnerId(warningId, partnerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Warning not found"));
+        if (!"WARNING".equalsIgnoreCase(warning.getStatus())) {
+            throw new ResourceNotFoundException("Warning not found");
+        }
+        if (warning.getDisputeStatus() == null || warning.getDisputeStatus().isBlank() || "NONE".equalsIgnoreCase(warning.getDisputeStatus())) {
+            throw new BadRequestException("No active dispute found for this warning");
+        }
+        warning.setDisputeStatus(normalized);
+        warning.setDisputeReviewNote(trim(reviewNote));
+        warning.setDisputeReviewedByAdminId(adminId);
+        warning.setDisputeReviewedAt(LocalDateTime.now());
+        if ("APPROVED".equals(normalized)) {
+            warning.setStatus("RESOLVED");
+        }
+        PartnerPenalty saved = partnerPenaltyRepository.save(warning);
+        PartnerWarningComment comment = new PartnerWarningComment();
+        comment.setWarning(saved);
+        comment.setSenderType("ADMIN");
+        comment.setSenderId(adminId);
+        comment.setMessage(trim(reviewNote) == null ? "Dispute status updated to " + normalized : trim(reviewNote));
+        partnerWarningCommentRepository.save(comment);
+        auditLogService.log(adminId, "ADMIN", "WARNING_DISPUTE_" + normalized, "PARTNER_WARNING",
+                warningId.toString(), null, reviewNote);
+        notificationManagementService.createPartnerWarningDisputeStatusNotification(partnerId, warningId, normalized);
+        partnerWarningRealtimeService.publish(partnerId, warningId, "warning-review", toWarningDisputeRow(saved));
+        return toWarningDisputeRow(saved);
     }
 
     @Transactional
@@ -320,5 +388,25 @@ public class AdminPartnerGovernanceService {
 
     private String trim(String value) {
         return value == null ? null : value.trim();
+    }
+
+    private Map<String, Object> toWarningDisputeRow(PartnerPenalty warning) {
+        Map<String, Object> row = new java.util.LinkedHashMap<>();
+        row.put("id", warning.getId());
+        row.put("warningId", warning.getId());
+        row.put("partnerId", warning.getPartnerId());
+        row.put("warningStatus", warning.getStatus());
+        row.put("reason", warning.getReason());
+        row.put("acknowledgedAt", warning.getAcknowledgedAt());
+        row.put("disputeStatus", warning.getDisputeStatus() == null || warning.getDisputeStatus().isBlank() ? "NONE" : warning.getDisputeStatus());
+        row.put("disputeReason", warning.getDisputeReason());
+        row.put("disputedAt", warning.getDisputedAt());
+        row.put("disputeReviewNote", warning.getDisputeReviewNote());
+        row.put("disputeReviewedByAdminId", warning.getDisputeReviewedByAdminId());
+        row.put("disputeReviewedAt", warning.getDisputeReviewedAt());
+        row.put("createdByAdminId", warning.getCreatedByAdminId());
+        row.put("createdAt", warning.getCreatedAt());
+        row.put("updatedAt", warning.getUpdatedAt());
+        return row;
     }
 }

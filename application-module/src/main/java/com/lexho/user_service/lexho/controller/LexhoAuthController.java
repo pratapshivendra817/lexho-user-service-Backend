@@ -20,12 +20,11 @@ public class LexhoAuthController {
 
     @PostMapping("/otp/send")
     public ResponseEntity<ApiResponse<Map<String, Object>>> sendOtp(@Valid @RequestBody LexhoDtos.OtpSendRequest request) {
-        String otp = authService.sendOtp(request.mobile(), request.role());
+        authService.sendOtp(request.mobile(), request.role());
         return ResponseEntity.ok(ApiResponse.success("OTP sent successfully", Map.of(
                 "mobile", request.mobile(),
                 "resendAfter", authService.getResendAfterSeconds(),
-                "role", request.role() == null ? "CUSTOMER" : request.role(),
-                "otp", otp
+                "role", request.role() == null ? "CUSTOMER" : request.role()
         )));
     }
 
@@ -47,7 +46,7 @@ public class LexhoAuthController {
         return ResponseEntity.ok(ApiResponse.success("Token refreshed", Map.of("token", token), token));
     }
 
-    @PostMapping("/api/auth/refresh")
+    @PostMapping({"/api/auth/refresh", "/api/v1/auth/refresh"})
     public ResponseEntity<ApiResponse<Map<String, String>>> refreshTokenApi(@Valid @RequestBody LexhoDtos.RefreshTokenApiRequest request) {
         String token = authService.refreshToken(request.refreshToken());
         return ResponseEntity.ok(ApiResponse.success("Token refreshed", Map.of("accessToken", token), token));

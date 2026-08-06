@@ -9,6 +9,7 @@ import com.lexho.user_service.exception.UnauthorizedException;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
@@ -73,5 +74,23 @@ class AdminExceptionHandlerTest {
                 .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(handler.handleGeneric(new Exception("boom")).getStatusCode())
                 .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @Test
+    void databaseExceptionsDoNotLeakSqlOrJdbcDetails() {
+        var duplicate = handler.handleKnownExceptions(new DataIntegrityViolationException(
+                "Duplicate entry '1' for key 'uq_x' while persisting admin credentials"));
+        var jpa = handler.handleKnownExceptions(new JpaSystemException(
+                new RuntimeException("Data truncated for column 'type' at row 1 during admin sync")));
+        var generic = handler.handleGeneric(new Exception(
+                "SQL syntax error near SELECT * FROM users during admin sync"));
+
+        assertThat(duplicate.getBody()).containsEntry("message", "Duplicate or invalid data");
+        assertThat(jpa.getBody()).containsEntry("message",
+                "Invalid detail type. Allowed values: INCLUDED, EXCLUDED, FAQ, INSTRUCTION");
+        assertThat(generic.getBody()).containsEntry("message", "Something went wrong");
+        assertThat(duplicate.getBody().toString()).doesNotContain("jdbc:mysql").doesNotContain("SELECT *");
+        assertThat(jpa.getBody().toString()).doesNotContain("jdbc:mysql").doesNotContain("Data truncated");
+        assertThat(generic.getBody().toString()).doesNotContain("jdbc:mysql").doesNotContain("SELECT *");
     }
 }

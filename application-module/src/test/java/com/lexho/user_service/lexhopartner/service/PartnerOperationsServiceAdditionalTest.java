@@ -16,6 +16,7 @@ import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerServiceAreaRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import org.junit.jupiter.api.Test;
@@ -40,15 +41,18 @@ class PartnerOperationsServiceAdditionalTest {
     private final PartnerLeaveRepository leaveRepository = mock(PartnerLeaveRepository.class);
     private final PartnerServiceAreaRepository serviceAreaRepository = mock(PartnerServiceAreaRepository.class);
     private final PartnerPenaltyRepository penaltyRepository = mock(PartnerPenaltyRepository.class);
+    private final PartnerWarningCommentRepository warningCommentRepository = mock(PartnerWarningCommentRepository.class);
     private final PartnerOrderRepository orderRepository = mock(PartnerOrderRepository.class);
     private final PartnerProfileRepository profileRepository = mock(PartnerProfileRepository.class);
     private final PartnerShiftRepository shiftRepository = mock(PartnerShiftRepository.class);
     private final ReviewRepository reviewRepository = mock(ReviewRepository.class);
     private final AuditLogService auditLogService = mock(AuditLogService.class);
     private final NotificationManagementService notificationManagementService = mock(NotificationManagementService.class);
+    private final PartnerWarningRealtimeService partnerWarningRealtimeService = mock(PartnerWarningRealtimeService.class);
     private final PartnerOperationsService service = new PartnerOperationsService(
-            leaveRepository, serviceAreaRepository, penaltyRepository, orderRepository,
-            profileRepository, shiftRepository, reviewRepository, auditLogService, notificationManagementService);
+            leaveRepository, serviceAreaRepository, penaltyRepository, warningCommentRepository, orderRepository,
+            profileRepository, shiftRepository, reviewRepository, auditLogService, notificationManagementService,
+            partnerWarningRealtimeService);
 
     @Test
     void createLeaveShouldValidateDatesAndMarkPartnerOffline() {

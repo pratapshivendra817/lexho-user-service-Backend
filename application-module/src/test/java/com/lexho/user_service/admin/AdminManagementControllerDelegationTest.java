@@ -10,6 +10,7 @@ import com.lexho.user_service.admin.dto.AdminSupportFaqCategoryUpsertRequest;
 import com.lexho.user_service.admin.dto.AdminSupportFaqUpsertRequest;
 import com.lexho.user_service.admin.dto.AdminSupportTicketReplyRequest;
 import com.lexho.user_service.admin.dto.AdminSupportTicketStatusRequest;
+import com.lexho.user_service.admin.service.AdminActivityFeedService;
 import com.lexho.user_service.admin.service.AdminCatalogService;
 import com.lexho.user_service.admin.service.AdminFileUploadService;
 import com.lexho.user_service.admin.service.AdminManagementService;
@@ -24,6 +25,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -49,6 +52,8 @@ class AdminManagementControllerDelegationTest {
     private AdminSupportFaqService faqService;
     @Mock
     private ApiRateLimiterService rateLimiterService;
+    @Mock
+    private AdminActivityFeedService adminActivityFeedService;
 
     private AdminManagementController controller;
 
@@ -61,6 +66,7 @@ class AdminManagementControllerDelegationTest {
                 bannerService,
                 faqService,
                 rateLimiterService);
+        ReflectionTestUtils.setField(controller, "adminActivityFeedService", adminActivityFeedService);
     }
 
     @Test
@@ -148,9 +154,13 @@ class AdminManagementControllerDelegationTest {
         controller.payouts(2, 50, "partner", "PENDING");
         controller.activityLogs(3, 20, "login");
         controller.supportTickets(1, 25, "refund", "OPEN", "PAYMENT", "HIGH");
+        controller.customerSupportTickets(1, 25, "refund", "OPEN", "PAYMENT", "HIGH");
+        controller.partnerSupportTickets(1, 25, "payout", "OPEN", "PAYOUT", "HIGH");
         controller.supportTicketDetail(77L);
+        controller.supportTicketStream(77L);
         controller.supportTicketStatus(77L, statusRequest);
         controller.supportTicketReply(77L, replyRequest);
+        controller.inboxActivity(2, 15);
 
         verify(rateLimiterService).check(
                 "admin_payouts",
@@ -161,9 +171,13 @@ class AdminManagementControllerDelegationTest {
         verify(managementService).payouts(2, 50, "partner", "PENDING");
         verify(managementService).activityLogs(3, 20, "login");
         verify(managementService).supportTickets(1, 25, "refund", "OPEN", "PAYMENT", "HIGH");
+        verify(managementService).customerSupportTickets(1, 25, "refund", "OPEN", "PAYMENT", "HIGH");
+        verify(managementService).partnerSupportTickets(1, 25, "payout", "OPEN", "PAYOUT", "HIGH");
         verify(managementService).supportTicketDetail(77L);
+        verify(managementService).supportTicketStream(77L);
         verify(managementService).updateSupportTicketStatus(77L, "RESOLVED");
         verify(managementService).replySupportTicket(77L, "Completed");
+        verify(adminActivityFeedService).activity(2, 15);
     }
 
     @Test

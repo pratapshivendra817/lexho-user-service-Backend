@@ -23,6 +23,7 @@ import com.lexho.user_service.cartconfig.service.CartConfigService;
 import com.lexho.user_service.customer.location.dto.ReverseGeocodeResponse;
 import com.lexho.user_service.customer.location.dto.ServiceabilityCheckResponse;
 import com.lexho.user_service.customer.location.service.ServiceabilityService;
+import com.lexho.user_service.customer.service.CustomerActivityFeedService;
 import com.lexho.user_service.customer.service.CustomerCartSlotService;
 import com.lexho.user_service.customer.service.SlotDateTimePolicy;
 import com.lexho.user_service.dispatch.repository.BookingEventRepository;
@@ -41,6 +42,7 @@ import com.lexho.user_service.lexho.entity.LexhoReferralCode;
 import com.lexho.user_service.lexho.service.LexhoAddressService;
 import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import com.lexho.user_service.notification.dto.NotificationPageResponse;
 import com.lexho.user_service.notification.dto.NotificationResponse;
 import com.lexho.notification.enums.NotificationStatus;
@@ -53,6 +55,7 @@ import com.lexho.user_service.service.OrderService;
 import com.lexho.user_service.subscription.repository.SubscriptionFrequencyRepository;
 import com.lexho.user_service.subscription.repository.SubscriptionMasterRepository;
 import com.lexho.user_service.subscription.repository.SubscriptionVisitRepository;
+import com.lexho.user_service.support.service.SupportRealtimeService;
 import com.lexho.user_service.util.MediaUrlResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,6 +73,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -108,6 +112,9 @@ class LexhoExperienceControllerMockMvcTest {
     private SupportFaqRepository supportFaqRepository;
     private CustomerCartSlotService customerCartSlotService;
     private MediaUrlResolver mediaUrlResolver;
+    private SupportRealtimeService supportRealtimeService;
+    private NotificationRealtimeService notificationRealtimeService;
+    private CustomerActivityFeedService customerActivityFeedService;
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -142,6 +149,9 @@ class LexhoExperienceControllerMockMvcTest {
         supportFaqRepository = mock(SupportFaqRepository.class);
         customerCartSlotService = mock(CustomerCartSlotService.class);
         mediaUrlResolver = mock(MediaUrlResolver.class);
+        supportRealtimeService = new SupportRealtimeService();
+        notificationRealtimeService = mock(NotificationRealtimeService.class);
+        customerActivityFeedService = mock(CustomerActivityFeedService.class);
 
         ServiceabilityCheckResponse serviceable = mock(ServiceabilityCheckResponse.class);
         when(serviceable.isServiceable()).thenReturn(true);
@@ -181,6 +191,9 @@ class LexhoExperienceControllerMockMvcTest {
                 currentPartnerLocationRepository,
                 bookingEventRepository
         );
+        ReflectionTestUtils.setField(controller, "supportRealtimeService", supportRealtimeService);
+        ReflectionTestUtils.setField(controller, "notificationRealtimeService", notificationRealtimeService);
+        ReflectionTestUtils.setField(controller, "customerActivityFeedService", customerActivityFeedService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -301,7 +314,10 @@ class LexhoExperienceControllerMockMvcTest {
         Order order = new Order();
         order.setId(11L);
         order.setUserId(7L);
+        order.setAssignedPartnerId(7L);
         when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+        when(currentPartnerLocationRepository.findByPartnerIdAndDeletedFalse(7L)).thenReturn(Optional.empty());
+        when(currentPartnerLocationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         mockMvc.perform(get("/api/bookings/history").requestAttr("userId", 7L)
                         .param("page", "-1").param("size", "500"))
@@ -315,8 +331,44 @@ class LexhoExperienceControllerMockMvcTest {
         mockMvc.perform(get("/api/partner/live-location/11").requestAttr("userId", 7L))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.eta").value("N/A"));
         mockMvc.perform(put("/api/partner/update-location")
+                        .requestAttr("userId", 7L)
                         .param("bookingId", "11").param("latitude", "28.6").param("longitude", "77.2"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.bookingId").value(11));
+
+        verify(currentPartnerLocationRepository).save(argThat(location ->
+                location.getPartnerId().equals(7L)
+                        && location.getLatitude().compareTo(new BigDecimal("28.6")) == 0
+                        && location.getLongitude().compareTo(new BigDecimal("77.2")) == 0
+                        && location.getLocationSeq() == 1L));
+    }
+
+    @Test
+    void updateLocationShouldRejectForeignPartnerAndInvalidCoordinates() throws Exception {
+        Order foreignOrder = new Order();
+        foreignOrder.setId(12L);
+        foreignOrder.setAssignedPartnerId(99L);
+        when(orderRepository.findById(12L)).thenReturn(Optional.of(foreignOrder));
+
+        assertThrows(jakarta.servlet.ServletException.class, () ->
+                mockMvc.perform(put("/api/partner/update-location")
+                        .requestAttr("userId", 7L)
+                        .param("bookingId", "12")
+                        .param("latitude", "28.6")
+                        .param("longitude", "77.2")));
+
+        Order ownOrder = new Order();
+        ownOrder.setId(13L);
+        ownOrder.setAssignedPartnerId(7L);
+        when(orderRepository.findById(13L)).thenReturn(Optional.of(ownOrder));
+
+        assertThrows(jakarta.servlet.ServletException.class, () ->
+                mockMvc.perform(put("/api/partner/update-location")
+                        .requestAttr("userId", 7L)
+                        .param("bookingId", "13")
+                        .param("latitude", "120")
+                        .param("longitude", "77.2")));
+
+        verify(currentPartnerLocationRepository, never()).save(any());
     }
 
     @Test
@@ -607,6 +659,18 @@ class LexhoExperienceControllerMockMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.allowed").value(true))
                 .andExpect(jsonPath("$.data.scheduledAt").exists());
+
+        mockMvc.perform(put("/api/bookings/reschedule/26")
+                        .requestAttr("userId", 7L)
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/bookings/26/reschedule")
+                        .requestAttr("userId", 7L)
+                        .contentType("application/json")
+                        .content("{\"date\":\"2026-06-21\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -709,6 +773,7 @@ class LexhoExperienceControllerMockMvcTest {
         when(supportTicketRepository.findByUserIdAndId(7L, 44L)).thenReturn(Optional.of(ticket));
         SupportTicketReply reply = new SupportTicketReply();
         reply.setMessage("We are on it");
+        reply.setSenderType("SUPPORT");
         ReflectionTestUtils.setField(reply, "createdAt", LocalDateTime.of(2026, 6, 20, 11, 0));
         when(supportTicketReplyRepository.findByTicket_IdOrderByCreatedAtAsc(44L)).thenReturn(List.of(reply));
 
@@ -749,5 +814,112 @@ class LexhoExperienceControllerMockMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.messages", hasSize(2)));
 
+    }
+
+    @Test
+    void supportReplyStatusAndBookingValidationShouldWork() throws Exception {
+        Order order = new Order();
+        order.setId(55L);
+        order.setUserId(7L);
+        when(orderRepository.findById(55L)).thenReturn(Optional.of(order));
+
+        SupportTicket ticket = new SupportTicket();
+        ReflectionTestUtils.setField(ticket, "id", 44L);
+        ticket.setUserId(7L);
+        ticket.setSubject("Help");
+        ticket.setMessage("Need support");
+        ticket.setStatus("RESOLVED");
+        ticket.setBookingId("55");
+        ticket.setPriority("MEDIUM");
+        ticket.setAttachmentUrls("[\"https://cdn.lexho.test/ticket.png\"]");
+        ReflectionTestUtils.setField(ticket, "createdAt", LocalDateTime.of(2026, 7, 20, 10, 0));
+        ReflectionTestUtils.setField(ticket, "updatedAt", LocalDateTime.of(2026, 7, 20, 10, 5));
+
+        when(supportTicketRepository.save(any(SupportTicket.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(supportTicketRepository.findByUserIdAndId(7L, 44L)).thenReturn(Optional.of(ticket));
+        when(supportTicketRepository.findByUserIdOrderByCreatedAtDesc(eq(7L), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(ticket)));
+        when(supportTicketReplyRepository.save(any(SupportTicketReply.class))).thenAnswer(invocation -> {
+            SupportTicketReply saved = invocation.getArgument(0);
+            ReflectionTestUtils.setField(saved, "createdAt", LocalDateTime.of(2026, 7, 20, 10, 7));
+            return saved;
+        });
+
+        mockMvc.perform(post("/api/support/create").requestAttr("userId", 7L)
+                        .contentType("application/json")
+                        .content("""
+                                {"subject":"Booking issue","message":"Need invoice","bookingId":"55","attachmentUrls":["https://cdn.lexho.test/a.png"]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.bookingId").value("55"))
+                .andExpect(jsonPath("$.data.attachmentUrls", hasSize(1)));
+
+        mockMvc.perform(post("/api/support/tickets/TCK-10044/reply").requestAttr("userId", 7L)
+                        .contentType("application/json")
+                        .content("""
+                                {"message":"Here is the screenshot","attachmentUrls":["https://cdn.lexho.test/reply.png"]}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("OPEN"))
+                .andExpect(jsonPath("$.data.message.sender").value("CUSTOMER"))
+                .andExpect(jsonPath("$.data.message.attachmentUrls", hasSize(1)));
+
+        mockMvc.perform(patch("/api/support/tickets/TCK-10044/status").requestAttr("userId", 7L)
+                        .contentType("application/json")
+                        .content("{\"status\":\"CLOSED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CLOSED"));
+
+        mockMvc.perform(patch("/api/support/tickets/TCK-10044/status").requestAttr("userId", 7L)
+                        .contentType("application/json")
+                        .content("{\"status\":\"OPEN\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("OPEN"));
+    }
+
+    @Test
+    void supportTicketStreamShouldOpenForOwnedTicket() throws Exception {
+        SupportTicket ticket = new SupportTicket();
+        ReflectionTestUtils.setField(ticket, "id", 44L);
+        ticket.setUserId(7L);
+        when(supportTicketRepository.findByUserIdAndId(7L, 44L)).thenReturn(Optional.of(ticket));
+
+        mockMvc.perform(get("/api/support/tickets/TCK-10044/stream").requestAttr("userId", 7L))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void customerNotificationStreamAndActivityFeedShouldDelegate() throws Exception {
+        when(notificationRealtimeService.subscribe(7L)).thenReturn(new org.springframework.web.servlet.mvc.method.annotation.SseEmitter());
+        when(customerActivityFeedService.activity(7L, 2, 5)).thenReturn(java.util.Map.of(
+                "data", java.util.List.of(java.util.Map.of("type", "NOTIFICATION", "id", "1")),
+                "meta", java.util.Map.of("page", 2, "limit", 5, "total", 1, "totalPages", 1)
+        ));
+
+        mockMvc.perform(get("/api/customer/notifications/stream").requestAttr("userId", 7L))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/customer/inbox/activity").requestAttr("userId", 7L)
+                        .param("page", "2").param("limit", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data[0].type").value("NOTIFICATION"))
+                .andExpect(jsonPath("$.meta.page").value(2));
+    }
+
+    @Test
+    void supportCreateShouldRejectForeignBooking() throws Exception {
+        Order order = new Order();
+        order.setId(99L);
+        order.setUserId(8L);
+        when(orderRepository.findById(99L)).thenReturn(Optional.of(order));
+
+        assertThrows(jakarta.servlet.ServletException.class, () ->
+                mockMvc.perform(post("/api/support/create").requestAttr("userId", 7L)
+                                .contentType("application/json")
+                                .content("""
+                                        {"subject":"Booking issue","message":"Need help","bookingId":"99"}
+                                        """))
+        );
     }
 }

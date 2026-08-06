@@ -11,6 +11,7 @@ import com.lexho.user_service.lexhopartner.entity.PartnerLeave;
 import com.lexho.user_service.lexhopartner.entity.PartnerPenalty;
 import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
 import com.lexho.user_service.lexhopartner.entity.PartnerServiceArea;
+import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
@@ -45,23 +46,27 @@ class PartnerOperationsServiceTest {
     private final PartnerLeaveRepository leaveRepository = mock(PartnerLeaveRepository.class);
     private final PartnerServiceAreaRepository serviceAreaRepository = mock(PartnerServiceAreaRepository.class);
     private final PartnerPenaltyRepository penaltyRepository = mock(PartnerPenaltyRepository.class);
+    private final PartnerWarningCommentRepository warningCommentRepository = mock(PartnerWarningCommentRepository.class);
     private final PartnerOrderRepository orderRepository = mock(PartnerOrderRepository.class);
     private final PartnerProfileRepository profileRepository = mock(PartnerProfileRepository.class);
     private final PartnerShiftRepository shiftRepository = mock(PartnerShiftRepository.class);
     private final ReviewRepository reviewRepository = mock(ReviewRepository.class);
     private final AuditLogService auditLogService = mock(AuditLogService.class);
     private final NotificationManagementService notificationManagementService = mock(NotificationManagementService.class);
+    private final PartnerWarningRealtimeService partnerWarningRealtimeService = mock(PartnerWarningRealtimeService.class);
 
     private final PartnerOperationsService service = new PartnerOperationsService(
             leaveRepository,
             serviceAreaRepository,
             penaltyRepository,
+            warningCommentRepository,
             orderRepository,
             profileRepository,
             shiftRepository,
             reviewRepository,
             auditLogService,
-            notificationManagementService
+            notificationManagementService,
+            partnerWarningRealtimeService
     );
 
     @Test
@@ -232,6 +237,7 @@ class PartnerOperationsServiceTest {
         suspension.setStatus("SUSPENSION");
         suspension.setCreatedAt(LocalDateTime.of(2026, 6, 19, 9, 0));
         when(penaltyRepository.findByPartnerIdOrderByCreatedAtDesc(10L)).thenReturn(List.of(warning, suspension));
+        when(warningCommentRepository.findByWarning_IdOrderByCreatedAtAsc(91L)).thenReturn(List.of());
         when(penaltyRepository.save(any(PartnerPenalty.class))).thenAnswer(invocation -> {
             PartnerPenalty saved = invocation.getArgument(0);
             ReflectionTestUtils.setField(saved, "id", 92L);
@@ -268,6 +274,46 @@ class PartnerOperationsServiceTest {
         assertEquals("WARNING", warning.get("redirectType"));
         verify(auditLogService).log(99L, "ADMIN", "WARNING_CREATED", "PARTNER", "10", null, "WARNING");
         verify(notificationManagementService, never()).createPartnerWarningNotification(any(), any(), any());
+    }
+
+    @Test
+    void warningDetailAcknowledgeAndDisputeShouldPersistMetadata() {
+        PartnerPenalty warning = new PartnerPenalty();
+        ReflectionTestUtils.setField(warning, "id", 94L);
+        warning.setPartnerId(10L);
+        warning.setStatus("WARNING");
+        warning.setReason("document mismatch");
+        warning.setCreatedAt(LocalDateTime.of(2026, 6, 22, 9, 0));
+        when(penaltyRepository.findByIdAndPartnerId(94L, 10L)).thenReturn(Optional.of(warning));
+        when(penaltyRepository.save(any(PartnerPenalty.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(warningCommentRepository.findByWarning_IdOrderByCreatedAtAsc(94L)).thenReturn(List.of());
+
+        Map<String, Object> detail = service.warningDetail(10L, 94L);
+        Map<String, Object> acknowledged = service.acknowledgeWarning(10L, 94L);
+        Map<String, Object> disputed = service.disputeWarning(10L, 94L,
+                "I have already submitted corrected documents",
+                List.of("https://cdn.lexho.test/evidence.jpg"));
+
+        assertEquals(94L, detail.get("warningId"));
+        assertEquals(Boolean.TRUE, acknowledged.get("acknowledged"));
+        assertEquals("OPEN", disputed.get("disputeStatus"));
+        assertEquals("I have already submitted corrected documents", disputed.get("disputeReason"));
+        verify(warningCommentRepository).save(any());
+        verify(auditLogService).log(10L, "PARTNER", "WARNING_DISPUTED", "PARTNER_WARNING", "94", null, "OPEN");
+        verify(partnerWarningRealtimeService, org.mockito.Mockito.atLeastOnce()).publish(eq(10L), eq(94L), any(), any(Map.class));
+    }
+
+    @Test
+    void disputeShouldRejectSecondActiveSubmission() {
+        PartnerPenalty warning = new PartnerPenalty();
+        ReflectionTestUtils.setField(warning, "id", 95L);
+        warning.setPartnerId(10L);
+        warning.setStatus("WARNING");
+        warning.setDisputeStatus("OPEN");
+        when(penaltyRepository.findByIdAndPartnerId(95L, 10L)).thenReturn(Optional.of(warning));
+
+        assertThrows(BadRequestException.class, () ->
+                service.disputeWarning(10L, 95L, "Please review again", List.of()));
     }
 
     @Test

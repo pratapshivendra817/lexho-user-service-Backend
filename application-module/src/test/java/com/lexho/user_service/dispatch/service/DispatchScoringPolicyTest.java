@@ -1,6 +1,7 @@
 package com.lexho.user_service.dispatch.service;
 
 import com.lexho.provider.entity.Partner;
+import com.lexho.user_service.config.DispatchProperties;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import org.junit.jupiter.api.Test;
 
@@ -11,13 +12,13 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DispatchScoringPolicyTest {
-    private final DispatchScoringPolicy policy = new DispatchScoringPolicy(10, 0.45, 0.25, 0.15, 0.15);
+    private final DispatchScoringPolicy policy = new DispatchScoringPolicy(dispatchProperties(10), 0.45, 0.25, 0.15, 0.15);
 
     @Test
     void checksDispatchRadiusIncludingUnknownDistance() {
-        assertTrue(policy.isWithinDispatchRadius(null));
-        assertTrue(policy.isWithinDispatchRadius(BigDecimal.TEN));
-        assertFalse(policy.isWithinDispatchRadius(BigDecimal.valueOf(10.01)));
+        assertFalse(policy.isWithinDispatchRadius(null, 10));
+        assertTrue(policy.isWithinDispatchRadius(BigDecimal.TEN, 10));
+        assertFalse(policy.isWithinDispatchRadius(BigDecimal.valueOf(10.01), 10));
         assertEquals(10.0, policy.getDispatchRadiusKm());
     }
 
@@ -45,5 +46,12 @@ class DispatchScoringPolicyTest {
         shift.setCurrentPincode(pincode); shift.setActiveJobsCount(jobs); shift.setMaxActiveJobs(maxJobs);
         Partner partner = new Partner(); partner.setRating(rating);
         return new DispatchOrchestrationService.Candidate(shift, partner, distance, 10);
+    }
+
+    private static DispatchProperties dispatchProperties(double maxRadiusKm) {
+        DispatchProperties properties = new DispatchProperties();
+        properties.getPartner().setMaxSearchRadiusKm(maxRadiusKm);
+        properties.getPartner().setInitialSearchRadiusKm(Math.min(1.0d, maxRadiusKm));
+        return properties;
     }
 }

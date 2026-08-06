@@ -43,7 +43,7 @@ class RefreshTokenTest {
         assertNotEquals(first, "other");
         assertEquals(first, second);
         assertEquals(first.hashCode(), second.hashCode());
-        assertEquals("RefreshToken{id=1, userId=10, token='token', role='ADMIN', expiresAt="
+        assertEquals("RefreshToken{id=1, userId=10, token='[REDACTED]', role='ADMIN', expiresAt="
                 + first.getExpiresAt() + ", revoked=false, createdAt=" + first.getCreatedAt() + "}", first.toString());
 
         second.setRevoked(true);

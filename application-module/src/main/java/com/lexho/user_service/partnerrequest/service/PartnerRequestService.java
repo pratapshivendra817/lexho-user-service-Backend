@@ -22,6 +22,7 @@ import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.model.PartnerServiceRequestStatus;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
+import com.lexho.user_service.subscription.service.SubscriptionAutoDispatchService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -40,17 +41,20 @@ public class PartnerRequestService {
     private final DispatchOrchestrationService dispatchOrchestrationService;
     private final OrderRepository orderRepository;
     private final PartnerLeaveRepository partnerLeaveRepository;
+    private final SubscriptionAutoDispatchService subscriptionAutoDispatchService;
 
     public PartnerRequestService(PartnerRepository partnerRepository,
                                  PartnerServiceRequestRepository partnerServiceRequestRepository,
                                  DispatchOrchestrationService dispatchOrchestrationService,
                                  OrderRepository orderRepository,
-                                 PartnerLeaveRepository partnerLeaveRepository) {
+                                 PartnerLeaveRepository partnerLeaveRepository,
+                                 SubscriptionAutoDispatchService subscriptionAutoDispatchService) {
         this.partnerRepository = partnerRepository;
         this.partnerServiceRequestRepository = partnerServiceRequestRepository;
         this.dispatchOrchestrationService = dispatchOrchestrationService;
         this.orderRepository = orderRepository;
         this.partnerLeaveRepository = partnerLeaveRepository;
+        this.subscriptionAutoDispatchService = subscriptionAutoDispatchService;
     }
 
     @Transactional
@@ -102,10 +106,19 @@ public class PartnerRequestService {
             request.setStatus(PartnerServiceRequestStatus.EXPIRED);
             request.setRejectionReason("REQUEST_EXPIRED");
             partnerServiceRequestRepository.save(request);
+            maybeContinueRequestDispatch(request);
             throw new InstantBookingUnavailableException(
                     InstantUnavailableCode.SLOT_EXPIRED.name(),
                     "Request expired. Please wait for the next dispatch."
             );
+        }
+
+        if (isSubscriptionRequest(request)) {
+            request.setStatus(PartnerServiceRequestStatus.ACCEPTED);
+            partnerServiceRequestRepository.save(request);
+            rejectPeerSubscriptionRequests(request);
+            subscriptionAutoDispatchService.markPartnerAccepted(request.getSubscriptionId(), request.getSubscriptionVisitId(), partnerId);
+            return actionResponse(request);
         }
 
         Order order = orderRepository.findByIdForUpdate(request.getCartId())
@@ -120,11 +133,11 @@ public class PartnerRequestService {
         int etaAtAccept = request.getEtaMinutes() == null
                 ? dispatchOrchestrationService.estimateEtaMinutes(request.getDistanceKm())
                 : request.getEtaMinutes();
-        if (instant && etaAtAccept > DispatchOrchestrationService.INSTANT_SLA_MINUTES) {
+        if (instant && etaAtAccept > dispatchOrchestrationService.maxEtaMinutes()) {
             request.setStatus(PartnerServiceRequestStatus.REJECTED);
             request.setRejectionReason(InstantUnavailableCode.NO_PARTNER_IN_30_MIN.name());
             partnerServiceRequestRepository.save(request);
-            maybeMarkInstantFailed(order.getId());
+            maybeContinueDispatch(order.getId());
             throw new InstantBookingUnavailableException(
                     InstantUnavailableCode.NO_PARTNER_IN_30_MIN.name(),
                     "No partner available right now. Please book a scheduled slot."
@@ -157,8 +170,12 @@ public class PartnerRequestService {
         request.setStatus(PartnerServiceRequestStatus.REJECTED);
         request.setRejectionReason(rejectRequest == null ? null : rejectRequest.getReason());
         partnerServiceRequestRepository.save(request);
+        if (isSubscriptionRequest(request)) {
+            maybeContinueRequestDispatch(request);
+            return actionResponse(request);
+        }
         dispatchOrchestrationService.markPartnerRejected(request.getCartId(), partnerId);
-        maybeMarkInstantFailed(request.getCartId());
+        maybeContinueDispatch(request.getCartId());
         return actionResponse(request);
     }
 
@@ -207,6 +224,7 @@ public class PartnerRequestService {
             request.setRejectionReason("REQUEST_EXPIRED");
         }
         partnerServiceRequestRepository.saveAll(expired);
+        expired.forEach(this::maybeContinueRequestDispatch);
         return expired.size();
     }
 
@@ -216,7 +234,9 @@ public class PartnerRequestService {
                 && LocalDateTime.now().isAfter(request.getExpiresAt())) {
             request.setStatus(PartnerServiceRequestStatus.EXPIRED);
             request.setRejectionReason("REQUEST_EXPIRED");
-            return partnerServiceRequestRepository.save(request);
+            PartnerServiceRequestEntity saved = partnerServiceRequestRepository.save(request);
+            maybeContinueRequestDispatch(saved);
+            return saved;
         }
         return request;
     }
@@ -225,6 +245,8 @@ public class PartnerRequestService {
         PartnerIncomingRequestResponse response = new PartnerIncomingRequestResponse();
         response.setRequestId(request.getId());
         response.setCartId(request.getCartId());
+        response.setSubscriptionId(request.getSubscriptionId());
+        response.setSubscriptionVisitId(request.getSubscriptionVisitId());
         response.setCustomerId(request.getCustomerId());
         response.setServiceId(request.getServiceId());
         response.setServiceType(request.getServiceType());
@@ -258,5 +280,54 @@ public class PartnerRequestService {
             dispatchOrchestrationService.saveEvent(orderId, "INSTANT_FAILED",
                     java.util.Map.of("reason", InstantUnavailableCode.INSTANT_UNAVAILABLE.name()));
         }
+    }
+
+    private void maybeContinueDispatch(Long orderId) {
+        Order order = orderRepository.findByIdForUpdate(orderId).orElse(null);
+        if (order == null) {
+            return;
+        }
+        long pendingCount = partnerServiceRequestRepository.countByCartIdAndStatus(orderId, PartnerServiceRequestStatus.PENDING);
+        long acceptedCount = partnerServiceRequestRepository.countByCartIdAndStatus(orderId, PartnerServiceRequestStatus.ACCEPTED);
+        if (pendingCount > 0 || acceptedCount > 0) {
+            return;
+        }
+        int created = dispatchOrchestrationService.retryDispatch(orderId);
+        if (created <= 0) {
+            maybeMarkInstantFailed(orderId);
+        }
+    }
+
+    private boolean isSubscriptionRequest(PartnerServiceRequestEntity request) {
+        return request.getSubscriptionId() != null && request.getSubscriptionVisitId() != null;
+    }
+
+    private void rejectPeerSubscriptionRequests(PartnerServiceRequestEntity request) {
+        List<PartnerServiceRequestEntity> peers = partnerServiceRequestRepository
+                .findBySubscriptionVisitIdAndStatus(request.getSubscriptionVisitId(), PartnerServiceRequestStatus.PENDING);
+        for (PartnerServiceRequestEntity peer : peers) {
+            if (!peer.getId().equals(request.getId())) {
+                peer.setStatus(PartnerServiceRequestStatus.REJECTED);
+                peer.setRejectionReason("Accepted by another partner");
+            }
+        }
+        partnerServiceRequestRepository.saveAll(peers);
+    }
+
+    private void maybeContinueRequestDispatch(PartnerServiceRequestEntity request) {
+        if (isSubscriptionRequest(request)) {
+            maybeContinueSubscriptionDispatch(request.getSubscriptionId(), request.getSubscriptionVisitId());
+            return;
+        }
+        maybeContinueDispatch(request.getCartId());
+    }
+
+    private void maybeContinueSubscriptionDispatch(Long subscriptionId, Long visitId) {
+        long pendingCount = partnerServiceRequestRepository.countBySubscriptionVisitIdAndStatus(visitId, PartnerServiceRequestStatus.PENDING);
+        long acceptedCount = partnerServiceRequestRepository.countBySubscriptionVisitIdAndStatus(visitId, PartnerServiceRequestStatus.ACCEPTED);
+        if (pendingCount > 0 || acceptedCount > 0) {
+            return;
+        }
+        subscriptionAutoDispatchService.retryDispatch(subscriptionId, visitId);
     }
 }

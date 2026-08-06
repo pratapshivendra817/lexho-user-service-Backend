@@ -2,6 +2,7 @@ package com.lexho.user_service.admin.controller;
 
 import com.lexho.user_service.admin.dto.*;
 import com.lexho.user_service.admin.service.AdminCatalogService;
+import com.lexho.user_service.admin.service.AdminActivityFeedService;
 import com.lexho.user_service.admin.service.AdminFileUploadService;
 import com.lexho.user_service.admin.service.AdminManagementService;
 import com.lexho.user_service.admin.service.AdminSupportFaqService;
@@ -10,12 +11,14 @@ import com.lexho.user_service.customer.banner.dto.AdminCustomerBannerUpsertReque
 import com.lexho.user_service.customer.banner.service.AdminCustomerBannerService;
 import com.lexho.user_service.service.ApiRateLimiterService;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
 import java.util.Map;
@@ -31,6 +34,9 @@ public class AdminManagementController {
     private final AdminCustomerBannerService adminCustomerBannerService;
     private final AdminSupportFaqService adminSupportFaqService;
     private final ApiRateLimiterService apiRateLimiterService;
+
+    @Autowired(required = false)
+    private AdminActivityFeedService adminActivityFeedService;
 
     public AdminManagementController(AdminManagementService adminManagementService,
                                      AdminCatalogService adminCatalogService,
@@ -223,9 +229,34 @@ public class AdminManagementController {
         return adminManagementService.supportTickets(page, limit, search, status, categoryId, priority);
     }
 
+    @GetMapping("/support/customer/tickets")
+    public PagedDataResponse<Map<String, Object>> customerSupportTickets(@RequestParam(defaultValue = "1") int page,
+                                                                         @RequestParam(defaultValue = "10") int limit,
+                                                                         @RequestParam(required = false) String search,
+                                                                         @RequestParam(required = false) String status,
+                                                                         @RequestParam(required = false) String categoryId,
+                                                                         @RequestParam(required = false) String priority) {
+        return adminManagementService.customerSupportTickets(page, limit, search, status, categoryId, priority);
+    }
+
+    @GetMapping("/support/partner/tickets")
+    public PagedDataResponse<Map<String, Object>> partnerSupportTickets(@RequestParam(defaultValue = "1") int page,
+                                                                        @RequestParam(defaultValue = "10") int limit,
+                                                                        @RequestParam(required = false) String search,
+                                                                        @RequestParam(required = false) String status,
+                                                                        @RequestParam(required = false) String categoryId,
+                                                                        @RequestParam(required = false) String priority) {
+        return adminManagementService.partnerSupportTickets(page, limit, search, status, categoryId, priority);
+    }
+
     @GetMapping("/support/tickets/{id}")
     public DataResponse<Map<String, Object>> supportTicketDetail(@PathVariable Long id) {
         return adminManagementService.supportTicketDetail(id);
+    }
+
+    @GetMapping("/support/tickets/{id}/stream")
+    public SseEmitter supportTicketStream(@PathVariable Long id) {
+        return adminManagementService.supportTicketStream(id);
     }
 
     @PatchMapping("/support/tickets/{id}/status")
@@ -238,6 +269,23 @@ public class AdminManagementController {
     public DataResponse<Map<String, Object>> supportTicketReply(@PathVariable Long id,
                                                                  @Valid @RequestBody AdminSupportTicketReplyRequest request) {
         return adminManagementService.replySupportTicket(id, request.getMessage());
+    }
+
+    @GetMapping("/inbox/activity")
+    public DataResponse<Map<String, Object>> inboxActivity(@RequestParam(defaultValue = "1") int page,
+                                                           @RequestParam(defaultValue = "20") int limit) {
+        if (adminActivityFeedService == null) {
+            return new DataResponse<>(Map.of(
+                    "data", java.util.List.of(),
+                    "meta", Map.of(
+                            "page", Math.max(page, 1),
+                            "limit", Math.min(Math.max(limit, 1), 100),
+                            "total", 0,
+                            "hasMore", false
+                    )
+            ));
+        }
+        return new DataResponse<>(adminActivityFeedService.activity(page, limit));
     }
 
     @GetMapping("/support/faq-categories")

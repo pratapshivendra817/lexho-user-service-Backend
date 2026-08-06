@@ -1,5 +1,6 @@
 package com.lexho.auth.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.Objects;
@@ -9,7 +10,7 @@ public class IssueTokenRequest {
     @NotNull
     private Long userId;
 
-    @NotNull
+    @NotBlank
     private String role;
 
     public Long getUserId() {

@@ -12,6 +12,8 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
@@ -59,7 +61,10 @@ class BannerPromotionRepositoryIntegrationTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @EntityScan(basePackageClasses = BannerPromotion.class)
-    @EnableJpaRepositories(basePackageClasses = BannerPromotionRepository.class)
+    @EnableJpaRepositories(
+            basePackageClasses = BannerPromotionRepository.class,
+            includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = BannerPromotionRepository.class)
+    )
     static class JpaTestConfig {
     }
 }
