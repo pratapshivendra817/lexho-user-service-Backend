@@ -20,11 +20,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x ./mvnw
 
       - name: Run Maven static-analysis gate
         run: ./mvnw -B -ntp verify -DskipTests
@@ -47,11 +50,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x ./mvnw
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -89,6 +95,7 @@ jobs:
 
       - name: Upload Semgrep SARIF
         if: always()
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
@@ -123,11 +130,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x ./mvnw
 
       - name: Cache Dependency-Check data
         uses: actions/cache@v4
@@ -163,7 +173,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -175,6 +185,7 @@ jobs:
 
       - name: Upload Trivy SARIF
         if: always()
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
