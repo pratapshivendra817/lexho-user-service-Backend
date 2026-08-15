@@ -124,6 +124,7 @@ jobs:
   owasp-dependency-check:
     name: OWASP Dependency-Check SCA
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -172,10 +173,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x ./mvnw
+
+      - name: Preload Maven dependency cache
+        run: ./mvnw -B -ntp -DskipTests dependency:go-offline
+
       - name: Run Trivy filesystem scan
         run: >
           docker run --rm
           -v "$PWD:/work"
+          -v "$HOME/.m2:/root/.m2:ro"
           -w /work
           aquasec/trivy:latest
           fs .

@@ -78,6 +78,19 @@ Artifacts uploaded by the workflow:
 - OWASP Dependency-Check HTML/JSON reports
 - Trivy SARIF
 
+## GitHub Actions Run Notes
+
+Manual workflow dispatch was triggered after adding the workflow.
+
+Observed CI status:
+
+- `PASS`: Semgrep SAST completed successfully and uploaded SARIF/artifacts.
+- `BLOCKED`: Maven Checkstyle/SpotBugs and CodeQL build jobs failed because the remote branch did not yet contain all source files present in the local workspace. The failed remote compile reported missing application classes including `DispatchProperties`, partner warning comment DTO/entity/repository/service classes, activity feed services, and notification realtime service.
+- `BLOCKED`: Trivy initially reached the scanner but failed when Maven Central returned `429 Too Many Requests` while resolving Maven POM metadata. The workflow was updated to preload the Maven dependency cache and mount it into the Trivy container.
+- `BLOCKED`: OWASP Dependency-Check exceeded the practical run window during CVE database initialization/update and was cancelled after the overall run had already failed.
+
+Next requirement for final hosted evidence: commit and push the pending backend source changes that make the remote branch match the locally buildable workspace, then rerun `Security SAST and SCA`.
+
 ## Local SCA Note
 
 OWASP Dependency-Check was attempted locally with:
