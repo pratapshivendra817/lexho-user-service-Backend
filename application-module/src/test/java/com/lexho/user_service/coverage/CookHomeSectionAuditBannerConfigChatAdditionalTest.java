@@ -270,6 +270,7 @@ class CookHomeSectionAuditBannerConfigChatAdditionalTest {
 
     @SuppressWarnings("unused")
     private static void validationTarget() {
+        // Intentionally empty: MethodParameter needs a concrete method target for validation exception construction.
     }
 
     @Test

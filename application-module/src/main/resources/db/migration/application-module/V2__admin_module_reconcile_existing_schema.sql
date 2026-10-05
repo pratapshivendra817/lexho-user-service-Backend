@@ -1,15 +1,27 @@
-CREATE TABLE IF NOT EXISTS admins (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    email VARCHAR(150) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'ADMIN',
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    failed_attempts INT NOT NULL DEFAULT 0,
-    account_locked BOOLEAN NOT NULL DEFAULT FALSE,
-    lock_until DATETIME NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+SET @sql_create_admins := IF(
+    EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = 'admins'
+    ),
+    'SELECT 1',
+    'CREATE TABLE admins (
+        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+        email VARCHAR(150) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NULL,
+        role VARCHAR(20) NOT NULL DEFAULT ''ADMIN'',
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        failed_attempts INT NOT NULL DEFAULT 0,
+        account_locked BOOLEAN NOT NULL DEFAULT FALSE,
+        lock_until DATETIME NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )'
 );
+PREPARE stmt_create_admins FROM @sql_create_admins;
+EXECUTE stmt_create_admins;
+DEALLOCATE PREPARE stmt_create_admins;
 
 SET @has_admins_password_hash := (
     SELECT COUNT(*)

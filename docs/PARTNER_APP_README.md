@@ -6,8 +6,7 @@ This section lists everything currently implemented for the Lexho Partner App ba
 
 ## Implemented Modules
 
-- Profile management: get/update partner profile, profile image upload, availability update.
-- KYC workflow: document upload, `PENDING`, `UNDER_REVIEW`, `APPROVED`, `REJECTED`, rejection reason, admin verification.
+- Runtime management: availability update, dashboard, bank details, service areas, leave, payouts, and notifications.
 - Bank workflow: bank details get/update, `PENDING`, `VERIFIED`, `REJECTED`, rejection reason, admin verification.
 - Orders: new orders, order detail, accept, reject, start, complete, history, dashboard, timeline.
 - Order lifecycle validation: `CREATED/ASSIGNED -> ACCEPTED`, `CREATED/ASSIGNED -> REJECTED`, `ACCEPTED -> STARTED`, `STARTED -> COMPLETED`.
@@ -38,10 +37,6 @@ This section lists everything currently implemented for the Lexho Partner App ba
 ## Primary Partner APIs
 
 ```text
-GET   /api/v1/partner/profile
-PUT   /api/v1/partner/profile
-POST  /api/v1/partner/profile-image
-POST  /api/v1/partner/documents
 PUT   /api/v1/partner/availability
 GET   /api/v1/partner/dashboard/stats
 GET   /api/v1/partner/banners
@@ -123,79 +118,18 @@ Rate-limited APIs return HTTP 429:
 }
 ```
 
-## Profile, KYC, And Documents
+## Runtime And Bank APIs
 
 ```text
-GET  /api/v1/partner/profile
-PUT  /api/v1/partner/profile
-POST /api/v1/partner/profile-image
-POST /api/v1/partner/documents
 PUT  /api/v1/partner/availability
-```
-
-Update profile request:
-
-```json
-{
-  "fullName": "Partner Name",
-  "phone": "9999999999",
-  "email": "partner@example.com",
-  "address": "Partner address",
-  "city": "Delhi",
-  "pincode": "110001"
-}
-```
-
-Profile response includes:
-
-```text
-kycStatus              PENDING | UNDER_REVIEW | APPROVED | REJECTED
-kycRejectionReason     nullable string
-penaltyStatus          ACTIVE | WARNING | SUSPENSION | BLOCKED
-```
-
-Document upload is `multipart/form-data`:
-
-```text
-aadhaar      required file
-pan          required file
-selfie       required file
-certificate  optional file
-```
-
-Upload validation:
-
-```text
-max size: 5 MB
-allowed: image/jpeg, image/png, image/webp
-corrupted/unsupported image files are rejected
 ```
 
 ## Admin Verification
 
 ```text
-PATCH /api/v1/admin/partners/{partnerId}/kyc/status
 PATCH /api/v1/admin/partners/{partnerId}/bank/status
 PATCH /api/v1/admin/partners/{partnerId}/penalties
 GET   /api/v1/admin/partners/{partnerId}/penalties
-```
-
-KYC decision:
-
-```json
-{
-  "status": "APPROVED",
-  "reason": null
-}
-```
-
-Allowed KYC statuses:
-
-```text
-PENDING
-UNDER_REVIEW
-APPROVED
-REJECTED
 ```
 
 Bank decision:
@@ -624,7 +558,7 @@ New production partner features are added by:
 application-module/src/main/resources/db/migration/V80__partner_app_production_features.sql
 ```
 
-The migration adds order lifecycle timestamps, audit actor fields, partner device tokens, leave records, service areas, penalties, KYC workflow status, and bank verification status.
+The migration adds order lifecycle timestamps, audit actor fields, partner device tokens, leave records, service areas, penalties, and bank verification status.
 
 ## Swagger/OpenAPI
 
@@ -635,8 +569,6 @@ New controller APIs are annotated with Swagger `@Operation` where controllers al
 Use these routes first:
 
 ```text
-GET   /api/v1/partner/profile
-PUT   /api/v1/partner/profile
 GET   /api/v1/partner/dashboard/stats
 GET   /api/v1/partner/banners
 GET   /api/v1/orders/new

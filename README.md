@@ -10,6 +10,40 @@ Production backend requirements: [docs/booking-production-backend-requirements.m
 
 Local to production roadmap: [docs/local-to-production-roadmap.md](docs/local-to-production-roadmap.md)
 
+## Postman Regression Testing
+
+Run the full Postman collection regression as a separate endpoint-by-endpoint validation step after the backend is running:
+
+```powershell
+.\scripts\postman-regression.ps1 -BaseUrl http://localhost:8082
+```
+
+To pass fresh tokens without editing the Postman environment file:
+
+```powershell
+.\scripts\postman-regression.ps1 -BaseUrl http://localhost:8082 -AdminToken "<jwt>" -AccessToken "<jwt>"
+```
+
+For a stable admin protected-endpoint pass using an existing admin token:
+
+```powershell
+.\scripts\postman-regression.ps1 -BaseUrl http://localhost:8082 -Collections application-module/postman/Lexho-Admin.postman_collection.json -AdminToken "<jwt>" -AccessToken "<jwt>" -ReadOnly -SkipAuthWhenToken
+```
+
+For the full admin collection with no skipped requests:
+
+```powershell
+.\scripts\postman-regression.ps1 -BaseUrl http://localhost:8082 -Collections application-module/postman/Lexho-Admin.postman_collection.json -AdminToken "<jwt>" -AccessToken "<jwt>" -AllowKnownStatefulStatuses
+```
+
+The runner executes all configured Postman collections with Newman and writes generated collections, CLI logs, and JSON reports to `target/postman-regression`. It injects baseline assertions into each request so endpoints without hand-written Postman tests still fail on server errors and request timeouts.
+
+Prerequisite:
+
+```powershell
+npm install -g newman
+```
+
 Backend is the single source of truth for:
 
 - Tracking screen selection
@@ -110,7 +144,7 @@ Migration `V81__production_observability_audit_contract.sql` creates `audit_log`
 - `new_value`
 - `timestamp`
 
-Audited actions include payment events, KYC/bank reviews, review create/approve/reject events, penalty updates, partner status changes, and order lifecycle transitions.
+Audited actions include payment events, bank reviews, review create/approve/reject events, penalty updates, partner status changes, and order lifecycle transitions.
 
 ## Complete App Feature Inventory
 
@@ -264,9 +298,6 @@ Customer app important response contracts:
 Partner app capabilities currently implemented:
 
 - Partner OTP login and refresh-token auth.
-- Partner onboarding.
-- Provider/partner document upload.
-- Partner profile.
 - Bank details.
 - Service areas.
 - Device token registration.
@@ -297,8 +328,7 @@ Partner API groups:
 | Area | Endpoints / Prefixes |
 | --- | --- |
 | OTP auth | `POST /otp/send`, `POST /otp/verify`, `POST /api/auth/refresh`, `POST /auth/refresh-token` |
-| Onboarding | `POST /api/partner/onboarding`, `POST /api/partner/documents/upload`, `GET /api/partner/documents/{id}` |
-| Profile/bank/service area | `/api/partner/profile/**`, partner profile controllers, bank details DTO/service APIs, `/api/partner/service-areas/**` |
+| Bank/service area | partner bank details DTO/service APIs, `/api/partner/service-areas/**` |
 | Dispatch/location | `/api/partner/dispatch/**`, `/api/v1/partner/dispatch/**`, `/api/v1/partners/nearby`, `/api/v1/partners/live/{partnerId}` |
 | Requests | `/api/partner/requests`, `/api/v1/partner/requests`, accept/reject request routes |
 | Orders | `/api/partner/orders/**`, `/api/v1/partner/orders/**`, compatibility routes `/api/partner/dispatch/**` |
@@ -340,9 +370,6 @@ Admin app capabilities currently implemented:
 - Subscription management, visits, calendar, partner assignment and replacement.
 - Customer management.
 - Customer account delete request management.
-- Partner/provider onboarding governance.
-- Partner KYC document review.
-- Partner KYC status review.
 - Partner bank verification review.
 - Partner availability/risk governance.
 - Partner skills governance.
@@ -475,7 +502,7 @@ Implemented production support:
 - Actuator health/info/metrics/prometheus.
 - Business counters for orders, payments, partner acceptance.
 - Audit log table and service.
-- Audit events for payment, KYC, bank review, partner status, penalties, order lifecycle.
+- Audit events for payment, bank review, partner status, penalties, order lifecycle.
 - Transaction management on critical flows.
 
 ### Exhaustive Controller Inventory
@@ -502,9 +529,8 @@ Customer-facing controllers:
 
 Partner-facing controllers:
 
-- `ProviderOnboardingController`: partner onboarding and documents.
 - `PartnerController`: partner CRUD/basic partner APIs.
-- `LexhoPartnerController`: partner profile, dashboard, earnings, payouts, withdrawals, leave/service-area features.
+- `LexhoPartnerController`: partner dashboard, earnings, payouts, withdrawals, bank details, leave/service-area features.
 - `LexhoPartnerOrderController`: partner order lifecycle.
 - `LexhoPartnerNotificationController`: partner notifications.
 - `PartnerDispatchController`: shift, availability, skills, location, dispatch history/config.
@@ -533,8 +559,7 @@ Admin-facing controllers:
 - `AdminSubscriptionPricingController`: subscription pricing.
 - `AdminCustomerManagementController`: customers and delete requests.
 - `AdminUserManagementController`: users.
-- `AdminPartnerControlController`: partner governance, KYC, bank, risk, settlements, withdrawals, penalties.
-- `AdminProviderOnboardingController`: provider onboarding admin review.
+- `AdminPartnerControlController`: partner governance, bank, risk, settlements, withdrawals, penalties.
 - `AdminBookingController`: admin booking CRUD/stats.
 - `AdminBookingManagementController`: booking operations, tracking, payment reconciliation, payout.
 - `AdminPaymentController`: payment admin dashboard/reconciliation/refunds.
@@ -1385,9 +1410,6 @@ Multipart upload APIs use `multipart/form-data`.
 
 Implemented partner app areas:
 
-- Partner profile read and update
-- Partner profile image upload
-- Partner document upload
 - Partner online or offline availability
 - Partner shift start, end, and history
 - Partner live location update
@@ -1405,31 +1427,14 @@ Implemented partner app areas:
 - Partner live tracking SSE
 - Compatibility routes for older partner app clients
 
-### 13.2 Profile APIs
+### 13.2 Partner Runtime APIs
 
-Partner profile APIs are exposed under both `/api/partner` and `/api/v1/partner`.
+Partner runtime APIs are exposed under both `/api/partner` and `/api/v1/partner`.
 
 ```text
-GET  /api/v1/partner/profile
-PUT  /api/v1/partner/profile
-POST /api/v1/partner/profile-image
-POST /api/v1/partner/documents
 PUT  /api/v1/partner/availability
 GET  /api/v1/partner/dashboard/stats
 GET  /api/v1/partner/banners?page=0&size=5
-```
-
-Update profile request:
-
-```json
-{
-  "fullName": "Partner Name",
-  "phone": "9999999999",
-  "email": "partner@example.com",
-  "address": "Partner address",
-  "city": "Delhi",
-  "pincode": "110001"
-}
 ```
 
 Availability request:
@@ -1438,15 +1443,6 @@ Availability request:
 {
   "available": true
 }
-```
-
-Document upload fields:
-
-```text
-aadhaar      required file
-pan          required file
-selfie       required file
-certificate  optional file
 ```
 
 ### 13.3 Order APIs
@@ -1691,8 +1687,6 @@ If Redis is not running, these features are affected:
 Use these routes for the current partner app:
 
 ```text
-GET   /api/v1/partner/profile
-PUT   /api/v1/partner/profile
 GET   /api/v1/partner/dashboard/stats
 GET   /api/v1/partner/banners
 GET   /api/v1/orders/new
@@ -1720,7 +1714,7 @@ Frontend rules:
 - Use `/api/v1/...` routes for new screens
 - Keep `/api/...` and provider aliases only for backward compatibility
 - Send partner JWT on every protected API
-- Use multipart only for image and document upload APIs
+- Use multipart only for supported image upload APIs
 - Do not assume Redis-backed nearby results are available in local development unless Redis is running
 
 

@@ -29,7 +29,6 @@ Base URL: `http://localhost:8082`
 | Screen | Status | Backend |
 |---|---|---|
 | Login (OTP) | Done | `/otp/send`, `/otp/verify` (`role=PARTNER`) |
-| Profile + KYC upload | Done | `/api/v1/partner/profile`, `/profile-image`, `/documents` |
 | Availability toggle | Done | `/api/v1/partner/availability`, `/api/v1/partner/me/status` |
 | Shift start/end | Done | `/api/v1/partner/dispatch/shift/start`, `/shift/end` |
 | Live location update | Done | `/api/v1/partner/dispatch/location` |
@@ -68,4 +67,3 @@ Base URL: `http://localhost:8082`
 | OSM reverse geocode/serviceability | Done | customer location module |
 | Geofence validation in booking | Done | booking path integrated |
 | Full route ETA/navigation APIs | Partial/Missing | not fully exposed as dedicated module yet |
-

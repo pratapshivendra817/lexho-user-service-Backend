@@ -14,10 +14,6 @@ Existing shared modules already provide:
 - `exception`: global exception handling (`exception/GlobalExceptionHandler`)
 
 ## APIs
-- `GET /api/partner/profile`
-- `PUT /api/partner/profile`
-- `POST /api/partner/profile-image`
-- `POST /api/partner/documents`
 - `PUT /api/partner/availability`
 - `GET /api/orders/new`
 - `POST /api/orders/{id}/accept`
@@ -32,7 +28,6 @@ Existing shared modules already provide:
 ## DB Schema
 Flyway migration: `V29__lexho_partner_marketplace_core.sql`
 - `partners`
-- `partner_documents`
 - `orders` (extended for partner workflow)
 - `order_status_history`
 - `partner_availability`

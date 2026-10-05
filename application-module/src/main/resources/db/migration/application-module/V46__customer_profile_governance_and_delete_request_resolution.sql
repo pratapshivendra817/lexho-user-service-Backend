@@ -3,7 +3,7 @@ SET @db_name = DATABASE();
 SET @sql = IF(
         (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'customers' AND COLUMN_NAME = 'profile_edit_locked') = 0,
-        'ALTER TABLE customers ADD COLUMN profile_edit_locked TINYINT(1) NULL DEFAULT 0',
+        'ALTER TABLE customers ADD COLUMN profile_edit_locked BOOLEAN NULL DEFAULT FALSE',
         'SELECT 1'
            );
 PREPARE stmt FROM @sql;
@@ -13,7 +13,7 @@ DEALLOCATE PREPARE stmt;
 SET @sql = IF(
         (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'customers' AND COLUMN_NAME = 'email_verified') = 0,
-        'ALTER TABLE customers ADD COLUMN email_verified TINYINT(1) NULL DEFAULT 0',
+        'ALTER TABLE customers ADD COLUMN email_verified BOOLEAN NULL DEFAULT FALSE',
         'SELECT 1'
            );
 PREPARE stmt FROM @sql;
@@ -23,7 +23,7 @@ DEALLOCATE PREPARE stmt;
 SET @sql = IF(
         (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'customers' AND COLUMN_NAME = 'phone_verified') = 0,
-        'ALTER TABLE customers ADD COLUMN phone_verified TINYINT(1) NULL DEFAULT 0',
+        'ALTER TABLE customers ADD COLUMN phone_verified BOOLEAN NULL DEFAULT FALSE',
         'SELECT 1'
            );
 PREPARE stmt FROM @sql;
@@ -33,7 +33,7 @@ DEALLOCATE PREPARE stmt;
 SET @sql = IF(
         (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'customers' AND COLUMN_NAME = 'profile_image_approved') = 0,
-        'ALTER TABLE customers ADD COLUMN profile_image_approved TINYINT(1) NULL DEFAULT 1',
+        'ALTER TABLE customers ADD COLUMN profile_image_approved BOOLEAN NULL DEFAULT TRUE',
         'SELECT 1'
            );
 PREPARE stmt FROM @sql;

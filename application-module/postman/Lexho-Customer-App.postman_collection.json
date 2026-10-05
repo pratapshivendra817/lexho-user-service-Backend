@@ -1,0 +1,230 @@
+{
+  "info": {
+    "name": "Lexho Customer App",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('no server error', function () {",
+          "  pm.expect(pm.response.code).to.be.below(500);",
+          "});",
+          "pm.test('response time under budget', function () {",
+          "  pm.expect(pm.response.responseTime).to.be.below(Number(pm.collectionVariables.get('responseTimeBudgetMs') || 5000));",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8082" },
+    { "key": "mobile", "value": "9876501234" },
+    { "key": "otp", "value": "" },
+    { "key": "customerToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "categoryId", "value": "29" },
+    { "key": "serviceId", "value": "1" },
+    { "key": "cartItemId", "value": "1" },
+    { "key": "addressId", "value": "" },
+    { "key": "bookingId", "value": "1" },
+    { "key": "couponCode", "value": "FIRSTONLY" },
+    { "key": "ticketId", "value": "TCK-10001" },
+    { "key": "responseTimeBudgetMs", "value": "5000" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"role\": \"CUSTOMER\"\n}" },
+            "url": "{{baseUrl}}/otp/send"
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('customerToken', json.token || json.data?.token || '');",
+                  "  pm.collectionVariables.set('refreshToken', json.data?.refreshToken || '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"otp\": \"{{otp}}\",\n  \"role\": \"CUSTOMER\"\n}" },
+            "url": "{{baseUrl}}/otp/verify"
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": "{{baseUrl}}/auth/refresh-token"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Public Home",
+      "item": [
+        { "name": "Home Dashboard", "request": { "method": "GET", "url": "{{baseUrl}}/api/home/dashboard" } },
+        { "name": "Banners", "request": { "method": "GET", "url": "{{baseUrl}}/api/banners?page=0&size=20" } },
+        { "name": "Categories", "request": { "method": "GET", "url": "{{baseUrl}}/api/categories?page=0&size=20" } },
+        { "name": "Popular Services", "request": { "method": "GET", "url": "{{baseUrl}}/api/services/popular?page=0&size=20" } },
+        { "name": "Recommended Services", "request": { "method": "GET", "url": "{{baseUrl}}/api/services/recommended?page=0&size=20" } },
+        { "name": "Quick Services", "request": { "method": "GET", "url": "{{baseUrl}}/api/services/quick?page=0&size=20" } },
+        { "name": "Search Services", "request": { "method": "GET", "url": "{{baseUrl}}/api/search/services?keyword=clean&page=0&size=20" } },
+        { "name": "Customer Banners", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/banners" } },
+        { "name": "Customer Service Catalog", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/services/catalog?page=0&size=20" } },
+        { "name": "Customer Service Detail", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/services/{{serviceId}}" } },
+        { "name": "Customer Services By Category", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/services?categoryId={{categoryId}}&page=0&size=20" } },
+        { "name": "Customer Popular By Category", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/services/popular?categoryId={{categoryId}}&page=0&size=20" } },
+        { "name": "Customer Popular Cook", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/services/popular/cook" } },
+        { "name": "Customer Popular Cleaning", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/services/popular/cleaning" } },
+        {
+          "name": "Cart Config",
+          "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/cart/config" }
+        },
+        {
+          "name": "Cook Family Sizes",
+          "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/cook-family-sizes" }
+        },
+        { "name": "Available Slots", "request": { "method": "GET", "url": "{{baseUrl}}/api/slots/available?date=2026-08-15" } },
+        { "name": "Coupon List", "request": { "method": "GET", "url": "{{baseUrl}}/api/coupon/list?page=0&size=20" } },
+        { "name": "Service Reviews", "request": { "method": "GET", "url": "{{baseUrl}}/api/reviews/service/{{serviceId}}?page=0&size=20" } }
+      ]
+    },
+    {
+      "name": "Customer Protected",
+      "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+      "item": [
+        { "name": "Profile", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/profile" } },
+        { "name": "User Profile Legacy", "request": { "method": "GET", "url": "{{baseUrl}}/api/user/profile" } },
+        { "name": "Profile Content", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/profile-content" } },
+        { "name": "Profile Addresses", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/addresses" } },
+        { "name": "Cart", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/cart" } },
+        { "name": "Legacy Cart Summary", "request": { "method": "GET", "url": "{{baseUrl}}/api/cart/summary" } },
+        { "name": "Booking History", "request": { "method": "GET", "url": "{{baseUrl}}/api/bookings/history?page=1&size=20" } },
+        { "name": "Booking Details", "request": { "method": "GET", "url": "{{baseUrl}}/api/bookings/details/{{bookingId}}" } },
+        { "name": "Payment Status", "request": { "method": "GET", "url": "{{baseUrl}}/api/payments/status/{{bookingId}}" } },
+        { "name": "My Reward Coupons", "request": { "method": "GET", "url": "{{baseUrl}}/api/coupons/my-rewards?page=0&size=20" } },
+        { "name": "Notifications", "request": { "method": "GET", "url": "{{baseUrl}}/api/notifications?page=0&size=20" } },
+        { "name": "Unread Notification Count", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/notifications/unread-count" } },
+        { "name": "Activity Inbox", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/inbox/activity?page=1&limit=20" } },
+        { "name": "Favorites", "request": { "method": "GET", "url": "{{baseUrl}}/api/favorites/list?page=0&size=20" } },
+        { "name": "Support FAQs", "request": { "method": "GET", "url": "{{baseUrl}}/api/support/faqs" } },
+        { "name": "Support History", "request": { "method": "GET", "url": "{{baseUrl}}/api/support/history?page=1&limit=20" } },
+        { "name": "Current Location", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/location/current" } },
+        { "name": "All Addresses", "request": { "method": "GET", "url": "{{baseUrl}}/api/customer/location/all?page=0&size=10" } }
+      ]
+    },
+    {
+      "name": "Customer Mutations",
+      "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+      "item": [
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Lexho Customer\",\n  \"email\": \"customer@example.com\",\n  \"gender\": \"OTHER\"\n}" },
+            "url": "{{baseUrl}}/api/customer/profile"
+          }
+        },
+        {
+          "name": "Update Location",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 28.6123,\n  \"longitude\": 77.2290,\n  \"accuracyMeters\": 18.4,\n  \"detectionSource\": \"GPS_AUTO\"\n}" },
+            "url": "{{baseUrl}}/api/customer/location/update"
+          }
+        },
+        {
+          "name": "Reverse Geocode",
+          "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 28.6123,\n  \"longitude\": 77.2290\n}" },
+            "url": "{{baseUrl}}/api/customer/location/reverse-geocode"
+          }
+        },
+        {
+          "name": "Serviceability Check",
+          "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customerToken}}", "type": "string" }] },
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"pincode\": \"110001\",\n  \"latitude\": 28.6123,\n  \"longitude\": 77.2290\n}" },
+            "url": "{{baseUrl}}/api/customer/location/serviceability/check"
+          }
+        },
+        {
+          "name": "Add To Cart",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"serviceId\": {{serviceId}},\n  \"quantity\": 1\n}" },
+            "url": "{{baseUrl}}/api/customer/cart"
+          }
+        },
+        {
+          "name": "Clear Cart",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/customer/cart/clear" }
+        },
+        {
+          "name": "Create Support Ticket",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"subject\": \"Postman regression ticket\",\n  \"message\": \"Created by customer regression collection\",\n  \"priority\": \"LOW\"\n}" },
+            "url": "{{baseUrl}}/api/support/create"
+          }
+        },
+        {
+          "name": "Generate Referral",
+          "request": { "method": "POST", "url": "{{baseUrl}}/api/referral/generate" }
+        },
+        {
+          "name": "Apply Coupon",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"WELCOME\"\n}" },
+            "url": "{{baseUrl}}/api/coupon/apply"
+          }
+        },
+        {
+          "name": "Validate First Booking Coupon",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"{{couponCode}}\",\n  \"planId\": {{serviceId}},\n  \"amount\": 499.00,\n  \"bookingType\": \"INSTANT\"\n}" },
+            "url": "{{baseUrl}}/api/coupons/validate"
+          }
+        }
+      ]
+    }
+  ]
+}

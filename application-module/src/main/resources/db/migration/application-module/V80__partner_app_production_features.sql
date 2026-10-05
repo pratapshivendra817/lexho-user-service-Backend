@@ -14,14 +14,6 @@ SET @sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_sche
     'ALTER TABLE order_status_history ADD COLUMN actor_id BIGINT NULL', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-SET @sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'partners' AND column_name = 'kyc_workflow_status') = 0,
-    'ALTER TABLE partners ADD COLUMN kyc_workflow_status VARCHAR(30) NOT NULL DEFAULT ''PENDING''', 'SELECT 1');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
-SET @sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'partners' AND column_name = 'kyc_rejection_reason') = 0,
-    'ALTER TABLE partners ADD COLUMN kyc_rejection_reason VARCHAR(500) NULL', 'SELECT 1');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
 SET @sql := IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'partners' AND column_name = 'bank_verification_status') = 0,
     'ALTER TABLE partners ADD COLUMN bank_verification_status VARCHAR(30) NOT NULL DEFAULT ''PENDING''', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

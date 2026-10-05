@@ -10,6 +10,7 @@ import com.lexho.common.enums.PaymentStatus;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.testconfig.WebSliceBootTestConfig;
 import com.lexho.user_service.admin.repository.AdminCategoryRepository;
+import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.admin.repository.SupportFaqCategoryRepository;
 import com.lexho.user_service.admin.repository.SupportFaqRepository;
 import com.lexho.user_service.admin.repository.SupportTicketRepository;
@@ -18,6 +19,7 @@ import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.banner.repository.BannerPromotionRepository;
 import com.lexho.user_service.config.JwtFilter;
 import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
+import com.lexho.user_service.cartconfig.repository.CartConfigRepository;
 import com.lexho.user_service.cartconfig.service.CartConfigService;
 import com.lexho.user_service.customer.controller.CustomerServiceController;
 import com.lexho.user_service.customer.location.service.ServiceabilityService;
@@ -34,7 +36,7 @@ import com.lexho.user_service.dispatch.service.DispatchOrchestrationService;
 import com.lexho.user_service.dto.OrderResponseDTO;
 import com.lexho.user_service.lexho.controller.LexhoExperienceController;
 import com.lexho.user_service.lexho.dto.LexhoDtos;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.lexho.repository.LexhoFavoriteRepository;
 import com.lexho.user_service.lexho.repository.LexhoReferralCodeRepository;
 import com.lexho.user_service.lexho.repository.LexhoReferralUseRepository;
@@ -132,6 +134,8 @@ class SlotBookingPaymentContractTest {
     @MockBean
     private AdminCategoryRepository adminCategoryRepository;
     @MockBean
+    private AdminServiceEntityRepository adminServiceEntityRepository;
+    @MockBean
     private PartnerRepository partnerRepository;
     @MockBean
     private ReviewRepository reviewRepository;
@@ -156,13 +160,15 @@ class SlotBookingPaymentContractTest {
     @MockBean
     private ApiRateLimiterService apiRateLimiterService;
     @MockBean
-    private PartnerProfileRepository partnerProfileRepository;
+    private PartnerOperationalProfileRepository partnerProfileRepository;
     @MockBean
     private GeoFenceValidationService geoFenceValidationService;
     @MockBean
     private ServiceabilityService serviceabilityService;
     @MockBean
     private CartConfigService cartConfigService;
+    @MockBean
+    private CartConfigRepository cartConfigRepository;
     @MockBean
     private SubscriptionMasterRepository subscriptionMasterRepository;
     @MockBean
@@ -180,6 +186,7 @@ class SlotBookingPaymentContractTest {
     void setup() {
         orders.clear();
         when(cartConfigService.currentEntity()).thenReturn(new CartConfigEntity());
+        when(cartConfigRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(new CartConfigEntity()));
         SlotDateTimePolicy realPolicy = new SlotDateTimePolicy(cartConfigService);
         ZoneId ist = ZoneId.of("Asia/Kolkata");
         LocalDateTime fixedNow = LocalDateTime.of(2026, 5, 19, 12, 0);
@@ -199,6 +206,7 @@ class SlotBookingPaymentContractTest {
         when(partnerShiftRepository.existsByOnlineTrue()).thenReturn(true);
         when(orderRepository.countByScheduledAtGreaterThanEqualAndScheduledAtLessThanAndStatusIn(any(), any(), anySet())).thenReturn(0L);
         when(orderRepository.findById(anyLong())).thenAnswer(invocation -> Optional.ofNullable(orders.get(invocation.getArgument(0))));
+        when(orderRepository.findByIdForUpdate(anyLong())).thenAnswer(invocation -> Optional.ofNullable(orders.get(invocation.getArgument(0))));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> {
             Order value = invocation.getArgument(0);
             if (value.getId() == null) {

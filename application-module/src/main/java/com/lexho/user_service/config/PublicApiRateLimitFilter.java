@@ -24,10 +24,23 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.regex.Pattern;
 
 @Component
 @Order(20)
 public class PublicApiRateLimitFilter extends OncePerRequestFilter {
+    private static final String POST = "POST";
+    private static final String PATCH = "PATCH";
+    private static final String MISSING_IDENTITY = "missing";
+    private static final String MOBILE_FIELD = "mobile";
+    private static final String BOOKING_ID_FIELD = "bookingId";
+    private static final String PAYMENT_RETRY_PATH = "/api/payments/retry";
+    private static final String PAYMENT_RETRY_V1_PATH = "/api/v1/payments/retry";
+    private static final Pattern PARTNER_REQUEST_ACCEPT_PATTERN =
+            Pattern.compile("/api(/v1)?/partner/requests/\\d+/accept");
+    private static final Pattern PARTNER_REQUEST_REJECT_PATTERN =
+            Pattern.compile("/api(/v1)?/partner/requests/\\d+/reject");
 
     private final ApiRateLimiterService rateLimiterService;
     private final ObjectMapper objectMapper;
@@ -86,30 +99,9 @@ public class PublicApiRateLimitFilter extends OncePerRequestFilter {
         if (path == null) {
             return null;
         }
-        if ("POST".equalsIgnoreCase(method) && path.equals("/otp/send")) {
-            return new RateLimitRule("otp_send", bodyText(request, "mobile"), 5, Duration.ofMinutes(15));
-        }
-        if ("POST".equalsIgnoreCase(method) && path.equals("/otp/verify")) {
-            return new RateLimitRule("otp_verify", bodyText(request, "mobile"), 10, Duration.ofMinutes(15));
-        }
-        if ("POST".equalsIgnoreCase(method) && path.equals("/api/admin/login")) {
-            return new RateLimitRule("admin_login", bodyText(request, "email"), 5, Duration.ofMinutes(15));
-        }
-        if ("POST".equalsIgnoreCase(method)
-                && (path.equals("/api/payments/create-order") || path.equals("/api/v1/payments/create-order"))) {
-            return new RateLimitRule("payment_create_order", userId(request), 10, Duration.ofMinutes(1));
-        }
-        if ("POST".equalsIgnoreCase(method)
-                && (path.equals("/api/payments/retry") || path.equals("/api/v1/payments/retry"))) {
-            return new RateLimitRule("payment_retry", bodyText(request, "bookingId"), 5, Duration.ofMinutes(1));
-        }
-        if ("PATCH".equalsIgnoreCase(method) && path.matches("/api(/v1)?/partner/requests/\\d+/accept")) {
-            return new RateLimitRule("partner_request_accept", userId(request), 20, Duration.ofMinutes(1));
-        }
-        if ("PATCH".equalsIgnoreCase(method) && path.matches("/api(/v1)?/partner/requests/\\d+/reject")) {
-            return new RateLimitRule("partner_request_reject", userId(request), 20, Duration.ofMinutes(1));
-        }
-        return null;
+        return postRule(request, method, path)
+                .or(() -> patchRule(request, method, path))
+                .orElse(null);
     }
 
     private boolean requiresCachedBody(HttpServletRequest request) {
@@ -118,12 +110,8 @@ public class PublicApiRateLimitFilter extends OncePerRequestFilter {
         if (path == null) {
             return false;
         }
-        return "POST".equalsIgnoreCase(method)
-                && (path.equals("/otp/send")
-                || path.equals("/otp/verify")
-                || path.equals("/api/admin/login")
-                || path.equals("/api/payments/retry")
-                || path.equals("/api/v1/payments/retry"));
+        return POST.equalsIgnoreCase(method)
+                && matchesAny(path, "/otp/send", "/otp/verify", PAYMENT_RETRY_PATH, PAYMENT_RETRY_V1_PATH);
     }
 
     private boolean isMultipart(HttpServletRequest request) {
@@ -133,15 +121,15 @@ public class PublicApiRateLimitFilter extends OncePerRequestFilter {
 
     private String bodyText(HttpServletRequest request, String field) {
         if (!(request instanceof CachedBodyRequest cachedBodyRequest)) {
-            return "missing";
+            return MISSING_IDENTITY;
         }
         try {
             if (cachedBodyRequest.body.length == 0) {
-                return "missing";
+                return MISSING_IDENTITY;
             }
             JsonNode node = objectMapper.readTree(cachedBodyRequest.body);
             String value = node.path(field).asText();
-            return value == null || value.isBlank() ? "missing" : value.trim().toLowerCase(Locale.ROOT);
+            return value == null || value.isBlank() ? MISSING_IDENTITY : value.trim().toLowerCase(Locale.ROOT);
         } catch (IOException ignored) {
             return "invalid";
         }
@@ -178,6 +166,47 @@ public class PublicApiRateLimitFilter extends OncePerRequestFilter {
     }
 
     private record RateLimitRule(String bucket, String identity, int maxRequests, Duration window) {
+    }
+
+    private Optional<RateLimitRule> postRule(HttpServletRequest request, String method, String path) {
+        if (!POST.equalsIgnoreCase(method)) {
+            return Optional.empty();
+        }
+        if (path.equals("/otp/send")) {
+            return Optional.of(new RateLimitRule("otp_send", bodyText(request, MOBILE_FIELD), 5, Duration.ofMinutes(15)));
+        }
+        if (path.equals("/otp/verify")) {
+            return Optional.of(new RateLimitRule("otp_verify", bodyText(request, MOBILE_FIELD), 10, Duration.ofMinutes(15)));
+        }
+        if (matchesAny(path, "/api/payments/create-order", "/api/v1/payments/create-order")) {
+            return Optional.of(new RateLimitRule("payment_create_order", userId(request), 10, Duration.ofMinutes(1)));
+        }
+        if (matchesAny(path, PAYMENT_RETRY_PATH, PAYMENT_RETRY_V1_PATH)) {
+            return Optional.of(new RateLimitRule("payment_retry", bodyText(request, BOOKING_ID_FIELD), 5, Duration.ofMinutes(1)));
+        }
+        return Optional.empty();
+    }
+
+    private Optional<RateLimitRule> patchRule(HttpServletRequest request, String method, String path) {
+        if (!PATCH.equalsIgnoreCase(method)) {
+            return Optional.empty();
+        }
+        if (PARTNER_REQUEST_ACCEPT_PATTERN.matcher(path).matches()) {
+            return Optional.of(new RateLimitRule("partner_request_accept", userId(request), 20, Duration.ofMinutes(1)));
+        }
+        if (PARTNER_REQUEST_REJECT_PATTERN.matcher(path).matches()) {
+            return Optional.of(new RateLimitRule("partner_request_reject", userId(request), 20, Duration.ofMinutes(1)));
+        }
+        return Optional.empty();
+    }
+
+    private boolean matchesAny(String value, String... expectedValues) {
+        for (String expectedValue : expectedValues) {
+            if (expectedValue.equals(value)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static class CachedBodyRequest extends HttpServletRequestWrapper {

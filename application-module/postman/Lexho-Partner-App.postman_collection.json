@@ -1,0 +1,164 @@
+{
+  "info": {
+    "name": "Lexho Partner App",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('no server error', function () { pm.expect(pm.response.code).to.be.below(500); });",
+          "pm.test('response time under budget', function () { pm.expect(pm.response.responseTime).to.be.below(Number(pm.collectionVariables.get('responseTimeBudgetMs') || 5000)); });"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8082" },
+    { "key": "mobile", "value": "9876501234" },
+    { "key": "otp", "value": "" },
+    { "key": "partnerToken", "value": "" },
+    { "key": "orderId", "value": "1" },
+    { "key": "warningId", "value": "1" },
+    { "key": "payoutId", "value": "1" },
+    { "key": "notificationId", "value": "1" },
+    { "key": "ticketId", "value": "PTCK-10001" },
+    { "key": "responseTimeBudgetMs", "value": "5000" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{partnerToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "Send Partner OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"role\": \"PARTNER\"\n}" },
+            "url": "{{baseUrl}}/otp/send"
+          }
+        },
+        {
+          "name": "Verify Partner OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('partnerToken', json.token || json.data?.token || '');",
+                  "  pm.collectionVariables.set('refreshToken', json.data?.refreshToken || '');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"otp\": \"{{otp}}\",\n  \"role\": \"PARTNER\"\n}" },
+            "url": "{{baseUrl}}/otp/verify"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read APIs",
+      "item": [
+        { "name": "Dashboard Stats", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/dashboard/stats" } },
+        { "name": "Partner Banners", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/banners?page=0&size=5" } },
+        { "name": "Earnings Summary", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/earnings/summary" } },
+        { "name": "Earning Transactions", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/earnings/transactions?page=0&size=20" } },
+        { "name": "Payouts", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/payouts?page=0&size=20" } },
+        { "name": "Performance", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/performance" } },
+        { "name": "Ratings", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/ratings?page=0&size=20" } },
+        { "name": "Onboarding Profile", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/onboarding" } },
+        { "name": "Leave", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/leave" } },
+        { "name": "Service Areas", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/service-areas" } },
+        { "name": "Warnings", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/warnings" } },
+        { "name": "Bank Details", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/bank-details" } },
+        { "name": "Withdrawals", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/withdrawals?page=0&size=20" } },
+        { "name": "Withdrawal Balance", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/withdrawals/balance" } },
+        { "name": "Activity Inbox", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/inbox/activity?page=0&size=20" } },
+        { "name": "Notifications", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/notifications?page=0&size=20" } },
+        { "name": "Notification Unread Count", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/notifications/unread-count" } },
+        { "name": "New Orders", "request": { "method": "GET", "url": "{{baseUrl}}/api/orders/new?page=0&size=20" } },
+        { "name": "Order History", "request": { "method": "GET", "url": "{{baseUrl}}/api/orders/history?page=0&size=20" } },
+        { "name": "Order Dashboard", "request": { "method": "GET", "url": "{{baseUrl}}/api/orders/dashboard" } },
+        { "name": "Partner New Orders Compatibility", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/orders/new?page=0&size=20" } },
+        { "name": "Partner Dispatch Requests", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/dispatch/requests/new?page=0&size=20" } },
+        { "name": "Support FAQs", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/support/faqs" } },
+        { "name": "Support Tickets", "request": { "method": "GET", "url": "{{baseUrl}}/api/partner/support/tickets?page=0&size=20" } }
+      ]
+    },
+    {
+      "name": "Mutations",
+      "item": [
+        {
+          "name": "Submit Onboarding",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "fullName", "value": "Rahul Kumar", "type": "text" },
+                { "key": "dateOfBirth", "value": "1995-04-20", "type": "text" },
+                { "key": "gender", "value": "MALE", "type": "text" },
+                { "key": "addressLine1", "value": "Sector 10, Noida", "type": "text" },
+                { "key": "city", "value": "Noida", "type": "text" },
+                { "key": "state", "value": "Uttar Pradesh", "type": "text" },
+                { "key": "pincode", "value": "201301", "type": "text" },
+                { "key": "skills", "value": "Cook", "type": "text" },
+                { "key": "accountNumber", "value": "123456789012", "type": "text" },
+                { "key": "ifscCode", "value": "HDFC0001234", "type": "text" },
+                { "key": "aadhaarFront", "type": "file", "src": [] },
+                { "key": "aadhaarBack", "type": "file", "src": [] },
+                { "key": "panCard", "type": "file", "src": [] },
+                { "key": "selfie", "type": "file", "src": [] },
+                { "key": "certificate", "type": "file", "src": [] }
+              ]
+            },
+            "url": "{{baseUrl}}/api/partner/onboarding"
+          }
+        },
+        {
+          "name": "Update Availability",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"online\": true,\n  \"available\": true\n}" },
+            "url": "{{baseUrl}}/api/partner/availability"
+          }
+        },
+        {
+          "name": "Register Device Token",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"postman-partner-device-token\",\n  \"platform\": \"ANDROID\"\n}" },
+            "url": "{{baseUrl}}/api/partner/device-token"
+          }
+        },
+        {
+          "name": "Create Support Ticket",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"subject\": \"Partner regression ticket\",\n  \"message\": \"Created by partner regression collection\",\n  \"priority\": \"LOW\"\n}" },
+            "url": "{{baseUrl}}/api/partner/support/tickets"
+          }
+        }
+      ]
+    }
+  ]
+}

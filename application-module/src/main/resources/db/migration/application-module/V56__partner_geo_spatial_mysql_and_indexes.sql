@@ -78,7 +78,11 @@ SET @idx_exists := (
     FROM information_schema.statistics
     WHERE table_schema = DATABASE()
       AND table_name = 'current_partner_locations'
-      AND index_name = 'idx_current_partner_locations_partner_deleted_updated'
+    GROUP BY index_name
+    HAVING COUNT(*) = 3
+       AND MAX(CASE WHEN seq_in_index = 1 AND column_name = 'partner_id' THEN 1 ELSE 0 END) = 1
+       AND MAX(CASE WHEN seq_in_index = 2 AND column_name = 'deleted' THEN 1 ELSE 0 END) = 1
+       AND MAX(CASE WHEN seq_in_index = 3 AND column_name = 'updated_at' THEN 1 ELSE 0 END) = 1
 );
 SET @ddl_idx := IF(@idx_exists = 0,
                    'CREATE INDEX idx_current_partner_locations_partner_deleted_updated ON current_partner_locations (partner_id, deleted, updated_at)',

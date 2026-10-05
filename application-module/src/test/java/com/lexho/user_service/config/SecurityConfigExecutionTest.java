@@ -36,7 +36,6 @@ class SecurityConfigExecutionTest {
                 .withProperty("app.security.exposure.expose-swagger", "true")
                 .withProperty("app.security.exposure.allow-internal-open", "true")
                 .withProperty("app.security.exposure.allow-public-customer-read", "true")
-                .withProperty("app.security.exposure.allow-public-partner-onboarding", "true")
                 .withProperty("app.security.exposure.allow-public-admin-profile-content", "true");
 
         SecurityConfig securityConfig = new SecurityConfig(

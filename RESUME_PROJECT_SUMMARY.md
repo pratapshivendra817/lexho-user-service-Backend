@@ -8,7 +8,7 @@ Built a production-oriented, multi-module Spring Boot backend for an on-demand h
 ## Resume Bullet Points
 
 - Developed a Java 17 / Spring Boot 3 multi-module backend for a home-service marketplace with customer, partner, admin, order, payment, catalog, notification, and application runtime modules.
-- Designed and implemented REST APIs for authentication, user management, service catalog, cart, bookings, partner onboarding, admin operations, reviews, support, profile management, and serviceable-area management.
+- Designed and implemented REST APIs for authentication, user management, service catalog, cart, bookings, partner runtime operations, admin operations, reviews, support, profile management, and serviceable-area management.
 - Integrated Razorpay payments with secure webhook signature verification, idempotent event processing, retry metadata, and payment/refund lifecycle tracking.
 - Built real-time dispatch and partner-location capabilities using Redis GEO concepts, geohash-based partitioning hooks, WebSocket/SSE-style event flows, and scalable tracking lifecycle services.
 - Added Firebase Cloud Messaging support for push notifications and notification orchestration for customer, partner, and admin workflows.
@@ -42,7 +42,7 @@ The project follows a Maven multi-module structure with a single Spring Boot run
 
 - **Authentication and Security:** JWT filters, role-based access, admin auth properties, protected APIs, rate limiting, and global exception handling.
 - **Customer App Backend:** service browsing, cart, bookings, address/location management, profile, reviews, support, notifications, subscriptions, and account governance.
-- **Partner App Backend:** partner profile, KYC-style governance, service areas, orders, earnings, withdrawals, leaves, device tokens, notifications, and live tracking.
+- **Partner App Backend:** partner runtime governance, service areas, orders, earnings, withdrawals, leaves, device tokens, notifications, and live tracking.
 - **Admin Backend:** booking management, partner/customer governance, catalog/category/service management, banners, sections, payouts, settings, support FAQs, serviceable areas, emergency and monitoring workflows.
 - **Booking and Dispatch:** order lifecycle, partner matching, partner skills, location updates, nearby partner search, dispatch scoring, cleanup schedulers, and tracking lifecycle management.
 - **Payments:** Razorpay order/payment integration, webhook processing, retry-safe event storage, refunds, payment status tracking, and payout-related workflows.

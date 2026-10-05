@@ -6,13 +6,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.ResponseEntity;
-import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -64,20 +61,7 @@ public class HealthController {
     }
 
     private String checkDatabase() {
-        Connection connection = null;
-        try {
-            connection = DataSourceUtils.getConnection(dataSource);
-            try (Statement statement = connection.createStatement()) {
-                statement.execute("SELECT 1");
-            }
-            return "UP";
-        } catch (Exception exception) {
-            return "DOWN";
-        } finally {
-            if (connection != null) {
-                DataSourceUtils.releaseConnection(connection, dataSource);
-            }
-        }
+        return DatabaseHealthChecker.check(dataSource);
     }
 
     private String checkRedis() {

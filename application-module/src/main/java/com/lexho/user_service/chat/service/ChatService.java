@@ -56,6 +56,8 @@ public class ChatService {
     private static final String ROOM_TOPIC_PREFIX = "/topic/chat/rooms/";
     private static final String USER_QUEUE_DESTINATION = "/queue/chat";
     private static final String TYPING_KEY_PREFIX = "chat:typing:";
+    private static final String ACCESS_DENIED_TO_CHAT_ROOM = "Access denied to chat room";
+    private static final String CREATED_AT_KEY = "createdAt";
 
     private final ChatRoomRepository chatRoomRepository;
     private final ChatParticipantRepository chatParticipantRepository;
@@ -92,6 +94,10 @@ public class ChatService {
 
     @Transactional
     public ChatRoomResponse createRoom(CreateChatRoomRequest request) {
+        return createRoomForCurrentActor(request);
+    }
+
+    private ChatRoomResponse createRoomForCurrentActor(CreateChatRoomRequest request) {
         ChatActor actor = currentActor();
         Order order = orderRepository.findById(request.getOrderId())
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
@@ -138,7 +144,7 @@ public class ChatService {
                 actor.participantType(),
                 actor.participantId(),
                 PageRequest.of(safePage(page), safeSize(size),
-                        Sort.by(Sort.Order.desc("lastMessageAt"), Sort.Order.desc("createdAt"))));
+                        Sort.by(Sort.Order.desc("lastMessageAt"), Sort.Order.desc(CREATED_AT_KEY))));
 
         List<Long> roomIds = rooms.getContent().stream().map(ChatRoom::getId).toList();
         Map<Long, ChatParticipant> participantByRoomId = chatParticipantRepository
@@ -159,6 +165,10 @@ public class ChatService {
 
     @Transactional
     public ChatMessagePageResponse listMessages(Long roomId, int page, int size) {
+        return listMessagesForCurrentActor(roomId, page, size);
+    }
+
+    private ChatMessagePageResponse listMessagesForCurrentActor(Long roomId, int page, int size) {
         ChatActor actor = currentActor();
         ChatRoom room = requireRoomAccess(roomId, actor);
         ChatParticipant participant = currentParticipant(roomId, actor);
@@ -166,7 +176,7 @@ public class ChatService {
 
         Page<ChatMessage> messages = chatMessageRepository.findByRoom_IdAndDeletedFalse(
                 roomId,
-                PageRequest.of(safePage(page), safeSize(size), Sort.by(Sort.Direction.DESC, "createdAt")));
+                PageRequest.of(safePage(page), safeSize(size), Sort.by(Sort.Direction.DESC, CREATED_AT_KEY)));
 
         return ChatMessagePageResponse.builder()
                 .content(messages.getContent().stream().map(this::toMessageResponse).toList())
@@ -180,8 +190,8 @@ public class ChatService {
 
     @Transactional
     public ChatMessagePageResponse listMessagesByOrderId(Long orderId, int page, int size) {
-        ChatRoomResponse room = createRoom(request(orderId));
-        return listMessages(room.getRoomId(), page, size);
+        ChatRoomResponse room = createRoomForCurrentActor(request(orderId));
+        return listMessagesForCurrentActor(room.getRoomId(), page, size);
     }
 
     @Transactional
@@ -264,6 +274,16 @@ public class ChatService {
                 roomId, actor.participantType(), actor.participantId());
     }
 
+    @Transactional(readOnly = true)
+    public boolean hasBookingAccess(Long bookingId, ChatActor actor) {
+        return orderRepository.findById(bookingId)
+                .filter(order -> (actor.participantType() == ChatParticipantType.CUSTOMER
+                        && actor.participantId().equals(order.getUserId()))
+                        || (actor.participantType() == ChatParticipantType.PARTNER
+                        && actor.participantId().equals(order.getAssignedPartnerId())))
+                .isPresent();
+    }
+
     public void publishTyping(Long roomId, ChatActor actor, ChatEventType eventType) {
         requireRoomAccess(roomId, actor);
         String key = typingKey(roomId, actor);
@@ -300,11 +320,11 @@ public class ChatService {
 
     private void validateRoomCreationAccess(ChatActor actor, Order order) {
         if (actor.participantType() == ChatParticipantType.CUSTOMER && !actor.participantId().equals(order.getUserId())) {
-            throw new AccessDeniedException("Access denied to chat room");
+            throw new AccessDeniedException(ACCESS_DENIED_TO_CHAT_ROOM);
         }
         if (actor.participantType() == ChatParticipantType.PARTNER) {
             if (order.getAssignedPartnerId() == null || !actor.participantId().equals(order.getAssignedPartnerId())) {
-                throw new AccessDeniedException("Access denied to chat room");
+                throw new AccessDeniedException(ACCESS_DENIED_TO_CHAT_ROOM);
             }
         }
     }
@@ -312,8 +332,9 @@ public class ChatService {
     private ChatRoom requireRoomAccess(Long roomId, ChatActor actor) {
         ChatRoom room = chatRoomRepository.findByIdAndDeletedFalse(roomId)
                 .orElseThrow(() -> new ResourceNotFoundException("Chat room not found"));
-        if (!hasRoomAccess(roomId, actor)) {
-            throw new AccessDeniedException("Access denied to chat room");
+        if (!chatParticipantRepository.existsByRoom_IdAndParticipantTypeAndParticipantIdAndDeletedFalse(
+                roomId, actor.participantType(), actor.participantId())) {
+            throw new AccessDeniedException(ACCESS_DENIED_TO_CHAT_ROOM);
         }
         return room;
     }
@@ -321,7 +342,7 @@ public class ChatService {
     private ChatParticipant currentParticipant(Long roomId, ChatActor actor) {
         return chatParticipantRepository.findByRoom_IdAndParticipantTypeAndParticipantIdAndDeletedFalse(
                         roomId, actor.participantType(), actor.participantId())
-                .orElseThrow(() -> new AccessDeniedException("Access denied to chat room"));
+                .orElseThrow(() -> new AccessDeniedException(ACCESS_DENIED_TO_CHAT_ROOM));
     }
 
     private ChatParticipant otherParticipant(ChatRoom room, ChatActor actor) {

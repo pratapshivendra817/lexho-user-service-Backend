@@ -52,7 +52,6 @@ class PublicApiRateLimitFilterTest {
         return Stream.of(
                 Arguments.of("POST", "/otp/send", "{\"mobile\":\" 9999999999 \"}", "otp_send", "9999999999", 5, 15),
                 Arguments.of("POST", "/otp/verify", "{\"mobile\":\"9999999998\"}", "otp_verify", "9999999998", 10, 15),
-                Arguments.of("POST", "/api/admin/login", "{\"email\":\" ADMIN@EXAMPLE.COM \"}", "admin_login", "admin@example.com", 5, 15),
                 Arguments.of("POST", "/api/payments/retry", "{\"bookingId\":\"ABC-1\"}", "payment_retry", "abc-1", 5, 1),
                 Arguments.of("POST", "/api/v1/payments/retry", "{}", "payment_retry", "missing", 5, 1)
         );
@@ -135,6 +134,19 @@ class PublicApiRateLimitFilterTest {
     @Test
     void bypassesUnmatchedRequestsWithoutWrapping() throws Exception {
         MockHttpServletRequest request = request("GET", "/health", "{\"value\":1}");
+
+        filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+
+        verify(rateLimiterService, never()).check(anyString(), anyString(), anyInt(), any(), anyString());
+        ArgumentCaptor<jakarta.servlet.ServletRequest> requestCaptor =
+                ArgumentCaptor.forClass(jakarta.servlet.ServletRequest.class);
+        verify(filterChain).doFilter(requestCaptor.capture(), any());
+        assertThat(requestCaptor.getValue()).isSameAs(request);
+    }
+
+    @Test
+    void leavesAdminLoginRateLimitToDedicatedAuthService() throws Exception {
+        MockHttpServletRequest request = request("POST", "/api/admin/login", "{\"email\":\"admin@example.com\"}");
 
         filter.doFilter(request, new MockHttpServletResponse(), filterChain);
 

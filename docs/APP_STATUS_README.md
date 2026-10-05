@@ -120,11 +120,6 @@ Customer-facing controllers present in repo include:
 Partner app backend coverage currently available:
 
 - Partner OTP login and refresh token flow
-- Partner onboarding
-- Document upload
-- Profile read/update
-- Profile image upload
-- KYC workflow
 - Bank details get/update
 - Bank verification status flow
 - Availability update
@@ -160,8 +155,6 @@ Partner app backend coverage currently available:
 Main partner API groups:
 
 - Auth: `POST /otp/send`, `POST /otp/verify`, `POST /api/auth/refresh`
-- Profile: `GET /api/v1/partner/profile`, `PUT /api/v1/partner/profile`, `POST /api/v1/partner/profile-image`
-- Documents/KYC: `POST /api/v1/partner/documents`
 - Dashboard: `GET /api/v1/partner/dashboard/stats`, `GET /api/v1/partner/banners`
 - Orders: `GET /api/v1/orders/new`, `GET /api/v1/orders/{id}`, `POST /api/v1/orders/{id}/accept`, `POST /api/v1/orders/{id}/reject`, `POST /api/v1/orders/{id}/start`, `POST /api/v1/orders/{id}/complete`, `GET /api/v1/orders/{id}/timeline`, `GET /api/v1/orders/history`
 - Requests: `GET /api/v1/partner/requests`, `GET /api/v1/partner/requests/{requestId}`, `PATCH /api/v1/partner/requests/{requestId}/accept`, `PATCH /api/v1/partner/requests/{requestId}/reject`
@@ -181,12 +174,11 @@ Partner-facing controllers present in repo include:
 - `PartnerDispatchCompatibilityController`
 - `PartnerRequestController`
 - `PartnerLiveTrackingController`
-- `ProviderOnboardingController`
 - `ProviderReviewController`
 
 Partner services present in repo include:
 
-- `PartnerProfileService`
+- `PartnerOperationalProfileService`
 - `PartnerOrderService`
 - `PartnerOperationsService`
 - `PartnerSettlementService`
@@ -223,8 +215,6 @@ Admin app backend coverage currently available:
 - Customer management
 - Customer delete request handling
 - User management
-- Partner onboarding governance
-- Partner KYC review
 - Partner bank verification review
 - Partner penalty management
 - Partner settlements and withdrawal admin controls
@@ -331,7 +321,7 @@ Examples present in repo:
 If you are planning frontend work:
 
 - `admin app` backend is broadly ready across dashboard, catalog, bookings, partners, payments, geo, notifications, and reviews.
-- `partner app` backend is broadly ready across profile, KYC, orders, dispatch, payouts, notifications, leave, and service areas.
+- `partner app` backend is broadly ready across runtime operations, orders, dispatch, payouts, notifications, leave, and service areas.
 - `customer app` backend is broadly ready across auth, home, services, cart, booking, payment, subscriptions, location, profile, and reviews.
 
 What is not guaranteed by this file:

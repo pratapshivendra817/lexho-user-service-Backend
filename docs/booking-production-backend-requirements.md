@@ -989,7 +989,7 @@ Example invalid-file-type response:
   "code": "INVALID_FILE_TYPE",
   "message": "Only jpg, jpeg, png, and pdf files are allowed",
   "timestamp": "2026-06-09T10:30:00Z",
-  "path": "/api/partner/documents/upload"
+  "path": "/api/admin/upload/image"
 }
 ```
 
@@ -1000,7 +1000,7 @@ Example scan-failed response:
   "code": "FILE_SCAN_FAILED",
   "message": "File could not be accepted",
   "timestamp": "2026-06-09T10:30:00Z",
-  "path": "/api/partner/documents/upload"
+  "path": "/api/admin/upload/image"
 }
 ```
 

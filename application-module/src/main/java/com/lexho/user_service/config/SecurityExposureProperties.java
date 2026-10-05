@@ -10,7 +10,6 @@ public class SecurityExposureProperties {
     private boolean exposeSwagger = false;
     private boolean allowInternalOpen = false;
     private boolean allowPublicCustomerRead = false;
-    private boolean allowPublicProviderOnboarding = false;
     private boolean allowPublicAdminProfileContent = false;
     private boolean allowPartnerRequestDevSeed = false;
 
@@ -36,14 +35,6 @@ public class SecurityExposureProperties {
 
     public void setAllowPublicCustomerRead(boolean allowPublicCustomerRead) {
         this.allowPublicCustomerRead = allowPublicCustomerRead;
-    }
-
-    public boolean isAllowPublicProviderOnboarding() {
-        return allowPublicProviderOnboarding;
-    }
-
-    public void setAllowPublicProviderOnboarding(boolean allowPublicProviderOnboarding) {
-        this.allowPublicProviderOnboarding = allowPublicProviderOnboarding;
     }
 
     public boolean isAllowPublicAdminProfileContent() {

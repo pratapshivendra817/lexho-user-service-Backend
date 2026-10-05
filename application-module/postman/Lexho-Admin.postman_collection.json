@@ -12,9 +12,9 @@
         "type": "text/javascript",
         "exec": [
           "const expectedByRequest = {",
+          "  'Login': [200, 401, 429],",
           "  'Verify OTP': [200, 400],",
           "  'Get Booking': [200, 404, 500],",
-          "  'Update Verification': [200, 400, 404],",
           "  'Delete Review': [200, 404, 500],",
           "  'Flag Review': [200, 404, 500],",
           "  'Create Notification': [200, 400, 404],",
@@ -144,7 +144,7 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/users?page=1&limit=10&search=&status="
+            "url": "{{baseUrl}}/api/admin/customers?page=0&size=10&search="
           }
         },
         {
@@ -157,20 +157,28 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/users/{{userId}}"
+            "url": "{{baseUrl}}/api/admin/customers/{{userId}}"
           }
         },
         {
           "name": "Toggle User",
           "request": {
-            "method": "PUT",
+            "method": "PATCH",
             "header": [
               {
                 "key": "Authorization",
                 "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/users/{{userId}}/block"
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/admin/customers/{{userId}}/status"
           }
         }
       ]
@@ -188,7 +196,7 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/bookings?page=1&limit=10&search=&status="
+            "url": "{{baseUrl}}/api/v1/admin/booking-management?page=0&size=10&search=&status="
           }
         },
         {
@@ -201,59 +209,7 @@
                 "value": "Bearer {{accessToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/admin/bookings/{{bookingId}}"
-          }
-        }
-      ]
-    },
-    {
-      "name": "Partners",
-      "item": [
-        {
-          "name": "List Partners",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": "{{baseUrl}}/api/admin/partners?page=1&limit=10&search=&status="
-          }
-        },
-        {
-          "name": "Get Partner",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": "{{baseUrl}}/api/admin/partners/{{partnerId}}"
-          }
-        },
-        {
-          "name": "Update Verification",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"status\": \"VERIFIED\"\n}"
-            },
-            "url": "{{baseUrl}}/api/admin/partners/{{partnerId}}/verification"
+            "url": "{{baseUrl}}/api/v1/admin/booking-management/{{bookingId}}"
           }
         }
       ]
@@ -370,7 +326,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Service Update\",\n  \"message\": \"Your booking has been updated\",\n  \"notificationType\": \"SYSTEM_ALERT\",\n  \"priority\": \"NORMAL\",\n  \"channels\": [\"PUSH\"],\n  \"targetUserType\": \"CUSTOMER\",\n  \"userIds\": [{{userId}}],\n  \"referenceId\": {{bookingId}},\n  \"referenceType\": \"BOOKING\",\n  \"redirectType\": \"NONE\"\n}"
+              "raw": "{\n  \"title\": \"Service Update\",\n  \"message\": \"Your booking has been updated\",\n  \"notificationType\": \"SYSTEM\",\n  \"priority\": \"MEDIUM\",\n  \"channels\": [\"IN_APP\"],\n  \"targetUserType\": \"CUSTOMER\",\n  \"userIds\": [{{userId}}],\n  \"referenceId\": {{bookingId}},\n  \"referenceType\": \"BOOKING\",\n  \"redirectType\": \"NONE\"\n}"
             },
             "url": "{{baseUrl}}/api/admin/notifications/send"
           }

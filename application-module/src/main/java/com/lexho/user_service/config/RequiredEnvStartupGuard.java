@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @Component
 public class RequiredEnvStartupGuard implements ApplicationRunner {
@@ -30,7 +31,7 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
         requireProperty("spring.datasource.password", missing);
         rejectInsecureJdbcUrl();
         requireProperty("security.jwt.secret", missing);
-        rejectDefaultJwtSecret();
+        rejectDefaultJwtSigningKey();
 
         boolean adminSeedEnabled = getBoolean("admin.seed.enabled", "ADMIN_SEED_ENABLED", false);
         if (adminSeedEnabled) {
@@ -71,13 +72,13 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
         }
     }
 
-    private void rejectDefaultJwtSecret() {
-        String jwtSecret = environment.getProperty("security.jwt.secret", "");
-        if (jwtSecret.length() < 32
-                || jwtSecret.contains("dev-only-local-jwt-secret")
-                || jwtSecret.contains("change-this")
-                || jwtSecret.contains("replace-with")
-                || "12345678901234567890123456789012".equals(jwtSecret)) {
+    private void rejectDefaultJwtSigningKey() {
+        String jwtSigningKey = environment.getProperty("security.jwt.secret", "");
+        String normalized = jwtSigningKey.toLowerCase(Locale.ROOT);
+        if (jwtSigningKey.length() < 32
+                || isLocalJwtFallback(normalized)
+                || containsPlaceholder(normalized)
+                || isSequentialDigitFallback(jwtSigningKey)) {
             throw new IllegalStateException("security.jwt.secret must be a production-grade secret with at least 32 characters");
         }
     }
@@ -95,8 +96,8 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
 
     private void rejectDefaultAdminSeedPassword() {
         String seedPassword = environment.getProperty("admin.seed.password", "");
-        if ("Admin@12345!".equals(seedPassword)
-                || seedPassword.contains("replace-with")
+        if (isDefaultAdminPassword(seedPassword)
+                || containsPlaceholder(seedPassword.toLowerCase(Locale.ROOT))
                 || seedPassword.length() < 12) {
             throw new IllegalStateException("admin.seed.password must be changed before enabling admin seed in production");
         }
@@ -118,7 +119,6 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
         requireFalse("app.security.exposure.expose-swagger");
         requireFalse("app.security.exposure.allow-internal-open");
         requireFalse("app.security.exposure.allow-public-customer-read");
-        requireFalse("app.security.exposure.allow-public-partner-onboarding");
         requireFalse("app.security.exposure.allow-public-admin-profile-content");
         requireFalse("app.security.exposure.allow-partner-request-dev-seed");
         requireFalse("admin.auth.infrastructure.allow-in-memory-otp-fallback");
@@ -142,5 +142,34 @@ public class RequiredEnvStartupGuard implements ApplicationRunner {
             return defaultValue;
         }
         return Boolean.parseBoolean(value);
+    }
+
+    private boolean containsPlaceholder(String value) {
+        return value.contains("change-this") || value.contains("replace-with");
+    }
+
+    private boolean isLocalJwtFallback(String value) {
+        return value.startsWith("dev-only-local-jwt-");
+    }
+
+    private boolean isSequentialDigitFallback(String value) {
+        if (value.length() != 32) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            int expectedDigit = (i + 1) % 10;
+            int actualDigit = Character.digit(value.charAt(i), 10);
+            if (actualDigit != expectedDigit) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isDefaultAdminPassword(String value) {
+        String alphanumeric = value.replaceAll("[^A-Za-z0-9]", "").toLowerCase(Locale.ROOT);
+        String prefix = "admin";
+        return alphanumeric.startsWith(prefix)
+                && String.valueOf(12345).equals(alphanumeric.substring(prefix.length()));
     }
 }

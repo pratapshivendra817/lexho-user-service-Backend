@@ -39,7 +39,7 @@ public class ChatWebSocketController {
 
     private ChatActor actor(Principal principal) {
         if (!(principal instanceof Authentication authentication)) {
-            throw new IllegalArgumentException("Authenticated chat actor is required");
+            throw new IllegalArgumentException(ChatActor.AUTHENTICATED_CHAT_ACTOR_REQUIRED);
         }
         return ChatActor.fromAuthentication(authentication);
     }

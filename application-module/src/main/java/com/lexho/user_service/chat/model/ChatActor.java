@@ -6,9 +6,11 @@ import org.springframework.security.core.GrantedAuthority;
 
 public record ChatActor(ChatParticipantType participantType, Long participantId) {
 
+    public static final String AUTHENTICATED_CHAT_ACTOR_REQUIRED = "Authenticated chat actor is required";
+
     public static ChatActor fromRole(String role, Long userId) {
         if (role == null || userId == null) {
-            throw new IllegalArgumentException("Authenticated chat actor is required");
+            throw new IllegalArgumentException(AUTHENTICATED_CHAT_ACTOR_REQUIRED);
         }
         if ("CUSTOMER".equalsIgnoreCase(role)) {
             return new ChatActor(ChatParticipantType.CUSTOMER, userId);
@@ -21,18 +23,18 @@ public record ChatActor(ChatParticipantType participantType, Long participantId)
 
     public static ChatActor fromAuthentication(Authentication authentication) {
         if (authentication == null || authentication.getDetails() == null) {
-            throw new IllegalArgumentException("Authenticated chat actor is required");
+            throw new IllegalArgumentException(AUTHENTICATED_CHAT_ACTOR_REQUIRED);
         }
         Long userId = authentication.getDetails() instanceof Long id ? id : null;
         if (userId == null) {
-            throw new IllegalArgumentException("Authenticated chat actor is required");
+            throw new IllegalArgumentException(AUTHENTICATED_CHAT_ACTOR_REQUIRED);
         }
         String role = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .filter(authority -> authority.startsWith("ROLE_"))
                 .findFirst()
                 .map(authority -> authority.substring("ROLE_".length()))
-                .orElseThrow(() -> new IllegalArgumentException("Authenticated chat actor is required"));
+                .orElseThrow(() -> new IllegalArgumentException(AUTHENTICATED_CHAT_ACTOR_REQUIRED));
         return fromRole(role, userId);
     }
 

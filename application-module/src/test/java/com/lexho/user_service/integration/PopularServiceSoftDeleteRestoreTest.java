@@ -1,5 +1,6 @@
 package com.lexho.user_service.integration;
 
+import com.lexho.testconfig.LexhoInfrastructureTest;
 import com.lexho.admin.entity.Admin;
 import com.lexho.user_service.admin.dto.PopularServiceUpsertRequest;
 import com.lexho.user_service.admin.entity.ActivityLog;
@@ -19,10 +20,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.SpringBootConfiguration;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.TestPropertySource;
 
@@ -34,10 +35,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(classes = PopularServiceSoftDeleteRestoreTest.JpaTestConfig.class)
-@AutoConfigureTestDatabase
+@LexhoInfrastructureTest
+@ActiveProfiles("it")
 @TestPropertySource(properties = {
         "spring.flyway.enabled=false",
-        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 class PopularServiceSoftDeleteRestoreTest {

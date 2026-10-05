@@ -3,17 +3,20 @@ package com.lexho.user_service.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.admin.entity.Admin;
 import com.lexho.admin.repository.AdminRepository;
+import com.lexho.user_service.service.AdminAuthService;
 import com.lexho.user_service.util.JwtUtil;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -40,7 +43,6 @@ class JwtFilterTest {
                 .withProperty("app.security.exposure.expose-swagger", "false")
                 .withProperty("app.security.exposure.allow-internal-open", "false")
                 .withProperty("app.security.exposure.allow-public-customer-read", "false")
-                .withProperty("app.security.exposure.allow-public-partner-onboarding", "false")
                 .withProperty("app.security.exposure.allow-public-admin-profile-content", "false");
         filter = new JwtFilter(jwtUtil, new ObjectMapper(), adminRepository, environment);
     }
@@ -55,7 +57,8 @@ class JwtFilterTest {
             "/", "/error", "/favicon.ico", "/ping", "/health", "/health/readiness",
             "/api/health", "/api/health/ping", "/actuator/health", "/api/payments/webhook",
             "/otp/send", "/auth/login", "/api/otp/send", "/api/auth/login", "/uploads/a.png",
-            "/images/a.png", "/api/admin/login", "/internal/auth/user", "/internal/bookings/1",
+            "/customer/otp/send", "/partner/otp/send", "/images/a.png", "/api/admin/login",
+            "/internal/auth/user", "/internal/bookings/1",
             "/api/admin/profile-content", "/api/v1/admin/profile-content",
             "/ws-notifications"
     })
@@ -71,14 +74,59 @@ class JwtFilterTest {
         assertThat(filter.shouldNotFilter(request("GET", "/api/private"))).isFalse();
         environment.setProperty("app.security.exposure.expose-swagger", "true");
         environment.setProperty("app.security.exposure.allow-public-customer-read", "true");
-        environment.setProperty("app.security.exposure.allow-public-partner-onboarding", "true");
         assertThat(filter.shouldNotFilter(request("GET", "/swagger-ui/index.html"))).isTrue();
         assertThat(filter.shouldNotFilter(request("GET", "/internal/auth/user"))).isTrue();
         assertThat(filter.shouldNotFilter(request("GET", "/api/customer/services"))).isTrue();
         assertThat(filter.shouldNotFilter(request("GET", "/api/admin/profile-content"))).isTrue();
         assertThat(filter.shouldNotFilter(request("GET", "/api/v1/admin/profile-content"))).isTrue();
         assertThat(filter.shouldNotFilter(request("PUT", "/api/admin/profile-content"))).isFalse();
-        assertThat(filter.shouldNotFilter(request("GET", "/api/partner/onboarding"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("GET", "/api/partner/onboarding"))).isFalse();
+    }
+
+    @Test
+    void publicSupportEndpointsBypassJwtWithoutExposureFlags() {
+        assertThat(filter.shouldNotFilter(request("GET", "/api/public/support/faqs"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("GET", "/api/public/support/faqs/"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("POST", "/api/public/support/tickets"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("POST", "/api/public/support/tickets/"))).isTrue();
+        assertThat(filter.shouldNotFilter(request("POST", "/api/public/support/faqs"))).isFalse();
+        assertThat(filter.shouldNotFilter(request("GET", "/api/public/support/tickets"))).isFalse();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "GET,/api/customer/profile",
+            "POST,/api/customer/profile",
+            "GET,/api/v1/customer/location/addresses",
+            "POST,/api/v1/customer/location/addresses",
+            "PUT,/api/partner/availability",
+            "GET,/api/v1/partner/dashboard/stats",
+            "POST,/api/v1/partner/dispatch/location",
+            "GET,/api/admin/dashboard/stats",
+            "POST,/api/admin/notifications/send",
+            "GET,/api/v1/admin/partners",
+            "PATCH,/api/v1/admin/geo/cities/1"
+    })
+    void customerPartnerAndAdminPrivateNamespacesRequireJwtFiltering(String method, String path) {
+        assertThat(filter.shouldNotFilter(request(method, path))).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/api/home/dashboard",
+            "/api/services/popular",
+            "/api/services/recommended",
+            "/api/services/quick",
+            "/api/search/services",
+            "/api/slots/available",
+            "/api/payments/legacy-options",
+            "/api/coupon/list",
+            "/api/reviews/service/1",
+            "/api/support/faqs"
+    })
+    void customerBootstrapReadEndpointsArePublicOnlyForGetRequests(String path) {
+        assertThat(filter.shouldNotFilter(request("GET", path))).isTrue();
+        assertThat(filter.shouldNotFilter(request("POST", path))).isFalse();
     }
 
     @Test
@@ -127,6 +175,23 @@ class JwtFilterTest {
     }
 
     @Test
+    void cookieOnlyApiRequestIsNotTreatedAsAuthenticated() throws Exception {
+        MockHttpServletRequest request = request("POST", "/api/customer/profile");
+        request.setCookies(
+                new Cookie("Authorization", "Bearer valid"),
+                new Cookie("access_token", "valid"),
+                new Cookie("JSESSIONID", "session-id")
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("Authorization token is required");
+        verifyNoInteractions(jwtUtil, adminRepository, chain);
+    }
+
+    @Test
     void validCustomerTokenPopulatesAuthenticationAndRequestAttributes() throws Exception {
         Claims claims = claims(7L, "9999999999", "CUSTOMER", "user@example.com");
         when(jwtUtil.validateToken("valid")).thenReturn(claims);
@@ -167,6 +232,8 @@ class JwtFilterTest {
         MockHttpServletResponse invalidResponse = new MockHttpServletResponse();
         filter.doFilterInternal(invalid, invalidResponse, chain);
         assertThat(invalidResponse.getStatus()).isEqualTo(401);
+        assertThat(invalidResponse.getContentAsString())
+                .contains(AdminAuthService.ADMIN_PORTAL_ACCESS_DENIED_MESSAGE);
 
         when(jwtUtil.validateToken("broken")).thenThrow(new IllegalArgumentException("expired"));
         MockHttpServletRequest broken = request("GET", "/api/private");
@@ -174,6 +241,56 @@ class JwtFilterTest {
         MockHttpServletResponse brokenResponse = new MockHttpServletResponse();
         filter.doFilterInternal(broken, brokenResponse, chain);
         assertThat(brokenResponse.getContentAsString()).contains("Invalid or expired token");
+    }
+
+    @Test
+    void malformedClaimsReturnUnauthorizedWithoutRawRuntimeFailure() throws Exception {
+        Claims claims = mock(Claims.class);
+        when(jwtUtil.validateToken("missing-claims")).thenReturn(claims);
+        MockHttpServletRequest request = request("GET", "/api/private");
+        request.addHeader("Authorization", "Bearer missing-claims");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("Invalid or expired token");
+        verifyNoInteractions(chain);
+    }
+
+    @Test
+    void v1AdminPathsAlsoRequireActiveAdminAccountValidation() throws Exception {
+        Admin inactiveAdmin = mock(Admin.class);
+        when(inactiveAdmin.isActive()).thenReturn(false);
+        when(adminRepository.findByEmailIgnoreCase("admin@example.com")).thenReturn(Optional.of(inactiveAdmin));
+        Claims inactiveAdminClaims = claims(9L, "admin", "ADMIN", "admin@example.com");
+        when(jwtUtil.validateToken("inactive-admin")).thenReturn(inactiveAdminClaims);
+        MockHttpServletRequest request = request("PUT", "/api/v1/admin/screening-centre");
+        request.addHeader("Authorization", "Bearer inactive-admin");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString())
+                .contains(AdminAuthService.ADMIN_PORTAL_ACCESS_DENIED_MESSAGE);
+        verifyNoInteractions(chain);
+    }
+
+    @Test
+    void nonAdminTokenCannotAccessAdminPortal() throws Exception {
+        Claims claims = claims(7L, "9999999999", "CUSTOMER", "customer@example.com");
+        when(jwtUtil.validateToken("customer")).thenReturn(claims);
+        MockHttpServletRequest request = request("GET", "/api/admin/users");
+        request.addHeader("Authorization", "Bearer customer");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString())
+                .contains(AdminAuthService.ADMIN_PORTAL_ACCESS_DENIED_MESSAGE);
+        verifyNoInteractions(adminRepository, chain);
     }
 
     private Claims claims(Long userId, String subject, String role, String email) {

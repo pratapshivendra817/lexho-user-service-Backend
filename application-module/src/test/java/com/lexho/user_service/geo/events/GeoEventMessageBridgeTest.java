@@ -8,6 +8,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import java.time.Instant;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -53,7 +54,7 @@ class GeoEventMessageBridgeTest {
                 rabbitTemplate, objectMapper, routingPartitionService, true, "geo.exchange", "geo.events");
         when(objectMapper.writeValueAsString(event)).thenThrow(new JsonProcessingException("bad") { });
 
-        serializationBridge.onGeoEvent(event);
+        assertThatCode(() -> serializationBridge.onGeoEvent(event)).doesNotThrowAnyException();
 
         ObjectMapper publishMapper = mock(ObjectMapper.class);
         GeoEventMessageBridge publishBridge = new GeoEventMessageBridge(
@@ -62,6 +63,6 @@ class GeoEventMessageBridgeTest {
         when(routingPartitionService.routingKey("geo.events", event)).thenReturn("geo.events.p1");
         doThrow(new RuntimeException("down")).when(rabbitTemplate).convertAndSend("geo.exchange", "geo.events.p1", (Object) "{json}");
 
-        publishBridge.onGeoEvent(event);
+        assertThatCode(() -> publishBridge.onGeoEvent(event)).doesNotThrowAnyException();
     }
 }

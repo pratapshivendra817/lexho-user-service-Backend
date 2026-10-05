@@ -1,19 +1,39 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="UserServiceApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
-    <option name="ALTERNATIVE_JRE_PATH" value="17" />
-    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
-    <envs>
-      <env name="DB_URL" value="jdbc:mysql://localhost:3306/user_servicedb?useSSL=false&amp;serverTimezone=UTC&amp;allowPublicKeyRetrieval=true" />
-      <env name="DB_USERNAME" value="root" />
-      <env name="DB_PASSWORD" value="Muskaan@8756" />
-      <env name="JWT_SECRET" value="9xK2mQ7pL8rT5vN1cW4yB6dF3hJ0sZ2uP9eR7tY1" />
-      <env name="ADMIN_SEED_PASSWORD" value="Admin@12345!" />
-    </envs>
-    <module name="application-module" />
-    <option name="SPRING_BOOT_MAIN_CLASS" value="com.lexho.user_service.UserServiceApplication" />
-    <option name="WORKING_DIRECTORY" value="file://$PROJECT_DIR$/application-module" />
-    <method v="2">
-      <option name="Make" enabled="true" />
-    </method>
+  <configuration default="false" name="UserServiceApplication" type="MavenRunConfiguration" factoryName="Maven">
+    <MavenSettings>
+      <option name="myGeneralSettings">
+        <MavenGeneralSettings>
+          <option name="myMavenHomeTypeForPersistence" value="WRAPPED" />
+        </MavenGeneralSettings>
+      </option>
+      <option name="myRunnerSettings">
+        <MavenRunnerSettings>
+          <option name="environmentProperties">
+            <map>
+              <entry key="SPRING_PROFILES_ACTIVE" value="dev" />
+              <entry key="LEXHO_AUTH_OTP_LOG_TO_CONSOLE" value="true" />
+            </map>
+          </option>
+        </MavenRunnerSettings>
+      </option>
+      <option name="myRunnerParameters">
+        <MavenRunnerParameters>
+          <option name="workingDirPath" value="$PROJECT_DIR$" />
+          <option name="pomFileName" value="pom.xml" />
+          <option name="profilesMap">
+            <map />
+          </option>
+          <option name="goals">
+            <list>
+              <option value="-pl" />
+              <option value="application-module" />
+              <option value="-Dmaven.test.skip=true" />
+              <option value="spring-boot:run" />
+            </list>
+          </option>
+        </MavenRunnerParameters>
+      </option>
+    </MavenSettings>
+    <method v="2" />
   </configuration>
 </component>

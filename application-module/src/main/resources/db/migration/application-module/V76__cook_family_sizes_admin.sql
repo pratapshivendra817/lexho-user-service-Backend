@@ -15,7 +15,8 @@ VALUES
     (2, 'MEDIUM', '3-5 Members', TRUE, 2),
     (3, 'LARGE', '6-8 Members', TRUE, 3),
     (4, 'XLARGE', '9+ Members', TRUE, 4)
+AS incoming
 ON DUPLICATE KEY UPDATE
-    family_size_label = VALUES(family_size_label),
-    active = VALUES(active),
-    display_order = VALUES(display_order);
+    family_size_label = incoming.family_size_label,
+    active = incoming.active,
+    display_order = incoming.display_order;

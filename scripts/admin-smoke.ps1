@@ -1,8 +1,7 @@
 param(
     [string]$BaseUrl = "http://localhost:8082",
     [string]$Email = "admin@lexho.com",
-    [string]$Password = "",
-    [long]$ProviderId = 1
+    [string]$Password = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,13 +45,5 @@ $headers = @{
 Write-Host "3) Dashboard stats"
 $statsResponse = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/admin/dashboard/stats" -Headers $headers
 $statsResponse | ConvertTo-Json -Depth 10 | Write-Host
-
-Write-Host "4) PATCH partner verification (CORS-sensitive endpoint)"
-$patchBody = @{
-    status = "VERIFIED"
-} | ConvertTo-Json
-
-$providerPatchResponse = Invoke-RestMethod -Method Patch -Uri "$BaseUrl/api/admin/partners/$ProviderId/verification" -Headers $headers -ContentType "application/json" -Body $patchBody
-$providerPatchResponse | ConvertTo-Json -Depth 10 | Write-Host
 
 Write-Host "Admin smoke flow completed successfully."

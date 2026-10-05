@@ -16,8 +16,6 @@ CREATE TABLE IF NOT EXISTS partners (
     experience_years INT NOT NULL DEFAULT 0,
     account_number VARCHAR(64) NOT NULL,
     ifsc_code VARCHAR(20) NOT NULL,
-    kyc_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-    kyc_failed_reason VARCHAR(500),
     onboarding_status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     rejection_reason VARCHAR(500),
     blocked_reason VARCHAR(500),
@@ -35,22 +33,7 @@ CREATE TABLE IF NOT EXISTS provider_service_areas (
     CONSTRAINT fk_provider_service_areas_provider FOREIGN KEY (provider_id) REFERENCES partners(id)
 );
 
-CREATE TABLE IF NOT EXISTS provider_documents (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    provider_id BIGINT NOT NULL,
-    document_type VARCHAR(30) NOT NULL,
-    file_image VARCHAR(1000) NOT NULL,
-    file_name VARCHAR(255) NOT NULL,
-    file_type VARCHAR(100) NOT NULL,
-    uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_provider_documents_provider FOREIGN KEY (provider_id) REFERENCES partners(id)
-);
-
 CREATE INDEX idx_providers_onboarding_status ON partners(onboarding_status);
-CREATE INDEX idx_providers_kyc_status ON partners(kyc_status);
 CREATE INDEX idx_providers_city ON partners(city);
 CREATE INDEX idx_providers_service_category ON partners(service_category_id);
 CREATE INDEX idx_providers_phone_number ON partners(phone_number);
-CREATE INDEX idx_provider_documents_provider ON provider_documents(provider_id);
-CREATE UNIQUE INDEX uq_provider_documents_provider_type ON provider_documents(provider_id, document_type);
-

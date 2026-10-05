@@ -6,7 +6,7 @@ param(
     [string]$DbUsername = "root",
     [string]$DbPassword = "",
     [string]$RedisHost = "localhost",
-    [string]$RedisPort = "6379",
+    [string]$RedisPort = "6380",
     [switch]$EnableRabbit
 )
 
@@ -15,6 +15,7 @@ $env:DB_USERNAME = $DbUsername
 $env:DB_PASSWORD = $DbPassword
 $env:REDIS_HOST = $RedisHost
 $env:REDIS_PORT = $RedisPort
+$env:IT_REDIS_PORT = $RedisPort
 
 $env:APP_GEO_EVENTS_RABBIT_ENABLED = $EnableRabbit.IsPresent.ToString().ToLower()
 $env:APP_GEO_EVENTS_RABBIT_CONSUMER_ENABLED = $EnableRabbit.IsPresent.ToString().ToLower()

@@ -1,30 +1,40 @@
 package com.lexho.user_service.config;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.context.NullSecurityContextRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.Arrays;
 import java.util.List;
-import java.util.StringTokenizer;
 
 @Configuration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
+
+    private static final AntPathMatcher CSRF_PATH_MATCHER = new AntPathMatcher();
+    private static final RequestMatcher DEFAULT_CSRF_MATCHER = CsrfFilter.DEFAULT_CSRF_MATCHER;
+    private static final String ROLE_ADMIN = "ADMIN";
+    private static final String ROLE_CUSTOMER = "CUSTOMER";
+    private static final String ROLE_PARTNER = "PARTNER";
 
     private final JwtFilter jwtFilter;
     private final InternalApiTokenFilter internalApiTokenFilter;
@@ -41,11 +51,19 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                // These endpoints are safe to exempt from CSRF because the service is fully stateless:
-                // JWTs are accepted only from the Authorization header, no HttpSession is used, and
-                // CORS credentials remain disabled so browsers do not attach ambient cookies.
-                .csrf(csrf -> csrf.ignoringRequestMatchers(csrfExemptPaths()))
+                // CSRF remains enabled for unsafe requests unless the request targets a stateless
+                // API namespace. Those API paths authenticate through explicit headers
+                // (Authorization: Bearer or X-Internal-Token), Spring Security does not persist an
+                // HttpSession, and cross-origin credentialed requests are disabled by the CORS
+                // configuration below.
+                .csrf(csrf -> csrf.requireCsrfProtectionMatcher(csrfProtectionRequestMatcher()))
                 .cors(Customizer.withDefaults())
+                .securityContext(securityContext -> securityContext
+                        .securityContextRepository(new NullSecurityContextRepository()))
+                .requestCache(AbstractHttpConfigurer::disable)
+                .formLogin(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable)
+                .logout(AbstractHttpConfigurer::disable)
                 .headers(headers -> headers
                         .frameOptions(frame -> frame.deny())
                         .contentTypeOptions(Customizer.withDefaults())
@@ -71,10 +89,60 @@ public class SecurityConfig {
                     auth.requestMatchers("/internal/**").hasRole("INTERNAL");
                     auth.requestMatchers("/ws-notifications/**", "/ws/admin/notifications/**", "/ws/customer/bookings/**", "/ws-chat/**").permitAll();
                     auth.requestMatchers("/uploads/**", "/images/**").permitAll();
-                    auth.requestMatchers("/otp/**", "/auth/**", "/api/otp/**", "/api/auth/**", "/api/v1/auth/**").permitAll();
+                    auth.requestMatchers(
+                            "/otp/**",
+                            "/auth/**",
+                            "/customer/otp/**",
+                            "/partner/otp/**",
+                            "/api/otp/**",
+                            "/api/auth/**",
+                            "/api/customer/otp/**",
+                            "/api/partner/otp/**",
+                            "/api/v1/auth/**",
+                            "/api/v1/customer/otp/**",
+                            "/api/v1/partner/otp/**"
+                    ).permitAll();
                     auth.requestMatchers(HttpMethod.POST, "/api/payments/webhook", "/api/payments/webhook/razorpay",
                             "/api/v1/webhooks/razorpay").permitAll();
                     auth.requestMatchers("/api/admin/login", "/api/admin/verify-otp").permitAll();
+                    auth.requestMatchers("/api/banners", "/api/banners/**", "/api/categories", "/api/categories/**").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/api/customer/banners").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/api/customer/home/banners", "/api/customer/home/banners/**").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/api/customer/home/sections", "/api/customer/home/sections/**").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/api/customer/services", "/api/customer/services/**").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/api/customer/profile-content").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/api/public/social-media").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, "/api/public/website/**").permitAll();
+                    auth.requestMatchers(HttpMethod.GET, publicSupportPaths()[0], publicSupportPaths()[0] + "/").permitAll();
+                    auth.requestMatchers(HttpMethod.POST, publicSupportPaths()[1], publicSupportPaths()[1] + "/").permitAll();
+                    auth.requestMatchers(HttpMethod.GET,
+                            "/api/content/documents/**",
+                            "/api/v1/content/documents/**",
+                            "/api/v1/legal/current",
+                            "/api/v1/legal/terms",
+                            "/api/v1/legal/privacy",
+                            "/api/v1/legal/cancellation",
+                            "/api/v1/legal/partner-terms",
+                            "/api/v1/legal/cookie",
+                            "/api/v1/legal/disclaimer",
+                            "/api/v1/legal/grievance",
+                            "/api/v1/legal/home",
+                            "/api/v1/legal/about",
+                            "/api/v1/faqs",
+                            "/api/v1/support/contact"
+                    ).permitAll();
+                    auth.requestMatchers(HttpMethod.GET,
+                            "/api/home/dashboard",
+                            "/api/services/popular",
+                            "/api/services/recommended",
+                            "/api/services/quick",
+                            "/api/search/services",
+                            "/api/slots/available",
+                            "/api/payments/legacy-options",
+                            "/api/coupon/list",
+                            "/api/reviews/service/**",
+                            "/api/support/faqs"
+                    ).permitAll();
 
                     if (isExposeSwagger()) {
                         auth.requestMatchers(
@@ -87,17 +155,7 @@ public class SecurityConfig {
 
                     auth.requestMatchers(HttpMethod.GET, "/api/admin/profile-content", "/api/v1/admin/profile-content").permitAll();
 
-                    if (isAllowPublicProviderOnboarding()) {
-                        auth.requestMatchers("/api/partner/onboarding").permitAll();
-                    }
-
                     if (isAllowPublicCustomerRead()) {
-                        auth.requestMatchers("/api/banners", "/api/banners/**", "/api/categories", "/api/categories/**").permitAll();
-                        auth.requestMatchers(HttpMethod.GET, "/api/customer/banners").permitAll();
-                        auth.requestMatchers(HttpMethod.GET, "/api/customer/home/banners", "/api/customer/home/banners/**").permitAll();
-                        auth.requestMatchers(HttpMethod.GET, "/api/customer/home/sections", "/api/customer/home/sections/**").permitAll();
-                        auth.requestMatchers(HttpMethod.GET, "/api/customer/services", "/api/customer/services/**").permitAll();
-                        auth.requestMatchers(HttpMethod.GET, "/api/customer/profile-content").permitAll();
                         auth.requestMatchers(HttpMethod.POST,
                                 "/api/customer/location/reverse-geocode",
                                 "/api/v1/customer/location/reverse-geocode",
@@ -106,13 +164,14 @@ public class SecurityConfig {
                         ).permitAll();
                     }
 
-                    auth.requestMatchers("/api/customer/**").hasRole("CUSTOMER");
-                    auth.requestMatchers("/api/partner/**").hasRole("PARTNER");
-                    auth.requestMatchers("/api/admin/**").hasRole("ADMIN");
-                    auth.requestMatchers("/api/v1/chat/**").hasAnyRole("CUSTOMER", "PARTNER");
-                    auth.requestMatchers("/api/v1/customer/**").hasRole("CUSTOMER");
-                    auth.requestMatchers("/api/v1/partner/**").hasRole("PARTNER");
-                    auth.requestMatchers("/api/v1/admin/**").hasRole("ADMIN");
+                    auth.requestMatchers("/api/cart/**", "/api/cart").hasRole(ROLE_CUSTOMER);
+                    auth.requestMatchers("/api/customer/**").hasRole(ROLE_CUSTOMER);
+                    auth.requestMatchers("/api/partner/**").hasRole(ROLE_PARTNER);
+                    auth.requestMatchers("/api/admin/**").hasRole(ROLE_ADMIN);
+                    auth.requestMatchers("/api/v1/chat/**").hasAnyRole(ROLE_CUSTOMER, ROLE_PARTNER);
+                    auth.requestMatchers("/api/v1/customer/**").hasRole(ROLE_CUSTOMER);
+                    auth.requestMatchers("/api/v1/partner/**").hasRole(ROLE_PARTNER);
+                    auth.requestMatchers("/api/v1/admin/**").hasRole(ROLE_ADMIN);
                     auth.anyRequest().authenticated();
                 })
                 .addFilterBefore(internalApiTokenFilter, UsernamePasswordAuthenticationFilter.class)
@@ -143,24 +202,46 @@ public class SecurityConfig {
                 "/api/**",
                 "/internal/**",
                 "/otp/**",
-                "/auth/**"
+                "/auth/**",
+                "/customer/otp/**",
+                "/partner/otp/**"
+        };
+    }
+
+    static String[] csrfAlwaysExemptPaths() {
+        return new String[]{
+                "/api/admin/login",
+                "/api/admin/verify-otp"
+        };
+    }
+
+    static RequestMatcher csrfProtectionRequestMatcher() {
+        return request -> DEFAULT_CSRF_MATCHER.matches(request)
+                && !isAlwaysCsrfExemptPath(request)
+                && !isStatelessHeaderAuthenticatedPath(request);
+    }
+
+    private static boolean isAlwaysCsrfExemptPath(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        return servletPath != null && Arrays.stream(csrfAlwaysExemptPaths())
+                .anyMatch(pattern -> CSRF_PATH_MATCHER.match(pattern, servletPath));
+    }
+
+    private static boolean isStatelessHeaderAuthenticatedPath(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        return servletPath != null && Arrays.stream(csrfExemptPaths())
+                .anyMatch(pattern -> CSRF_PATH_MATCHER.match(pattern, servletPath));
+    }
+
+    static String[] publicSupportPaths() {
+        return new String[]{
+                "/api/public/support/faqs",
+                "/api/public/support/tickets"
         };
     }
 
     static List<String> parseAllowedOrigins(String rawOrigins) {
-        if (rawOrigins == null || rawOrigins.isBlank()) {
-            return List.of();
-        }
-
-        LinkedHashSet<String> origins = new LinkedHashSet<>();
-        StringTokenizer tokenizer = new StringTokenizer(rawOrigins, ",");
-        while (tokenizer.hasMoreTokens()) {
-            String origin = tokenizer.nextToken().trim();
-            if (!origin.isEmpty()) {
-                origins.add(origin);
-            }
-        }
-        return new ArrayList<>(origins);
+        return AllowedOriginsParser.parse(rawOrigins);
     }
 
     private boolean isExposeSwagger() {
@@ -169,10 +250,6 @@ public class SecurityConfig {
 
     private boolean isAllowPublicCustomerRead() {
         return environment.getProperty("app.security.exposure.allow-public-customer-read", Boolean.class, false);
-    }
-
-    private boolean isAllowPublicProviderOnboarding() {
-        return environment.getProperty("app.security.exposure.allow-public-partner-onboarding", Boolean.class, false);
     }
 
 }

@@ -1,16 +1,28 @@
-CREATE TABLE IF NOT EXISTS customer_banners (
-    id BIGINT PRIMARY KEY AUTO_INCREMENT,
-    category_id BIGINT NULL,
-    title VARCHAR(255) NOT NULL,
-    image_url VARCHAR(1000) NOT NULL,
-    redirect_type ENUM('CATEGORY', 'SERVICE', 'EXTERNAL') NOT NULL,
-    redirect_id BIGINT NULL,
-    redirect_url VARCHAR(1000) NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    priority INT NOT NULL DEFAULT 100,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+SET @sql_create_customer_banners := IF(
+    EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = 'customer_banners'
+    ),
+    'SELECT 1',
+    'CREATE TABLE customer_banners (
+        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+        category_id BIGINT NULL,
+        title VARCHAR(255) NOT NULL,
+        image_url VARCHAR(1000) NOT NULL,
+        redirect_type ENUM(''CATEGORY'', ''SERVICE'', ''EXTERNAL'') NOT NULL,
+        redirect_id BIGINT NULL,
+        redirect_url VARCHAR(1000) NULL,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        priority INT NOT NULL DEFAULT 100,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )'
 );
+PREPARE stmt_create_customer_banners FROM @sql_create_customer_banners;
+EXECUTE stmt_create_customer_banners;
+DEALLOCATE PREPARE stmt_create_customer_banners;
 
 SET @fk_customer_banners_category_exists := (
     SELECT COUNT(1)

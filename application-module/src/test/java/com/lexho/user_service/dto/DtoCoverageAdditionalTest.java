@@ -1,6 +1,5 @@
 package com.lexho.user_service.dto;
 
-import com.lexho.provider.entity.Partner;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -104,7 +103,6 @@ class DtoCoverageAdditionalTest {
         HomeResponseDTO homeResponse = new HomeResponseDTO();
         OrderItemDTO orderItem = new OrderItemDTO();
         OrderResponseDTO orderResponse = new OrderResponseDTO();
-        PartnerCreateRequestDTO partnerCreateRequest = new PartnerCreateRequestDTO();
         PlaceOrderRequest placeOrderRequest = new PlaceOrderRequest();
         SubCategoryCreateRequestDTO subCategoryCreateRequest = new SubCategoryCreateRequestDTO();
         SubCategoryResponseDTO subCategoryResponse = new SubCategoryResponseDTO(4L, "Kitchen", "icon", 5L, "Home");
@@ -144,16 +142,6 @@ class DtoCoverageAdditionalTest {
         orderResponse.setSlaMinutes(90);
         orderResponse.setUnavailableReason("none");
         orderResponse.setItems(List.of(orderItem));
-        partnerCreateRequest.setName("Cook");
-        partnerCreateRequest.setCategoryId(12L);
-        partnerCreateRequest.setSubCategoryId(13L);
-        partnerCreateRequest.setRating(4.7);
-        partnerCreateRequest.setTotalReviews(99L);
-        partnerCreateRequest.setPrice(399.0);
-        partnerCreateRequest.setAvailable(true);
-        partnerCreateRequest.setExperience(4);
-        partnerCreateRequest.setImage("/partner.png");
-        partnerCreateRequest.setVerificationStatus("VERIFIED");
         placeOrderRequest.setAddress("Pune");
         placeOrderRequest.setScheduledAt(LocalDateTime.parse("2026-07-17T11:00:00"));
         placeOrderRequest.setBookingType("SCHEDULED");
@@ -161,20 +149,6 @@ class DtoCoverageAdditionalTest {
         subCategoryCreateRequest.setName("Sub");
         subCategoryCreateRequest.setIcon("icon");
         subCategoryCreateRequest.setCategoryId(14L);
-
-        Partner partner = new Partner();
-        partner.setId(100L);
-        partner.setName("Mapped");
-        partner.setRating(4.5);
-        partner.setPrice(299.0);
-        partner.setExperience(6);
-        partner.setImage("/mapped.png");
-        partner.setCategoryId(20L);
-        partner.setSubCategoryId(21L);
-        partner.setAvailable(true);
-        partner.setTotalReviews(50L);
-        partner.setVerificationStatus("ACTIVE");
-        PartnerResponseDTO partnerResponse = PartnerResponseDTO.from(partner);
 
         assertThat(loginResponse.getEmail()).isEqualTo("admin@lexho.com");
         assertThat(loginResponse.getOtpExpiresInSeconds()).isEqualTo(300);
@@ -189,23 +163,10 @@ class DtoCoverageAdditionalTest {
         assertThat(cartSummary.getTotal()).isEqualTo(398.0);
         assertThat(homeResponse.getSections()).singleElement().extracting(HomeSectionDTO::getTitle).isEqualTo("Popular");
         assertThat(orderResponse.getItems()).singleElement().extracting(OrderItemDTO::getPartnerName).isEqualTo("Team");
-        assertThat(partnerCreateRequest.getVerificationStatus()).isEqualTo("VERIFIED");
         assertThat(placeOrderRequest.getExpectedTotal()).isEqualByComparingTo("599");
         assertThat(subCategoryCreateRequest.getCategoryId()).isEqualTo(14L);
         assertThat(subCategoryResponse.getCategoryName()).isEqualTo("Home");
         subCategoryResponse.setCategoryName("Kitchen");
         assertThat(subCategoryResponse.getCategoryName()).isEqualTo("Kitchen");
-
-        assertThat(partnerResponse.getId()).isEqualTo(100L);
-        assertThat(partnerResponse.getName()).isEqualTo("Mapped");
-        assertThat(partnerResponse.getRating()).isEqualTo(4.5);
-        assertThat(partnerResponse.getPrice()).isEqualTo(299.0);
-        assertThat(partnerResponse.getExperience()).isEqualTo(6);
-        assertThat(partnerResponse.getImage()).isEqualTo("/mapped.png");
-        assertThat(partnerResponse.getCategoryId()).isEqualTo(20L);
-        assertThat(partnerResponse.getSubCategoryId()).isEqualTo(21L);
-        assertThat(partnerResponse.getAvailable()).isTrue();
-        assertThat(partnerResponse.getTotalReviews()).isEqualTo(50L);
-        assertThat(partnerResponse.getVerificationStatus()).isEqualTo("ACTIVE");
     }
 }

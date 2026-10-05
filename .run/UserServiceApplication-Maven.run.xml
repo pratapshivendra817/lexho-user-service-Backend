@@ -6,7 +6,16 @@
           <option name="myMavenHomeTypeForPersistence" value="WRAPPED" />
         </MavenGeneralSettings>
       </option>
-      <option name="myRunnerSettings" />
+      <option name="myRunnerSettings">
+        <MavenRunnerSettings>
+          <option name="environmentProperties">
+            <map>
+              <entry key="SPRING_PROFILES_ACTIVE" value="dev" />
+              <entry key="LEXHO_AUTH_OTP_LOG_TO_CONSOLE" value="true" />
+            </map>
+          </option>
+        </MavenRunnerSettings>
+      </option>
       <option name="myRunnerParameters">
         <MavenRunnerParameters>
           <option name="workingDirPath" value="$PROJECT_DIR$" />
@@ -18,6 +27,7 @@
             <list>
               <option value="-pl" />
               <option value="application-module" />
+              <option value="-Dmaven.test.skip=true" />
               <option value="spring-boot:run" />
             </list>
           </option>

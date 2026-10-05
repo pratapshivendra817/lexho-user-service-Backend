@@ -167,6 +167,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.vaadin.external.google</groupId>
+                    <artifactId>android-json</artifactId>
+                </exclusion>
+            </exclusions>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -177,7 +183,7 @@
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <scope>runtime</scope>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -250,21 +256,21 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <version>${maven.failsafe.plugin.version}</version>
+                <configuration>
+                    <argLine>@{argLine}</argLine>
+                    <useModulePath>false</useModulePath>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <excludedGroups>${failsafe.excludedGroups}</excludedGroups>
+                    <groups>${failsafe.groups}</groups>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>
                             <goal>integration-test</goal>
                             <goal>verify</goal>
                         </goals>
-                        <configuration>
-                            <argLine>@{argLine}</argLine>
-                            <useModulePath>false</useModulePath>
-                            <includes>
-                                <include>**/*IT.java</include>
-                            </includes>
-                            <excludedGroups>${failsafe.excludedGroups}</excludedGroups>
-                            <groups>${failsafe.groups}</groups>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>

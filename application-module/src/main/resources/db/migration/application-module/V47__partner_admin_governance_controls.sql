@@ -27,7 +27,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF(
         (SELECT COUNT(*) FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'partners' AND COLUMN_NAME = 'fraud_flag') = 0,
-        'ALTER TABLE partners ADD COLUMN fraud_flag TINYINT(1) NOT NULL DEFAULT 0',
+        'ALTER TABLE partners ADD COLUMN fraud_flag BOOLEAN NOT NULL DEFAULT FALSE',
         'SELECT 1'
            );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -41,30 +41,6 @@ SET @sql = IF(
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 UPDATE partners SET risk_status = 'NORMAL' WHERE risk_status IS NULL OR TRIM(risk_status) = '';
-
-SET @sql = IF(
-        (SELECT COUNT(*) FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'partner_documents' AND COLUMN_NAME = 'review_reason') = 0,
-        'ALTER TABLE partner_documents ADD COLUMN review_reason VARCHAR(500) NULL',
-        'SELECT 1'
-           );
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
-SET @sql = IF(
-        (SELECT COUNT(*) FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'partner_documents' AND COLUMN_NAME = 'reviewed_by_admin_id') = 0,
-        'ALTER TABLE partner_documents ADD COLUMN reviewed_by_admin_id BIGINT NULL',
-        'SELECT 1'
-           );
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
-SET @sql = IF(
-        (SELECT COUNT(*) FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = @db_name AND TABLE_NAME = 'partner_documents' AND COLUMN_NAME = 'reviewed_at') = 0,
-        'ALTER TABLE partner_documents ADD COLUMN reviewed_at DATETIME NULL',
-        'SELECT 1'
-           );
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @sql = IF(
         (SELECT COUNT(*) FROM information_schema.COLUMNS

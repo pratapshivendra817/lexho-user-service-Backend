@@ -19,6 +19,7 @@ import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
@@ -55,8 +56,9 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void mapsUploadRateLimitSecurityAndInfrastructureErrors() {
-        assertThat(handler.handleMaxUploadSize(new MaxUploadSizeExceededException(5), request).getStatusCode())
-                .isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+        var uploadTooLarge = handler.handleMaxUploadSize(new MaxUploadSizeExceededException(30), request);
+        assertThat(uploadTooLarge.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+        assertThat(uploadTooLarge.getBody().message()).contains("total request must be 30 MB or less");
         assertThat(handler.handleFileUpload(new FileUploadException("INVALID_FILE_TYPE", "bad"), request).getStatusCode())
                 .isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(handler.handleTooManyRequests(new TooManyRequestsException(null, 9), request).getHeaders()
@@ -76,6 +78,9 @@ class GlobalExceptionHandlerTest {
                 .isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(handler.handleDataIntegrity(new DataIntegrityViolationException("duplicate")).getStatusCode())
                 .isEqualTo(HttpStatus.CONFLICT);
+        assertThat(handler.handleServletRequestBinding(
+                new ServletRequestBindingException("Missing request attribute 'userId'")).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
         assertThat(handler.handleGlobal(new Exception("boom"), null).getStatusCode())
                 .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -190,6 +195,18 @@ class GlobalExceptionHandlerTest {
         assertThat(handler.handleNoResourceFound(
                 new NoResourceFoundException(HttpMethod.GET, "/missing")).getStatusCode())
                 .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void mapsInvalidJsonFieldFormatToHelpfulMessage() {
+        var cause = new com.fasterxml.jackson.databind.exc.InvalidFormatException(
+                null, "bad date", "24-09-2026", java.time.LocalDate.class);
+        cause.prependPath(new Object(), "dateOfBirth");
+        HttpMessageNotReadableException exception = new HttpMessageNotReadableException("bad json", cause);
+
+        var response = handler.handleMalformedRequest(exception);
+
+        assertThat(response.getBody().getMessage()).isEqualTo("dateOfBirth must use YYYY-MM-DD");
     }
 
     @Test

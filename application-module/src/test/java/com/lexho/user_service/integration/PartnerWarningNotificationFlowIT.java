@@ -1,5 +1,6 @@
 package com.lexho.user_service.integration;
 
+import com.lexho.testconfig.LexhoInfrastructureTest;
 import com.lexho.admin.repository.AdminRepository;
 import com.lexho.notification.entity.Notification;
 import com.lexho.notification.entity.NotificationLog;
@@ -20,12 +21,14 @@ import com.lexho.user_service.lexhopartner.entity.PartnerPenalty;
 import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerServiceAreaRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.lexhopartner.service.PartnerActivityFeedService;
+import com.lexho.user_service.lexhopartner.service.PartnerCatalogService;
 import com.lexho.user_service.lexhopartner.service.PartnerOperationsService;
 import com.lexho.user_service.lexhopartner.service.PartnerWarningRealtimeService;
+import com.lexho.user_service.lexhopartner.util.FileStorageUtil;
 import com.lexho.user_service.notification.mapper.NotificationMapper;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.notification.service.NotificationRealtimeService;
@@ -33,8 +36,8 @@ import com.lexho.user_service.review.repository.ReviewRepository;
 import com.lexho.user_service.security.SecurityUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.ApplicationEventPublisher;
@@ -42,6 +45,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -66,8 +70,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@LexhoInfrastructureTest
 @ContextConfiguration(classes = PartnerWarningNotificationFlowIT.JpaConfig.class)
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY)
+@ActiveProfiles("it")
 class PartnerWarningNotificationFlowIT {
 
     private static final Long PARTNER_ID = 501L;
@@ -116,7 +122,7 @@ class PartnerWarningNotificationFlowIT {
                 partnerPenaltyRepository,
                 mock(PartnerWarningCommentRepository.class),
                 mock(PartnerOrderRepository.class),
-                mock(PartnerProfileRepository.class),
+                mock(PartnerOperationalProfileRepository.class),
                 mock(PartnerShiftRepository.class),
                 mock(ReviewRepository.class),
                 auditLogService,
@@ -127,7 +133,8 @@ class PartnerWarningNotificationFlowIT {
         AdminPartnerControlController adminController = new AdminPartnerControlController(
                 null, null, null, null, partnerOperationsService);
         LexhoPartnerController partnerController = new LexhoPartnerController(
-                null, null, null, null, null, partnerOperationsService, mock(PartnerActivityFeedService.class));
+                null, null, null, null, null, partnerOperationsService, mock(PartnerActivityFeedService.class),
+                mock(PartnerCatalogService.class), mock(FileStorageUtil.class));
         LexhoPartnerNotificationController notificationController =
                 new LexhoPartnerNotificationController(notificationManagementService, notificationMapper,
                         mock(NotificationRealtimeService.class));

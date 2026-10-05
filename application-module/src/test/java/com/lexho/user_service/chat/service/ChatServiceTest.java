@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -73,6 +74,19 @@ class ChatServiceTest {
             simpUserRegistry,
             messagingTemplate
     );
+
+    @Test
+    void bookingAccessMustMatchActorTypeAsWellAsNumericId() {
+        Order order = new Order();
+        order.setId(55L);
+        order.setUserId(7L);
+        order.setAssignedPartnerId(9L);
+        when(orderRepository.findById(55L)).thenReturn(Optional.of(order));
+
+        assertFalse(chatService.hasBookingAccess(55L, ChatActor.fromRole("PARTNER", 7L)));
+        assertTrue(chatService.hasBookingAccess(55L, ChatActor.fromRole("CUSTOMER", 7L)));
+        assertTrue(chatService.hasBookingAccess(55L, ChatActor.fromRole("PARTNER", 9L)));
+    }
 
     @Test
     void createRoomShouldCreateOneRoomPerOrder() {

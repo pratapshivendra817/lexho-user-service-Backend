@@ -2,6 +2,8 @@ package com.lexho.user_service.config;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.cors.CorsConfiguration;
 
@@ -16,7 +18,36 @@ class SecurityConfigTest {
     @Test
     void csrfExemptionIsLimitedToStatelessApiNamespaces() {
         assertThat(Arrays.asList(SecurityConfig.csrfExemptPaths()))
-                .containsExactly("/api/**", "/internal/**", "/otp/**", "/auth/**");
+                .containsExactly(
+                        "/api/**",
+                        "/internal/**",
+                        "/otp/**",
+                        "/auth/**",
+                        "/customer/otp/**",
+                        "/partner/otp/**");
+        assertThat(Arrays.asList(SecurityConfig.csrfAlwaysExemptPaths()))
+                .containsExactly("/api/admin/login", "/api/admin/verify-otp");
+    }
+
+    @Test
+    void csrfProtectionRemainsEnabledExceptForStatelessApiWrites() {
+        RequestMatcher matcher = SecurityConfig.csrfProtectionRequestMatcher();
+
+        assertThat(matcher.matches(request("POST", "/api/customer/profile", null))).isFalse();
+        assertThat(matcher.matches(request("POST", "/internal/bookings/users/1/summary", null))).isFalse();
+        assertThat(matcher.matches(request("PATCH", "/api/v1/admin/serviceable-areas/9/status", "JSESSIONID=abc"))).isFalse();
+        assertThat(matcher.matches(request("POST", "/api/admin/login", "JSESSIONID=abc"))).isFalse();
+        assertThat(matcher.matches(request("POST", "/api/admin/verify-otp", "JSESSIONID=abc"))).isFalse();
+        assertThat(matcher.matches(request("POST", "/customer/otp/send", "JSESSIONID=abc"))).isFalse();
+        assertThat(matcher.matches(request("POST", "/partner/otp/send", "JSESSIONID=abc"))).isFalse();
+        assertThat(matcher.matches(request("POST", "/admin/profile", null))).isTrue();
+        assertThat(matcher.matches(request("GET", "/api/customer/profile", "JSESSIONID=abc"))).isFalse();
+    }
+
+    @Test
+    void publicSupportPathsAreExplicitlyTrackedForPermitAllRules() {
+        assertThat(Arrays.asList(SecurityConfig.publicSupportPaths()))
+                .containsExactly("/api/public/support/faqs", "/api/public/support/tickets");
     }
 
     @Test
@@ -76,15 +107,12 @@ class SecurityConfigTest {
                 mock(InternalApiTokenFilter.class),
                 new MockEnvironment()
                 .withProperty("app.security.exposure.expose-swagger", "true")
-                .withProperty("app.security.exposure.allow-public-customer-read", "true")
-                .withProperty("app.security.exposure.allow-public-partner-onboarding", "true"));
+                .withProperty("app.security.exposure.allow-public-customer-read", "true"));
 
         assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isExposeSwagger")).isFalse();
         assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowPublicCustomerRead")).isFalse();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(defaults, "isAllowPublicProviderOnboarding")).isFalse();
         assertThat((boolean) ReflectionTestUtils.invokeMethod(exposed, "isExposeSwagger")).isTrue();
         assertThat((boolean) ReflectionTestUtils.invokeMethod(exposed, "isAllowPublicCustomerRead")).isTrue();
-        assertThat((boolean) ReflectionTestUtils.invokeMethod(exposed, "isAllowPublicProviderOnboarding")).isTrue();
     }
 
     @Test
@@ -97,5 +125,14 @@ class SecurityConfigTest {
                 environment);
 
         assertThat((boolean) ReflectionTestUtils.invokeMethod(securityConfig, "isAllowPublicCustomerRead")).isTrue();
+    }
+
+    private static MockHttpServletRequest request(String method, String path, String cookieHeader) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, path);
+        request.setServletPath(path);
+        if (cookieHeader != null) {
+            request.addHeader("Cookie", cookieHeader);
+        }
+        return request;
     }
 }

@@ -154,19 +154,16 @@ class InfrastructureSupportTest {
         assertThat(properties.isExposeSwagger()).isFalse();
         assertThat(properties.isAllowInternalOpen()).isFalse();
         assertThat(properties.isAllowPublicCustomerRead()).isFalse();
-        assertThat(properties.isAllowPublicProviderOnboarding()).isFalse();
         assertThat(properties.isAllowPublicAdminProfileContent()).isFalse();
 
         properties.setExposeSwagger(true);
         properties.setAllowInternalOpen(true);
         properties.setAllowPublicCustomerRead(true);
-        properties.setAllowPublicProviderOnboarding(true);
         properties.setAllowPublicAdminProfileContent(true);
 
         assertThat(properties.isExposeSwagger()).isTrue();
         assertThat(properties.isAllowInternalOpen()).isTrue();
         assertThat(properties.isAllowPublicCustomerRead()).isTrue();
-        assertThat(properties.isAllowPublicProviderOnboarding()).isTrue();
         assertThat(properties.isAllowPublicAdminProfileContent()).isTrue();
     }
 
