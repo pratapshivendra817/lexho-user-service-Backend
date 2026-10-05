@@ -60,5 +60,7 @@ resp_*.json
 b_*.json
 t_*.json
 *_body.txt
+step_*.xml
 temp_*
 debug_*
+.tmp/
