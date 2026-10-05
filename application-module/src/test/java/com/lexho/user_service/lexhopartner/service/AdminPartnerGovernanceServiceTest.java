@@ -9,15 +9,12 @@ import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import com.lexho.user_service.dispatch.service.PartnerSkillService;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
-import com.lexho.user_service.lexhopartner.entity.PartnerDocument;
 import com.lexho.user_service.lexhopartner.entity.PartnerPenalty;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
 import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.lexhopartner.entity.PartnerWithdrawalRequest;
-import com.lexho.user_service.lexhopartner.entity.VerificationStatus;
-import com.lexho.user_service.lexhopartner.repository.PartnerDocumentRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import org.junit.jupiter.api.Test;
@@ -41,8 +38,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class AdminPartnerGovernanceServiceTest {
 
-    @Mock PartnerProfileRepository partnerProfileRepository;
-    @Mock PartnerDocumentRepository partnerDocumentRepository;
+    @Mock PartnerOperationalProfileRepository partnerProfileRepository;
     @Mock PartnerShiftRepository partnerShiftRepository;
     @Mock PartnerSkillService partnerSkillService;
     @Mock PayoutRepository payoutRepository;
@@ -141,60 +137,19 @@ class AdminPartnerGovernanceServiceTest {
     }
 
     @Test
-    void reviewKycDocumentShouldApprovePartnerWhenAllDocumentsApproved() {
-        PartnerProfile partner = partner(10L);
-        PartnerDocument document = document(20L, partner, VerificationStatus.PENDING);
+    void bankReviewShouldSetRejectionStateAndValidateStatus() {
+        PartnerOperationalProfile partner = partner(10L);
         when(partnerProfileRepository.findById(10L)).thenReturn(Optional.of(partner));
-        when(partnerDocumentRepository.findById(20L)).thenReturn(Optional.of(document));
-        when(partnerDocumentRepository.findByPartnerId(10L)).thenReturn(List.of(document));
-
-        Map<String, Object> response = service.reviewKycDocument(10L, 20L, " approved ", " verified ", 7L);
-
-        assertEquals("APPROVED", response.get("verificationStatus"));
-        assertEquals(true, response.get("partnerVerified"));
-        assertEquals("APPROVED", partner.getKycWorkflowStatus());
-        verify(partnerDocumentRepository).save(document);
-        verify(partnerProfileRepository).save(partner);
-        verify(auditLogService).log(7L, "ADMIN", "KYC_APPROVED", "PARTNER_DOCUMENT", "20", null, " verified ");
-    }
-
-    @Test
-    void reviewKycDocumentShouldRejectWrongOwnerAndInvalidDecision() {
-        PartnerProfile partner = partner(10L);
-        PartnerDocument other = document(20L, partner(11L), VerificationStatus.PENDING);
-        when(partnerProfileRepository.findById(10L)).thenReturn(Optional.of(partner));
-        when(partnerDocumentRepository.findById(20L)).thenReturn(Optional.of(other));
-        assertThrows(BadRequestException.class,
-                () -> service.reviewKycDocument(10L, 20L, "APPROVED", "reason", 7L));
-
-        PartnerDocument owned = document(21L, partner, VerificationStatus.PENDING);
-        when(partnerDocumentRepository.findById(21L)).thenReturn(Optional.of(owned));
-        assertThrows(BadRequestException.class,
-                () -> service.reviewKycDocument(10L, 21L, "PENDING", "reason", 7L));
-        assertThrows(BadRequestException.class,
-                () -> service.reviewKycDocument(10L, 21L, "invalid", "reason", 7L));
-    }
-
-    @Test
-    void partnerAndBankReviewShouldSetRejectionStateAndValidateStatus() {
-        PartnerProfile partner = partner(10L);
-        when(partnerProfileRepository.findById(10L)).thenReturn(Optional.of(partner));
-
-        Map<String, Object> kyc = service.reviewPartnerKyc(10L, " rejected ", " bad document ");
-        assertEquals("REJECTED", kyc.get("kycStatus"));
-        assertEquals("bad document", kyc.get("rejectionReason"));
-        assertFalse(partner.isVerified());
 
         Map<String, Object> bank = service.reviewBank(10L, " rejected ", " invalid account ");
         assertEquals("REJECTED", bank.get("bankVerificationStatus"));
         assertEquals("invalid account", bank.get("rejectionReason"));
-        assertThrows(BadRequestException.class, () -> service.reviewPartnerKyc(10L, "invalid", null));
         assertThrows(BadRequestException.class, () -> service.reviewBank(10L, null, null));
     }
 
     @Test
     void forceAvailabilityShouldUpdatePartnerAndShift() {
-        PartnerProfile partner = partner(10L);
+        PartnerOperationalProfile partner = partner(10L);
         PartnerShiftEntity shift = new PartnerShiftEntity();
         shift.setPartnerId(10L);
         when(partnerProfileRepository.findById(10L)).thenReturn(Optional.of(partner));
@@ -222,7 +177,7 @@ class AdminPartnerGovernanceServiceTest {
 
     @Test
     void riskActionsShouldApplyEachSupportedTransition() {
-        PartnerProfile partner = partner(10L);
+        PartnerOperationalProfile partner = partner(10L);
         partner.setOnline(true);
         when(partnerProfileRepository.findById(10L)).thenReturn(Optional.of(partner));
 
@@ -242,24 +197,14 @@ class AdminPartnerGovernanceServiceTest {
     void missingPartnerShouldRaiseResourceNotFound() {
         when(partnerProfileRepository.findById(404L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class,
-                () -> service.reviewPartnerKyc(404L, "APPROVED", null));
-        assertThrows(ResourceNotFoundException.class,
                 () -> service.forceAvailability(404L, true, 10, "reason"));
     }
 
-    private static PartnerProfile partner(Long id) {
-        PartnerProfile partner = new PartnerProfile();
+    private static PartnerOperationalProfile partner(Long id) {
+        PartnerOperationalProfile partner = new PartnerOperationalProfile();
         partner.setId(id);
         partner.setName("Partner " + id);
         return partner;
-    }
-
-    private static PartnerDocument document(Long id, PartnerProfile partner, VerificationStatus status) {
-        PartnerDocument document = new PartnerDocument();
-        document.setId(id);
-        document.setPartner(partner);
-        document.setVerificationStatus(status);
-        return document;
     }
 
     private static Payout payout(Long id) {

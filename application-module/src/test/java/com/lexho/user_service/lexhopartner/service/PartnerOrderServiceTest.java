@@ -12,11 +12,15 @@ import com.lexho.user_service.lexhopartner.util.AuditLogUtil;
 import com.lexho.user_service.lexhopartner.util.FileStorageUtil;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
+import com.lexho.user_service.dispatch.service.PartnerDispatchEligibilityService;
+import com.lexho.user_service.localization.dynamic.DynamicContentTranslationService;
+import com.lexho.user_service.notification.service.NotificationTriggerService;
 import com.lexho.user_service.observability.BusinessMetricsService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -26,6 +30,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.math.BigDecimal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,14 +58,38 @@ class PartnerOrderServiceTest {
     private PartnerSettlementService partnerSettlementService;
     @Mock
     private BusinessMetricsService businessMetricsService;
+    @Mock
+    private DynamicContentTranslationService dynamicTranslationService;
+    @Mock
+    private NotificationTriggerService notificationTriggerService;
+    @Spy
+    private PartnerDispatchEligibilityService partnerDispatchEligibilityService = new PartnerDispatchEligibilityService();
 
-    @InjectMocks
     private PartnerOrderService partnerOrderService;
+
+    @BeforeEach
+    void setUp() {
+        partnerOrderService = new PartnerOrderService(
+                partnerOrderRepository,
+                orderStatusHistoryRepository,
+                fileStorageUtil,
+                auditLogUtil,
+                partnerShiftRepository,
+                partnerSettlementService,
+                businessMetricsService,
+                Optional.of(dynamicTranslationService),
+                Optional.of(notificationTriggerService),
+                partnerDispatchEligibilityService,
+                Optional.empty()
+        );
+    }
 
     @Test
     void acceptOrderShouldUpdateStatus() {
         PartnerOrder order = order(1L, OrderStatus.CREATED, null);
-        when(partnerOrderRepository.findById(1L)).thenReturn(Optional.of(order));
+        order.setBookingType("SCHEDULED");
+        when(partnerOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(11L)).thenReturn(Optional.of(onlineShift(11L)));
         when(partnerOrderRepository.save(any(PartnerOrder.class))).thenAnswer(inv -> inv.getArgument(0));
 
         var response = partnerOrderService.acceptOrder(11L, 1L);
@@ -73,7 +102,7 @@ class PartnerOrderServiceTest {
     @Test
     void rejectOrderShouldUseRejectedTerminalStatus() {
         PartnerOrder order = order(1L, OrderStatus.CREATED, null);
-        when(partnerOrderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(partnerOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
         when(partnerOrderRepository.save(any(PartnerOrder.class))).thenAnswer(inv -> inv.getArgument(0));
 
         var response = partnerOrderService.rejectOrder(11L, 1L);
@@ -85,28 +114,28 @@ class PartnerOrderServiceTest {
     @Test
     void startOrderShouldFailForInvalidState() {
         PartnerOrder order = order(1L, OrderStatus.CREATED, 10L);
-        when(partnerOrderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(partnerOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
 
-        assertThrows(BadRequestException.class, () -> partnerOrderService.startOrder(10L, 1L, null));
+        assertThrows(BadRequestException.class, () -> partnerOrderService.startOrder(10L, 1L, null, "1234"));
     }
 
     @Test
     void completeOrderShouldFailBeforeStart() {
         PartnerOrder order = order(1L, OrderStatus.ACCEPTED, 10L);
-        when(partnerOrderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(partnerOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
 
-        assertThrows(BadRequestException.class, () -> partnerOrderService.completeOrder(10L, 1L, null));
+        assertThrows(BadRequestException.class, () -> partnerOrderService.completeOrder(10L, 1L, null, "1234"));
     }
 
     @Test
     void newOrdersAndHistoryUsePagingAndMapResults() {
         PartnerOrder order = order(7L, OrderStatus.CREATED, null);
-        when(partnerOrderRepository.findByStatusInAndAssignedPartnerIdIsNull(any(), any(Pageable.class)))
+        when(partnerOrderRepository.findPartnerVisibleOpenOrders(any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(order)));
         when(partnerOrderRepository.findByAssignedPartnerId(eq(11L), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(order)));
 
-        var newOrders = partnerOrderService.getNewOrders(1, 5, "createdAt", "asc");
+        var newOrders = partnerOrderService.getNewOrders(11L, 1, 5, "createdAt", "asc");
         var history = partnerOrderService.getHistory(11L, 1, 5, null, null);
 
         assertThat(newOrders.content()).hasSize(1);
@@ -117,16 +146,37 @@ class PartnerOrderServiceTest {
     @Test
     void newOrdersFallsBackToSafeSortFieldForUnknownInput() {
         PartnerOrder order = order(7L, OrderStatus.CREATED, null);
-        when(partnerOrderRepository.findByStatusInAndAssignedPartnerIdIsNull(any(), any(Pageable.class)))
+        when(partnerOrderRepository.findPartnerVisibleOpenOrders(any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(order)));
 
-        partnerOrderService.getNewOrders(0, 20, "drop table orders", "asc");
+        partnerOrderService.getNewOrders(11L, 0, 20, "drop table orders", "asc");
 
         org.mockito.ArgumentCaptor<Pageable> pageableCaptor = org.mockito.ArgumentCaptor.forClass(Pageable.class);
-        verify(partnerOrderRepository).findByStatusInAndAssignedPartnerIdIsNull(any(), pageableCaptor.capture());
+        verify(partnerOrderRepository).findPartnerVisibleOpenOrders(pageableCaptor.capture());
         Sort.Order sortOrder = pageableCaptor.getValue().getSort().getOrderFor("createdAt");
         assertThat(sortOrder).isNotNull();
         assertThat(sortOrder.getDirection()).isEqualTo(Sort.Direction.ASC);
+    }
+
+    @Test
+    void scheduledManualOrdersAreVisibleAndAcceptableBeforePaymentCapture() {
+        PartnerOrder order = order(12L, OrderStatus.CREATED, null);
+        order.setBookingType("SCHEDULED");
+        order.setScheduledAt(LocalDateTime.now().plusHours(3));
+        when(partnerOrderRepository.findPartnerVisibleOpenOrders(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(order)));
+        when(partnerOrderRepository.findByIdForUpdate(12L)).thenReturn(Optional.of(order));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(11L)).thenReturn(Optional.of(onlineShift(11L)));
+        when(partnerOrderRepository.save(any(PartnerOrder.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var newOrders = partnerOrderService.getNewOrders(11L, 0, 20, "createdAt", "desc");
+        var accepted = partnerOrderService.acceptOrder(11L, 12L);
+
+        assertThat(newOrders.content()).hasSize(1);
+        assertThat(newOrders.content().get(0).bookingType()).isEqualTo("SCHEDULED");
+        assertThat(newOrders.content().get(0).scheduledAt()).isEqualTo(order.getScheduledAt());
+        assertThat(accepted.status()).isEqualTo(OrderStatus.ACCEPTED);
+        assertThat(accepted.assignedPartnerId()).isEqualTo(11L);
     }
 
     @Test
@@ -162,43 +212,87 @@ class PartnerOrderServiceTest {
     }
 
     @Test
-    void startAndCompleteOrderStoreImagesAndTriggerCompletionSideEffects() {
+    void pinVerifiedStartAndCompleteStoreImagesAndTriggerCompletionSideEffects() {
         PartnerOrder accepted = order(8L, OrderStatus.ACCEPTED, 10L);
-        PartnerOrder started = order(9L, OrderStatus.STARTED, 10L);
-        when(partnerOrderRepository.findById(8L)).thenReturn(Optional.of(accepted));
-        when(partnerOrderRepository.findById(9L)).thenReturn(Optional.of(started));
+        PartnerOrder inProgress = order(9L, OrderStatus.IN_PROGRESS, 10L);
+        inProgress.setCustomerId(44L);
+        inProgress.setServiceStartPinConsumedAt(LocalDateTime.now().minusMinutes(5));
+        when(partnerOrderRepository.findByIdForUpdate(8L)).thenReturn(Optional.of(accepted));
+        when(partnerOrderRepository.findByIdForUpdate(9L)).thenReturn(Optional.of(inProgress));
         when(partnerOrderRepository.save(any(PartnerOrder.class))).thenAnswer(inv -> inv.getArgument(0));
         when(fileStorageUtil.storeImage(any(), eq("order-before"))).thenReturn("before-url");
         when(fileStorageUtil.storeImage(any(), eq("order-after"))).thenReturn("after-url");
+        when(partnerSettlementService.netEarningForOrder(9L)).thenReturn(Optional.of(new BigDecimal("212.50")));
 
-        var startedDto = partnerOrderService.startOrder(10L, 8L, new MockMultipartFile("file", new byte[]{1}));
-        var completedDto = partnerOrderService.completeOrder(10L, 9L, new MockMultipartFile("file", new byte[]{2}));
+        var arrivedDto = partnerOrderService.arriveOrder(10L, 8L);
+        String startPin = partnerOrderService.serviceStartPinForCustomer(accepted);
+        var startedDto = partnerOrderService.startOrder(10L, 8L, new MockMultipartFile("file", new byte[]{1}), startPin);
+        partnerOrderService.requestCompletePin(10L, 9L);
+        String completePin = partnerOrderService.serviceCompletePinForCustomer(inProgress);
+        var completedDto = partnerOrderService.completeOrder(10L, 9L, new MockMultipartFile("file", new byte[]{2}), completePin);
 
-        assertThat(startedDto.status()).isEqualTo(OrderStatus.STARTED);
-        assertThat(started.getAfterImageUrls()).isEqualTo("after-url");
+        assertThat(arrivedDto.status()).isEqualTo(OrderStatus.ARRIVED);
+        assertThat(startedDto.status()).isEqualTo(OrderStatus.IN_PROGRESS);
+        assertThat(startedDto.jobStatus()).isEqualTo("IN_PROGRESS");
+        assertThat(inProgress.getAfterImageUrls()).isEqualTo("after-url");
         assertThat(completedDto.status()).isEqualTo(OrderStatus.COMPLETED);
+        assertThat(completedDto.reviewEligible()).isTrue();
         verify(partnerSettlementService).ensurePayout(9L);
+        verify(notificationTriggerService).serviceCompleted(44L, "9");
+        verify(notificationTriggerService).partnerServiceCompleted(10L, "9", new BigDecimal("212.50"));
         verify(businessMetricsService).incrementOrdersCompleted();
     }
 
     @Test
-    void startAndCompleteOrderAllowMissingImages() {
-        PartnerOrder accepted = order(18L, OrderStatus.ACCEPTED, 10L);
-        PartnerOrder started = order(19L, OrderStatus.STARTED, 10L);
-        when(partnerOrderRepository.findById(18L)).thenReturn(Optional.of(accepted));
-        when(partnerOrderRepository.findById(19L)).thenReturn(Optional.of(started));
+    void directStartAndCompleteRequireCustomerPin() {
+        assertThrows(BadRequestException.class, () -> partnerOrderService.startOrder(10L, 18L, null));
+        assertThrows(BadRequestException.class, () -> partnerOrderService.completeOrder(10L, 18L, null));
+        verify(fileStorageUtil, never()).storeImage(any(), any());
+    }
+
+    @Test
+    void wrongPinsDoNotStartOrCompleteAndPinReuseIsBlocked() {
+        PartnerOrder arrived = order(20L, OrderStatus.ACCEPTED, 10L);
+        when(partnerOrderRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(arrived));
         when(partnerOrderRepository.save(any(PartnerOrder.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        var startedDto = partnerOrderService.startOrder(10L, 18L, null);
-        var completedDto = partnerOrderService.completeOrder(10L, 19L, null);
+        partnerOrderService.arriveOrder(10L, 20L);
 
-        assertThat(startedDto.status()).isEqualTo(OrderStatus.STARTED);
-        assertThat(completedDto.status()).isEqualTo(OrderStatus.COMPLETED);
-        assertThat(accepted.getBeforeImageUrls()).isNull();
-        assertThat(started.getAfterImageUrls()).isNull();
-        verify(fileStorageUtil, never()).storeImage(any(), any());
-        verify(partnerSettlementService).ensurePayout(19L);
-        verify(businessMetricsService).incrementOrdersCompleted();
+        assertThrows(BadRequestException.class, () -> partnerOrderService.startOrder(10L, 20L, null, "0000"));
+        assertThat(arrived.getServiceStartPinAttempts()).isEqualTo(1);
+        String startPin = partnerOrderService.serviceStartPinForCustomer(arrived);
+        var duplicateStart = partnerOrderService.startOrder(10L, 20L, null, startPin);
+        assertThat(arrived.getStatus()).isEqualTo(OrderStatus.IN_PROGRESS);
+        assertThat(duplicateStart.status()).isEqualTo(OrderStatus.IN_PROGRESS);
+
+        partnerOrderService.requestCompletePin(10L, 20L);
+        assertThrows(BadRequestException.class, () -> partnerOrderService.completeOrder(10L, 20L, null, "0000"));
+        String completePin = partnerOrderService.serviceCompletePinForCustomer(arrived);
+        partnerOrderService.completeOrder(10L, 20L, null, completePin);
+        assertThat(arrived.getStatus()).isEqualTo(OrderStatus.COMPLETED);
+        assertThrows(BadRequestException.class, () -> partnerOrderService.completeOrder(10L, 20L, null, completePin));
+    }
+
+    @Test
+    void expiredPinsAndDuplicateArrivalAreRejected() {
+        PartnerOrder order = order(21L, OrderStatus.ACCEPTED, 10L);
+        when(partnerOrderRepository.findByIdForUpdate(21L)).thenReturn(Optional.of(order));
+        when(partnerOrderRepository.save(any(PartnerOrder.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        partnerOrderService.arriveOrder(10L, 21L);
+        var duplicateArrival = partnerOrderService.arriveOrder(10L, 21L);
+        assertThat(duplicateArrival.status()).isEqualTo(OrderStatus.ARRIVED);
+
+        order.setServiceStartPinExpiresAt(LocalDateTime.now().minusMinutes(1));
+        assertThrows(BadRequestException.class, () -> partnerOrderService.startOrder(10L, 21L, null, "1234"));
+
+        order.setServiceStartPinExpiresAt(LocalDateTime.now().plusMinutes(10));
+        String startPin = partnerOrderService.serviceStartPinForCustomer(order);
+        partnerOrderService.startOrder(10L, 21L, null, startPin);
+
+        partnerOrderService.requestCompletePin(10L, 21L);
+        order.setServiceCompletePinExpiresAt(LocalDateTime.now().minusMinutes(1));
+        assertThrows(BadRequestException.class, () -> partnerOrderService.completeOrder(10L, 21L, null, "5678"));
     }
 
     @Test
@@ -213,13 +307,15 @@ class PartnerOrderServiceTest {
                 120.0, 600.0, 0.0, 0.0, 0.0, 0.0, 0L, 0L, 0L, 0L, 0.0));
         when(partnerOrderRepository.countByAssignedPartnerIdAndStatus(10L, OrderStatus.COMPLETED)).thenReturn(4L);
         when(partnerOrderRepository.countByAssignedPartnerIdAndStatus(10L, OrderStatus.ACCEPTED)).thenReturn(2L);
+        when(partnerOrderRepository.countByAssignedPartnerIdAndStatus(10L, OrderStatus.ARRIVED)).thenReturn(1L);
+        when(partnerOrderRepository.countByAssignedPartnerIdAndStatus(10L, OrderStatus.IN_PROGRESS)).thenReturn(1L);
         when(partnerOrderRepository.countByAssignedPartnerIdAndStatus(10L, OrderStatus.STARTED)).thenReturn(1L);
 
         var dashboard = partnerOrderService.dashboard(10L);
 
         assertThat(dashboard.totalCompletedOrders()).isEqualTo(4L);
-        assertThat(dashboard.pendingOrders()).isEqualTo(3L);
-        assertThat(dashboard.activeDeliveries()).isEqualTo(1L);
+        assertThat(dashboard.pendingOrders()).isEqualTo(5L);
+        assertThat(dashboard.activeDeliveries()).isEqualTo(2L);
         assertThat(dashboard.todayEarnings()).isEqualTo(120.0);
         assertThat(dashboard.totalOnlineHours()).isGreaterThan(0.0);
     }
@@ -254,10 +350,25 @@ class PartnerOrderServiceTest {
     @Test
     void ownedOrderChecksAssignedPartner() {
         PartnerOrder unassigned = order(9L, OrderStatus.ACCEPTED, null);
-        when(partnerOrderRepository.findById(9L)).thenReturn(Optional.of(unassigned));
+        when(partnerOrderRepository.findByIdForUpdate(9L)).thenReturn(Optional.of(unassigned));
 
-        assertThrows(BadRequestException.class, () -> partnerOrderService.startOrder(10L, 9L, null));
+        assertThrows(BadRequestException.class, () -> partnerOrderService.startOrder(10L, 9L, null, "1234"));
         verify(fileStorageUtil, never()).storeImage(any(), any());
+    }
+
+    @Test
+    void mapsServiceTypeThroughDynamicTranslationForPartnerLocale() {
+        PartnerOrder order = order(7L, OrderStatus.ACCEPTED, 10L);
+        when(partnerOrderRepository.findById(7L)).thenReturn(Optional.of(order));
+        when(partnerSettlementService.partnerVisibleAmountForOrder(order)).thenReturn(100.0);
+        when(dynamicTranslationService.translateForPartner(
+                10L, null, "partner_order", 7L, "service_type", "Cleaning"))
+                .thenReturn("Safai HI");
+
+        var response = partnerOrderService.getOrder(10L, 7L);
+
+        assertThat(response.serviceType()).isEqualTo("Safai HI");
+        assertThat(response.amount()).isEqualTo(100.0);
     }
 
     private PartnerOrder order(Long id, OrderStatus status, Long assignedPartnerId) {
@@ -274,5 +385,16 @@ class PartnerOrderServiceTest {
         order.setAmount(250.0);
         order.setCreatedAt(LocalDateTime.now());
         return order;
+    }
+
+    private PartnerShiftEntity onlineShift(Long partnerId) {
+        PartnerShiftEntity shift = new PartnerShiftEntity();
+        shift.setPartnerId(partnerId);
+        shift.setOnline(true);
+        shift.setActiveJobsCount(0);
+        shift.setMaxActiveJobs(3);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
+        return shift;
     }
 }

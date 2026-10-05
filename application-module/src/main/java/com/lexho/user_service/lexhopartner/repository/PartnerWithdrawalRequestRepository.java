@@ -12,4 +12,6 @@ public interface PartnerWithdrawalRequestRepository extends JpaRepository<Partne
     Page<PartnerWithdrawalRequest> findByPartnerId(Long partnerId, Pageable pageable);
 
     List<PartnerWithdrawalRequest> findByPartnerIdAndStatusIn(Long partnerId, List<String> statuses);
+
+    long countByPartnerIdAndStatusIn(Long partnerId, List<String> statuses);
 }

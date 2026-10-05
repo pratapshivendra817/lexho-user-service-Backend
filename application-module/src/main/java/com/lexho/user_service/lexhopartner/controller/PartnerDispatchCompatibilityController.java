@@ -39,46 +39,50 @@ public class PartnerDispatchCompatibilityController {
 
     @GetMapping({"/orders/new", "/dispatch/new"})
     public ApiResponse<PageResponseDto<OrderResponseDto>> newRequests(
+            @RequestAttribute(PartnerControllerText.ATTR_USER_ID) Long partnerId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String direction) {
-        return ApiResponse.success("Orders fetched", partnerOrderService.getNewOrders(page, size, sortBy, direction));
+        return ApiResponse.success(PartnerControllerText.MSG_ORDERS_FETCHED,
+                partnerOrderService.getNewOrders(partnerId, page, size, sortBy, direction));
     }
 
     @GetMapping("/orders/{id}")
-    public ApiResponse<OrderResponseDto> orderDetails(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<OrderResponseDto> orderDetails(@RequestAttribute(PartnerControllerText.ATTR_USER_ID) Long partnerId,
                                                       @PathVariable Long id) {
-        return ApiResponse.success("Order fetched", partnerOrderService.getOrder(partnerId, id));
+        return ApiResponse.success(PartnerControllerText.MSG_ORDER_FETCHED, partnerOrderService.getOrder(partnerId, id));
     }
 
     @GetMapping("/orders/{id}/chat/messages")
     public ApiResponse<ChatMessagePageResponse> orderChatMessages(@PathVariable Long id,
                                                                   @RequestParam(defaultValue = "0") int page,
                                                                   @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success("Chat messages fetched", chatService.listMessagesByOrderId(id, page, size));
+        return ApiResponse.success(PartnerControllerText.MSG_CHAT_MESSAGES_FETCHED, chatService.listMessagesByOrderId(id, page, size));
     }
 
     @GetMapping("/dispatch/requests/new")
     public ApiResponse<PagedResponse<PartnerIncomingRequestResponse>> newDispatchRequests(
-            @RequestAttribute("userId") Long partnerId,
+            @RequestAttribute(PartnerControllerText.ATTR_USER_ID) Long partnerId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ApiResponse.success(
-                "Requests fetched",
+                PartnerControllerText.MSG_REQUESTS_FETCHED,
                 partnerRequestService.getIncomingRequests(partnerId, PartnerServiceRequestStatus.PENDING, page, size)
         );
     }
 
     @PostMapping("/dispatch/{requestId}/accept")
-    public ApiResponse<PartnerRequestActionResponse> accept(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<PartnerRequestActionResponse> accept(@RequestAttribute(PartnerControllerText.ATTR_USER_ID) Long partnerId,
                                                             @PathVariable Long requestId) {
-        return ApiResponse.success("Request accepted", partnerRequestService.accept(partnerId, requestId));
+        return ApiResponse.success(PartnerControllerText.MSG_REQUEST_ACCEPTED,
+                partnerRequestService.accept(partnerId, requestId));
     }
 
     @PostMapping("/dispatch/{requestId}/reject")
-    public ApiResponse<PartnerRequestActionResponse> reject(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<PartnerRequestActionResponse> reject(@RequestAttribute(PartnerControllerText.ATTR_USER_ID) Long partnerId,
                                                             @PathVariable Long requestId) {
-        return ApiResponse.success("Request rejected", partnerRequestService.reject(partnerId, requestId, null));
+        return ApiResponse.success(PartnerControllerText.MSG_REQUEST_REJECTED,
+                partnerRequestService.reject(partnerId, requestId, null));
     }
 }

@@ -1,0 +1,5 @@
+ALTER TABLE admin_categories
+    ADD COLUMN description VARCHAR(1000) NULL AFTER name;
+
+ALTER TABLE service_details
+    MODIFY COLUMN type ENUM('INCLUDED', 'EXCLUDED', 'FAQ', 'INSTRUCTION', 'REQUIREMENT') NOT NULL;

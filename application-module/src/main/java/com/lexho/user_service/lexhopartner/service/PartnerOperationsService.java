@@ -1,8 +1,5 @@
 package com.lexho.user_service.lexhopartner.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.user_service.audit.service.AuditLogService;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import com.lexho.user_service.exception.BadRequestException;
@@ -18,11 +15,15 @@ import com.lexho.user_service.lexhopartner.entity.PartnerWarningComment;
 import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerServiceAreaRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
+import com.lexho.user_service.localization.dynamic.DynamicContentTranslationService;
+import com.lexho.user_service.localization.service.PartnerLocalizationService;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.review.repository.ReviewRepository;
+import com.lexho.user_service.util.LexhoConstants;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -31,43 +32,98 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 @Service
 public class PartnerOperationsService {
-
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    private static final TypeReference<List<String>> STRING_LIST_TYPE = new TypeReference<>() {};
-    private static final int MAX_ATTACHMENTS = 10;
-    private static final int MAX_ATTACHMENT_URL_LENGTH = 500;
+    private static final String FIELD_REASON = "reason";
+    private static final String FIELD_STATUS = "status";
 
     private final PartnerLeaveRepository leaveRepository;
     private final PartnerServiceAreaRepository serviceAreaRepository;
     private final PartnerPenaltyRepository penaltyRepository;
     private final PartnerWarningCommentRepository warningCommentRepository;
     private final PartnerOrderRepository orderRepository;
-    private final PartnerProfileRepository profileRepository;
+    private final PartnerOperationalProfileRepository profileRepository;
     private final PartnerShiftRepository shiftRepository;
     private final ReviewRepository reviewRepository;
     private final AuditLogService auditLogService;
     private final NotificationManagementService notificationManagementService;
     private final PartnerWarningRealtimeService partnerWarningRealtimeService;
+    private final PartnerLocalizationService localizationService;
+    private final DynamicContentTranslationService dynamicTranslationService;
 
     public PartnerOperationsService(PartnerLeaveRepository leaveRepository,
                                     PartnerServiceAreaRepository serviceAreaRepository,
                                     PartnerPenaltyRepository penaltyRepository,
                                     PartnerWarningCommentRepository warningCommentRepository,
                                     PartnerOrderRepository orderRepository,
-                                    PartnerProfileRepository profileRepository,
+                                    PartnerOperationalProfileRepository profileRepository,
                                     PartnerShiftRepository shiftRepository,
                                     ReviewRepository reviewRepository,
                                     AuditLogService auditLogService,
                                     NotificationManagementService notificationManagementService,
                                     PartnerWarningRealtimeService partnerWarningRealtimeService) {
+        this(leaveRepository,
+                serviceAreaRepository,
+                penaltyRepository,
+                warningCommentRepository,
+                orderRepository,
+                profileRepository,
+                shiftRepository,
+                reviewRepository,
+                auditLogService,
+                notificationManagementService,
+                partnerWarningRealtimeService,
+                null,
+                Optional.empty());
+    }
+
+    public PartnerOperationsService(PartnerLeaveRepository leaveRepository,
+                                    PartnerServiceAreaRepository serviceAreaRepository,
+                                    PartnerPenaltyRepository penaltyRepository,
+                                    PartnerWarningCommentRepository warningCommentRepository,
+                                    PartnerOrderRepository orderRepository,
+                                    PartnerOperationalProfileRepository profileRepository,
+                                    PartnerShiftRepository shiftRepository,
+                                    ReviewRepository reviewRepository,
+                                    AuditLogService auditLogService,
+                                    NotificationManagementService notificationManagementService,
+                                    PartnerWarningRealtimeService partnerWarningRealtimeService,
+                                    PartnerLocalizationService localizationService) {
+        this(leaveRepository,
+                serviceAreaRepository,
+                penaltyRepository,
+                warningCommentRepository,
+                orderRepository,
+                profileRepository,
+                shiftRepository,
+                reviewRepository,
+                auditLogService,
+                notificationManagementService,
+                partnerWarningRealtimeService,
+                localizationService,
+                Optional.empty());
+    }
+
+    @Autowired
+    public PartnerOperationsService(PartnerLeaveRepository leaveRepository,
+                                    PartnerServiceAreaRepository serviceAreaRepository,
+                                    PartnerPenaltyRepository penaltyRepository,
+                                    PartnerWarningCommentRepository warningCommentRepository,
+                                    PartnerOrderRepository orderRepository,
+                                    PartnerOperationalProfileRepository profileRepository,
+                                    PartnerShiftRepository shiftRepository,
+                                    ReviewRepository reviewRepository,
+                                    AuditLogService auditLogService,
+                                    NotificationManagementService notificationManagementService,
+                                    PartnerWarningRealtimeService partnerWarningRealtimeService,
+                                    PartnerLocalizationService localizationService,
+                                    Optional<DynamicContentTranslationService> dynamicTranslationService) {
         this.leaveRepository = leaveRepository;
         this.serviceAreaRepository = serviceAreaRepository;
         this.penaltyRepository = penaltyRepository;
@@ -79,19 +135,21 @@ public class PartnerOperationsService {
         this.auditLogService = auditLogService;
         this.notificationManagementService = notificationManagementService;
         this.partnerWarningRealtimeService = partnerWarningRealtimeService;
+        this.localizationService = localizationService;
+        this.dynamicTranslationService = dynamicTranslationService.orElse(null);
     }
 
     @Transactional
     public Map<String, Object> createLeave(Long partnerId, PartnerLeaveRequest request) {
         if (request.toDate().isBefore(request.fromDate())) {
-            throw new BadRequestException("toDate must be greater than or equal to fromDate");
+            throw new BadRequestException(PartnerServiceText.MSG_TO_DATE_AFTER_FROM_DATE);
         }
         PartnerLeave leave = new PartnerLeave();
         leave.setPartnerId(partnerId);
         leave.setFromDate(request.fromDate());
         leave.setToDate(request.toDate());
         leave.setReason(request.reason() == null ? null : request.reason().trim());
-        leave.setStatus("REQUESTED");
+        leave.setStatus(PartnerServiceText.STATUS_REQUESTED);
         PartnerLeave saved = leaveRepository.save(leave);
         profileRepository.findById(partnerId).ifPresent(profile -> {
             profile.setOnline(false);
@@ -112,23 +170,28 @@ public class PartnerOperationsService {
     @Transactional
     public Map<String, Object> cancelLeave(Long partnerId, Long leaveId) {
         PartnerLeave leave = leaveRepository.findByIdAndPartnerId(leaveId, partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Leave not found"));
-        leave.setStatus("CANCELLED");
+                .orElseThrow(() -> new ResourceNotFoundException(PartnerServiceText.MSG_LEAVE_NOT_FOUND));
+        leave.setStatus(PartnerServiceText.STATUS_CANCELLED);
         return leaveMap(leaveRepository.save(leave));
     }
 
     @Transactional
     public List<Map<String, Object>> updateServiceAreas(Long partnerId, PartnerServiceAreaRequest request) {
-        return updateServiceAreas(partnerId, request.areas());
+        return replaceServiceAreas(partnerId, request.areas());
     }
 
     @Transactional
     public List<Map<String, Object>> updateServiceAreas(Long partnerId, List<PartnerServiceAreaRequest.ServiceAreaItem> areas) {
+        return replaceServiceAreas(partnerId, areas);
+    }
+
+    private List<Map<String, Object>> replaceServiceAreas(Long partnerId,
+                                                          List<PartnerServiceAreaRequest.ServiceAreaItem> areas) {
         serviceAreaRepository.deleteByPartnerId(partnerId);
         serviceAreaRepository.flush();
         List<PartnerServiceArea> saved = areas.stream().map(item -> {
             if (item.pincode() == null || item.pincode().isBlank()) {
-                throw new BadRequestException("pincode is required");
+                throw new BadRequestException(PartnerServiceText.MSG_PINCODE_REQUIRED);
             }
             PartnerServiceArea area = new PartnerServiceArea();
             area.setPartnerId(partnerId);
@@ -164,7 +227,7 @@ public class PartnerOperationsService {
         response.put("completionRate", completionRate);
         response.put("cancellationRate", cancellationRate);
         response.put("averageRating", rating);
-        response.put("rating", rating);
+        response.put(LexhoConstants.FIELD_RATING, rating);
         response.put("onTimeArrivalRate", onTimeArrivalRate);
         response.put("onTimeArrivalPercentage", onTimeArrivalRate);
         return response;
@@ -174,16 +237,17 @@ public class PartnerOperationsService {
     public Map<String, Object> ratings(Long partnerId, int page, int size) {
         var result = reviewRepository.findByProviderIdAndDeletedFalse(
                 partnerId,
-                PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), Sort.by("createdAt").descending())
+                PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100),
+                        Sort.by(LexhoConstants.FIELD_CREATED_AT).descending())
         );
         List<Map<String, Object>> reviews = result.getContent().stream().map(review -> {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", review.getId());
             row.put("bookingId", review.getBookingId());
             row.put("customerName", review.getCustomerId() == null ? "Anonymous" : "Customer " + review.getCustomerId());
-            row.put("rating", review.getRating());
+        row.put(LexhoConstants.FIELD_RATING, review.getRating());
             row.put("comment", review.getReviewComment());
-            row.put("createdAt", review.getCreatedAt());
+        row.put(LexhoConstants.FIELD_CREATED_AT, review.getCreatedAt());
             return row;
         }).toList();
         double average = result.getTotalElements() == 0 ? 0.0
@@ -191,7 +255,7 @@ public class PartnerOperationsService {
                 .mapToInt(review -> review.getRating() == null ? 0 : review.getRating()).average().orElse(0.0);
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("averageRating", Math.round(average * 100.0) / 100.0);
-        response.put("rating", Math.round(average * 100.0) / 100.0);
+        response.put(LexhoConstants.FIELD_RATING, Math.round(average * 100.0) / 100.0);
         response.put("totalReviews", result.getTotalElements());
         response.put("feedback", reviews);
         response.put("reviews", Map.of(
@@ -208,7 +272,7 @@ public class PartnerOperationsService {
     @Transactional(readOnly = true)
     public List<Map<String, Object>> warnings(Long partnerId) {
         return penaltyRepository.findByPartnerIdOrderByCreatedAtDesc(partnerId).stream()
-                .filter(penalty -> "WARNING".equalsIgnoreCase(penalty.getStatus()))
+                .filter(penalty -> PartnerServiceText.STATUS_WARNING.equalsIgnoreCase(penalty.getStatus()))
                 .map(this::warningMap)
                 .toList();
     }
@@ -226,11 +290,12 @@ public class PartnerOperationsService {
     @Transactional
     public Map<String, Object> addPenalty(Long partnerId, String status, String reason, Long adminId) {
         if (status == null || status.isBlank()) {
-            throw new BadRequestException("status is required");
+            throw new BadRequestException(PartnerServiceText.MSG_STATUS_REQUIRED);
         }
         String normalized = status.trim().toUpperCase();
-        if (!java.util.Set.of("WARNING", "SUSPENSION", "BLOCKED").contains(normalized)) {
-            throw new BadRequestException("Invalid penalty status");
+        if (!java.util.Set.of(PartnerServiceText.STATUS_WARNING, PartnerServiceText.STATUS_SUSPENSION,
+                PartnerServiceText.STATUS_BLOCKED).contains(normalized)) {
+            throw new BadRequestException(PartnerServiceText.MSG_INVALID_PENALTY_STATUS);
         }
         PartnerPenalty penalty = new PartnerPenalty();
         penalty.setPartnerId(partnerId);
@@ -238,11 +303,12 @@ public class PartnerOperationsService {
         penalty.setReason(reason == null ? null : reason.trim());
         penalty.setCreatedByAdminId(adminId);
         PartnerPenalty saved = penaltyRepository.save(penalty);
-        auditLogService.log(adminId, "ADMIN", "PENALTY_UPDATED", "PARTNER",
+        auditLogService.log(adminId, PartnerServiceText.AUDIT_ADMIN, PartnerServiceText.AUDIT_PENALTY_UPDATED,
+                PartnerServiceText.AUDIT_PARTNER,
                 partnerId.toString(), null, normalized);
-        if ("WARNING".equals(normalized)) {
+        if (PartnerServiceText.STATUS_WARNING.equals(normalized)) {
             notificationManagementService.createPartnerWarningNotification(partnerId, saved.getId(), saved.getReason());
-            publishWarningEvent(saved, "warning-created");
+            publishWarningEvent(saved, PartnerServiceText.EVENT_WARNING_CREATED);
         }
         return penaltyMap(saved);
     }
@@ -253,7 +319,7 @@ public class PartnerOperationsService {
         if (sendNotification) {
             notificationManagementService.createPartnerWarningNotification(partnerId, warning.getId(), warning.getReason());
         }
-        publishWarningEvent(warning, "warning-created");
+        publishWarningEvent(warning, PartnerServiceText.EVENT_WARNING_CREATED);
         return warningMap(warning);
     }
 
@@ -263,7 +329,7 @@ public class PartnerOperationsService {
         if (warning.getAcknowledgedAt() == null) {
             warning.setAcknowledgedAt(LocalDateTime.now());
             warning = penaltyRepository.save(warning);
-            publishWarningEvent(warning, "warning-acknowledged");
+            publishWarningEvent(warning, PartnerServiceText.EVENT_WARNING_ACKNOWLEDGED);
         }
         return warningMap(warning);
     }
@@ -274,21 +340,23 @@ public class PartnerOperationsService {
                                               String disputeReason,
                                               List<String> attachmentUrls) {
         if (disputeReason == null || disputeReason.isBlank()) {
-            throw new BadRequestException("Dispute reason is required");
+            throw new BadRequestException(PartnerServiceText.MSG_DISPUTE_REASON_REQUIRED);
         }
         PartnerPenalty warning = requireWarning(partnerId, warningId);
         String currentStatus = warning.getDisputeStatus();
-        if ("OPEN".equalsIgnoreCase(currentStatus) || "UNDER_REVIEW".equalsIgnoreCase(currentStatus)) {
-            throw new BadRequestException("A dispute is already active for this warning");
+        if (PartnerServiceText.STATUS_OPEN.equalsIgnoreCase(currentStatus)
+                || PartnerServiceText.STATUS_UNDER_REVIEW.equalsIgnoreCase(currentStatus)) {
+            throw new BadRequestException(PartnerServiceText.MSG_DISPUTE_ALREADY_ACTIVE);
         }
-        warning.setDisputeStatus("OPEN");
+        warning.setDisputeStatus(PartnerServiceText.STATUS_OPEN);
         warning.setDisputeReason(disputeReason.trim());
         warning.setDisputedAt(LocalDateTime.now());
         warning = penaltyRepository.save(warning);
-        addComment(warning, "PARTNER", partnerId, disputeReason.trim(), attachmentUrls);
-        auditLogService.log(partnerId, "PARTNER", "WARNING_DISPUTED", "PARTNER_WARNING",
+        addComment(warning, PartnerServiceText.SENDER_PARTNER, partnerId, disputeReason.trim(), attachmentUrls);
+        auditLogService.log(partnerId, PartnerServiceText.AUDIT_PARTNER, PartnerServiceText.AUDIT_WARNING_DISPUTED,
+                PartnerServiceText.AUDIT_PARTNER_WARNING,
                 String.valueOf(warningId), null, warning.getDisputeStatus());
-        publishWarningEvent(warning, "warning-disputed");
+        publishWarningEvent(warning, PartnerServiceText.EVENT_WARNING_DISPUTED);
         return warningMap(warning);
     }
 
@@ -296,8 +364,8 @@ public class PartnerOperationsService {
     public Map<String, Object> addWarningComment(Long partnerId, Long warningId, PartnerWarningCommentRequest request) {
         PartnerPenalty warning = requireWarning(partnerId, warningId);
         String message = normalizeCommentMessage(request.message(), request.attachmentUrls());
-        addComment(warning, "PARTNER", partnerId, message, request.attachmentUrls());
-        publishWarningEvent(warning, "warning-comment");
+        addComment(warning, PartnerServiceText.SENDER_PARTNER, partnerId, message, request.attachmentUrls());
+        publishWarningEvent(warning, PartnerServiceText.EVENT_WARNING_COMMENT);
         return warningMap(warning);
     }
 
@@ -309,12 +377,12 @@ public class PartnerOperationsService {
     private PartnerPenalty saveWarning(Long partnerId, String reason, Long adminId) {
         PartnerPenalty warning = new PartnerPenalty();
         warning.setPartnerId(partnerId);
-        warning.setStatus("WARNING");
+        warning.setStatus(PartnerServiceText.STATUS_WARNING);
         warning.setReason(reason == null ? null : reason.trim());
         warning.setCreatedByAdminId(adminId);
         PartnerPenalty saved = penaltyRepository.save(warning);
-        auditLogService.log(adminId, "ADMIN", "WARNING_CREATED", "PARTNER",
-                partnerId.toString(), null, "WARNING");
+        auditLogService.log(adminId, PartnerServiceText.AUDIT_ADMIN, PartnerServiceText.AUDIT_WARNING_CREATED,
+                PartnerServiceText.AUDIT_PARTNER, partnerId.toString(), null, PartnerServiceText.STATUS_WARNING);
         return saved;
     }
 
@@ -331,7 +399,7 @@ public class PartnerOperationsService {
             status = deriveLeaveStatus(leave);
         }
         return Map.of("id", leave.getId(), "leaveId", leave.getId(), "fromDate", leave.getFromDate(), "toDate", leave.getToDate(),
-                "reason", leave.getReason() == null ? "" : leave.getReason(), "status", status);
+                FIELD_REASON, leave.getReason() == null ? "" : leave.getReason(), FIELD_STATUS, status);
     }
 
     private Map<String, Object> areaMap(PartnerServiceArea area) {
@@ -341,30 +409,33 @@ public class PartnerOperationsService {
     }
 
     private Map<String, Object> penaltyMap(PartnerPenalty penalty) {
-        return Map.of("id", penalty.getId(), "status", penalty.getStatus(),
-                "reason", penalty.getReason() == null ? "" : penalty.getReason(),
-                "createdAt", penalty.getCreatedAt());
+        return Map.of("id", penalty.getId(), FIELD_STATUS, penalty.getStatus(),
+                FIELD_REASON, penalty.getReason() == null ? "" : penalty.getReason(),
+                LexhoConstants.FIELD_CREATED_AT, penalty.getCreatedAt());
     }
 
     private Map<String, Object> warningMap(PartnerPenalty penalty) {
-        String reason = penalty.getReason() == null ? "" : penalty.getReason();
+        String reason = translatedWarningText(
+                penalty.getPartnerId(), penalty.getId(), FIELD_REASON, penalty.getReason() == null ? "" : penalty.getReason());
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("id", penalty.getId());
         row.put("warningId", penalty.getId());
-        row.put("type", "WARNING");
-        row.put("category", "WARNING");
-        row.put("reason", reason);
+        row.put("type", PartnerServiceText.STATUS_WARNING);
+        row.put("category", PartnerServiceText.STATUS_WARNING);
+        row.put(FIELD_REASON, reason);
         row.put("message", reason);
-        row.put("title", "WARNING");
+        row.put("title", text("warning.title", PartnerServiceText.MSG_WARNING_TITLE));
         row.put("guidance", guidanceFor(penalty.getStatus()));
         row.put("resolutionGuidance", guidanceFor(penalty.getStatus()));
-        row.put("status", penalty.getStatus());
+        row.put(FIELD_STATUS, penalty.getStatus());
         row.put("warningStatus", penalty.getStatus());
-        row.put("active", !"RESOLVED".equalsIgnoreCase(penalty.getStatus()));
+        row.put("active", !PartnerServiceText.STATUS_RESOLVED.equalsIgnoreCase(penalty.getStatus()));
         row.put("acknowledged", penalty.getAcknowledgedAt() != null);
         row.put("acknowledgedAt", penalty.getAcknowledgedAt());
         row.put("disputeStatus", defaultDisputeStatus(penalty.getDisputeStatus()));
-        row.put("disputeReason", penalty.getDisputeReason() == null ? "" : penalty.getDisputeReason());
+        row.put("disputeReason", translatedWarningText(
+                penalty.getPartnerId(), penalty.getId(), "dispute_reason",
+                penalty.getDisputeReason() == null ? "" : penalty.getDisputeReason()));
         row.put("disputedAt", penalty.getDisputedAt());
         row.put("disputeReviewNote", penalty.getDisputeReviewNote() == null ? "" : penalty.getDisputeReviewNote());
         row.put("disputeReviewedByAdminId", penalty.getDisputeReviewedByAdminId());
@@ -375,13 +446,24 @@ public class PartnerOperationsService {
                 .toList();
         row.put("comments", comments);
         row.put("commentCount", comments.size());
-        row.put("latestCommentAt", comments.isEmpty() ? null : comments.get(comments.size() - 1).get("createdAt"));
-        row.put("notificationTitle", "New Warning Issued");
-        row.put("notificationMessage", "A new warning has been issued to your account. Tap to view the details.");
-        row.put("redirectType", "WARNING");
+        row.put("latestCommentAt",
+                comments.isEmpty() ? null : comments.get(comments.size() - 1).get(LexhoConstants.FIELD_CREATED_AT));
+        row.put("notificationTitle", text("notification.warning.title",
+                PartnerServiceText.MSG_WARNING_NOTIFICATION_TITLE));
+        row.put("notificationMessage", text("notification.warning.message",
+                PartnerServiceText.MSG_WARNING_ACCOUNT));
+        row.put("redirectType", PartnerServiceText.STATUS_WARNING);
         row.put("redirectValue", String.valueOf(penalty.getId()));
-        row.put("createdAt", penalty.getCreatedAt());
+        row.put(LexhoConstants.FIELD_CREATED_AT, penalty.getCreatedAt());
         return row;
+    }
+
+    private String translatedWarningText(Long partnerId, Long warningId, String fieldName, String englishText) {
+        if (dynamicTranslationService == null || englishText == null || englishText.isBlank()) {
+            return englishText;
+        }
+        return dynamicTranslationService.translateForPartner(
+                partnerId, null, "partner_warning", warningId, fieldName, englishText);
     }
 
     private Map<String, Object> warningCommentMap(PartnerWarningComment comment) {
@@ -390,43 +472,45 @@ public class PartnerOperationsService {
         row.put("senderType", comment.getSenderType());
         row.put("senderId", comment.getSenderId());
         row.put("message", comment.getMessage());
-        row.put("attachmentUrls", deserializeAttachmentUrls(comment.getAttachmentUrls()));
-        row.put("createdAt", comment.getCreatedAt());
+        row.put("attachmentUrls", PartnerAttachmentUrlSupport.deserializeAttachmentUrls(comment.getAttachmentUrls()));
+        row.put(LexhoConstants.FIELD_CREATED_AT, comment.getCreatedAt());
         return row;
     }
 
     private String deriveLeaveStatus(PartnerLeave leave) {
         LocalDate today = LocalDate.now();
         if (leave.getToDate() != null && leave.getToDate().isBefore(today)) {
-            return "COMPLETED";
+            return PartnerServiceText.STATUS_COMPLETED;
         }
         if (leave.getFromDate() != null && leave.getFromDate().isAfter(today)) {
-            return "SCHEDULED";
+            return PartnerServiceText.STATUS_SCHEDULED;
         }
-        return "ACTIVE";
+        return PartnerServiceText.STATUS_ACTIVE;
     }
 
     private String guidanceFor(String status) {
-        if ("BLOCKED".equalsIgnoreCase(status) || "SUSPENSION".equalsIgnoreCase(status)) {
-            return "Contact support or admin before taking new jobs.";
+        if (PartnerServiceText.STATUS_BLOCKED.equalsIgnoreCase(status)
+                || PartnerServiceText.STATUS_SUSPENSION.equalsIgnoreCase(status)) {
+            return text("warning.guidance.blocked", PartnerServiceText.MSG_WARNING_WORK_GUIDANCE);
         }
-        if ("WARNING".equalsIgnoreCase(status)) {
-            return "Review the issue and avoid repeating it on future jobs.";
+        if (PartnerServiceText.STATUS_WARNING.equalsIgnoreCase(status)) {
+            return text("warning.guidance.warning", PartnerServiceText.MSG_REVIEW_ISSUE_GUIDANCE);
         }
-        return "Follow admin guidance.";
+        return text("warning.guidance.default", PartnerServiceText.MSG_FOLLOW_ADMIN_GUIDANCE);
     }
 
     private PartnerPenalty requireWarning(Long partnerId, Long warningId) {
         PartnerPenalty warning = penaltyRepository.findByIdAndPartnerId(warningId, partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Warning not found"));
-        if (!Objects.equals("WARNING", warning.getStatus() == null ? null : warning.getStatus().toUpperCase())) {
-            throw new ResourceNotFoundException("Warning not found");
+                .orElseThrow(() -> new ResourceNotFoundException(PartnerServiceText.MSG_WARNING_NOT_FOUND));
+        if (!Objects.equals(PartnerServiceText.STATUS_WARNING,
+                warning.getStatus() == null ? null : warning.getStatus().toUpperCase())) {
+            throw new ResourceNotFoundException(PartnerServiceText.MSG_WARNING_NOT_FOUND);
         }
         return warning;
     }
 
     private String defaultDisputeStatus(String disputeStatus) {
-        return disputeStatus == null || disputeStatus.isBlank() ? "NONE" : disputeStatus;
+        return disputeStatus == null || disputeStatus.isBlank() ? PartnerServiceText.STATUS_NONE : disputeStatus;
     }
 
     private void addComment(PartnerPenalty warning,
@@ -439,7 +523,7 @@ public class PartnerOperationsService {
         comment.setSenderType(senderType);
         comment.setSenderId(senderId);
         comment.setMessage(message);
-        comment.setAttachmentUrls(serializeAttachmentUrls(attachmentUrls));
+        comment.setAttachmentUrls(PartnerAttachmentUrlSupport.serializeAttachmentUrls(attachmentUrls));
         warningCommentRepository.save(comment);
     }
 
@@ -447,58 +531,19 @@ public class PartnerOperationsService {
         partnerWarningRealtimeService.publish(warning.getPartnerId(), warning.getId(), eventName, warningMap(warning));
     }
 
-    private String serializeAttachmentUrls(List<String> attachmentUrls) {
-        List<String> sanitized = sanitizeAttachmentUrls(attachmentUrls);
-        if (sanitized.isEmpty()) {
-            return null;
-        }
-        try {
-            return OBJECT_MAPPER.writeValueAsString(sanitized);
-        } catch (JsonProcessingException exception) {
-            throw new BadRequestException("Invalid attachmentUrls");
-        }
-    }
-
-    private List<String> deserializeAttachmentUrls(String rawValue) {
-        if (rawValue == null || rawValue.isBlank()) {
-            return List.of();
-        }
-        try {
-            List<String> values = OBJECT_MAPPER.readValue(rawValue, STRING_LIST_TYPE);
-            return values == null ? List.of() : values;
-        } catch (JsonProcessingException exception) {
-            return List.of();
-        }
-    }
-
-    private List<String> sanitizeAttachmentUrls(List<String> attachmentUrls) {
-        if (attachmentUrls == null || attachmentUrls.isEmpty()) {
-            return List.of();
-        }
-        List<String> sanitized = new ArrayList<>();
-        for (String value : attachmentUrls) {
-            String normalized = value == null || value.isBlank() ? null : value.trim();
-            if (normalized == null) {
-                continue;
-            }
-            if (normalized.length() > MAX_ATTACHMENT_URL_LENGTH) {
-                throw new BadRequestException("attachmentUrl is too long");
-            }
-            if (!sanitized.contains(normalized)) {
-                sanitized.add(normalized);
-            }
-            if (sanitized.size() > MAX_ATTACHMENTS) {
-                throw new BadRequestException("No more than 10 attachments are allowed");
-            }
-        }
-        return sanitized;
-    }
-
     private String normalizeCommentMessage(String message, List<String> attachmentUrls) {
         String normalized = message == null ? "" : message.trim();
         if (normalized.isEmpty() && (attachmentUrls == null || attachmentUrls.isEmpty())) {
-            throw new BadRequestException("Comment message or attachmentUrls is required");
+            throw new BadRequestException(PartnerServiceText.MSG_COMMENT_OR_ATTACHMENTS_REQUIRED);
         }
-        return normalized.isEmpty() ? "Attachment added" : normalized;
+        return normalized.isEmpty() ? PartnerServiceText.MSG_ATTACHMENT_ADDED : normalized;
+    }
+
+    private String text(String key, String fallback) {
+        if (localizationService == null) {
+            return fallback;
+        }
+        String translated = localizationService.translate(key, fallback);
+        return translated == null || translated.isBlank() ? fallback : translated;
     }
 }

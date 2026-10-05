@@ -22,10 +22,17 @@ public class FileStorageUtil {
     }
 
     public String storeImage(MultipartFile file, String folder) {
+        return store(file, folder, uploadSecurityService.validateImage(file));
+    }
+
+    public String storeDocument(MultipartFile file, String folder) {
+        return store(file, folder, uploadSecurityService.validateDocument(file));
+    }
+
+    private String store(MultipartFile file, String folder, String ext) {
         if (file == null || file.isEmpty()) {
-            throw new BadRequestException("Image file is required");
+            throw new BadRequestException("File is required");
         }
-        String ext = uploadSecurityService.validateImage(file);
         try {
             Path base = Paths.get("uploads").resolve(folder).toAbsolutePath().normalize();
             Files.createDirectories(base);

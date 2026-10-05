@@ -21,6 +21,9 @@ import com.lexho.user_service.lexhopartner.entity.PartnerWithdrawalRequest;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerSettlementRefundRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
+import com.lexho.user_service.localization.dynamic.DynamicContentTranslationService;
+import com.lexho.user_service.util.LexhoConstants;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
@@ -33,6 +36,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class PartnerSettlementService {
@@ -45,23 +49,53 @@ public class PartnerSettlementService {
     private final PartnerWithdrawalRequestRepository withdrawalRepository;
     private final PartnerSettlementRefundRepository settlementRefundRepository;
     private final PartnerSettlementProperties properties;
+    private final DynamicContentTranslationService dynamicTranslationService;
+    private final CompletionSettingsService completionSettingsService;
 
     public PartnerSettlementService(PayoutRepository payoutRepository,
                                     PartnerOrderRepository partnerOrderRepository,
                                     PartnerWithdrawalRequestRepository withdrawalRepository,
                                     PartnerSettlementRefundRepository settlementRefundRepository,
                                     PartnerSettlementProperties properties) {
+        this(payoutRepository, partnerOrderRepository, withdrawalRepository, settlementRefundRepository, properties,
+                Optional.empty(), Optional.empty());
+    }
+
+    public PartnerSettlementService(PayoutRepository payoutRepository,
+                                    PartnerOrderRepository partnerOrderRepository,
+                                    PartnerWithdrawalRequestRepository withdrawalRepository,
+                                    PartnerSettlementRefundRepository settlementRefundRepository,
+                                    PartnerSettlementProperties properties,
+                                    DynamicContentTranslationService dynamicTranslationService) {
+        this(payoutRepository, partnerOrderRepository, withdrawalRepository, settlementRefundRepository, properties,
+                Optional.ofNullable(dynamicTranslationService), Optional.empty());
+    }
+
+    @Autowired
+    public PartnerSettlementService(PayoutRepository payoutRepository,
+                                    PartnerOrderRepository partnerOrderRepository,
+                                    PartnerWithdrawalRequestRepository withdrawalRepository,
+                                    PartnerSettlementRefundRepository settlementRefundRepository,
+                                    PartnerSettlementProperties properties,
+                                    Optional<DynamicContentTranslationService> dynamicTranslationService,
+                                    Optional<CompletionSettingsService> completionSettingsService) {
         this.payoutRepository = payoutRepository;
         this.partnerOrderRepository = partnerOrderRepository;
         this.withdrawalRepository = withdrawalRepository;
         this.settlementRefundRepository = settlementRefundRepository;
         this.properties = properties;
+        this.dynamicTranslationService = optionalValue(dynamicTranslationService);
+        this.completionSettingsService = optionalValue(completionSettingsService);
+    }
+
+    private static <T> T optionalValue(Optional<T> optional) {
+        return optional == null ? null : optional.orElse(null);
     }
 
     @EventListener
     @Transactional
     public void onPaymentCaptured(PaymentCapturedEvent event) {
-        ensurePayout(event.bookingId());
+        ensurePayoutInternal(event.bookingId());
     }
 
     @EventListener
@@ -72,6 +106,10 @@ public class PartnerSettlementService {
 
     @Transactional
     public void ensurePayout(Long bookingId) {
+        ensurePayoutInternal(bookingId);
+    }
+
+    private void ensurePayoutInternal(Long bookingId) {
         if (payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(bookingId).isPresent()) {
             return;
         }
@@ -85,7 +123,9 @@ public class PartnerSettlementService {
             return;
         }
         BigDecimal gross = money(order.getAmount());
-        BigDecimal commissionPercent = properties.getCommissionPercent();
+        BigDecimal commissionPercent = completionSettingsService == null
+                ? properties.getCommissionPercent()
+                : completionSettingsService.commissionPercentFor(order);
         BigDecimal commission = gross.multiply(commissionPercent)
                 .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
         Payout payout = new Payout();
@@ -106,10 +146,40 @@ public class PartnerSettlementService {
     }
 
     @Transactional(readOnly = true)
+    public Optional<BigDecimal> netEarningForOrder(Long bookingId) {
+        return netEarningForOrderInternal(bookingId);
+    }
+
+    private Optional<BigDecimal> netEarningForOrderInternal(Long bookingId) {
+        return payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(bookingId)
+                .map(this::availableAmount);
+    }
+
+    @Transactional(readOnly = true)
+    public Double partnerVisibleAmountForOrder(PartnerOrder order) {
+        if (order == null) {
+            return null;
+        }
+        if (order.getStatus() == OrderStatus.COMPLETED && order.getId() != null) {
+            Optional<BigDecimal> settledAmount = netEarningForOrderInternal(order.getId());
+            if (settledAmount.isPresent()) {
+                return settledAmount.get().doubleValue();
+            }
+        }
+        BigDecimal gross = money(order.getAmount());
+        BigDecimal commissionPercent = completionSettingsService == null
+                ? properties.getCommissionPercent()
+                : completionSettingsService.commissionPercentFor(order);
+        BigDecimal commission = gross.multiply(commissionPercent)
+                .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        return gross.subtract(commission).max(BigDecimal.ZERO).doubleValue();
+    }
+
+    @Transactional(readOnly = true)
     public PageResponseDto<PartnerPayoutDto> payouts(Long partnerId, int page, int size) {
         var result = payoutRepository.findByProviderId(
                 partnerId,
-                PageRequest.of(Math.max(page, 0), limit(size), Sort.by("createdAt").descending())
+                PageRequest.of(Math.max(page, 0), limit(size), Sort.by(LexhoConstants.FIELD_CREATED_AT).descending())
         );
         return new PageResponseDto<>(result.map(this::toPayout).getContent(), result.getNumber(),
                 result.getSize(), result.getTotalElements(), result.getTotalPages());
@@ -130,7 +200,7 @@ public class PartnerSettlementService {
         LocalDateTime startWeek = today.minusDays(today.getDayOfWeek().getValue() - 1L).atStartOfDay();
         LocalDateTime startMonth = today.withDayOfMonth(1).atStartOfDay();
         double lifetime = sumNet(payouts, LocalDateTime.MIN);
-        double availableBalance = withdrawableBalance(partnerId).doubleValue();
+        double availableBalance = withdrawableBalanceInternal(partnerId).doubleValue();
         double pendingSettlement = payouts.stream()
                 .filter(payout -> "PENDING".equals(payout.getStatus()) || "PROCESSING".equals(payout.getStatus()))
                 .map(this::availableAmount)
@@ -165,30 +235,39 @@ public class PartnerSettlementService {
         }
         var result = payoutRepository.findByProviderIdAndCreatedAtBetween(
                 partnerId, start, end,
-                PageRequest.of(Math.max(page, 0), limit(size), Sort.by("createdAt").descending())
+                PageRequest.of(Math.max(page, 0), limit(size), Sort.by(LexhoConstants.FIELD_CREATED_AT).descending())
         );
         List<PartnerEarningTransactionDto> items = result.getContent().stream().map(payout -> {
             PartnerOrder order = partnerOrderRepository.findById(payout.getReferenceBookingId()).orElse(null);
             String serviceType = order == null ? null : order.getServiceType();
+            String translatedServiceType = translatedServiceType(partnerId, order, serviceType);
             String description = serviceType == null || serviceType.isBlank()
                     ? "Booking #" + payout.getReferenceBookingId() + " settlement"
-                    : serviceType + " settlement";
+                    : translatedServiceType + " settlement";
             return new PartnerEarningTransactionDto(
                     payout.getId(),
                     payout.getReferenceBookingId(),
                     description,
-                    gross(payout).doubleValue(),
+                    availableAmount(payout).doubleValue(),
                     availableAmount(payout).doubleValue(),
                     availableAmount(payout).doubleValue(),
                     "EARNING",
                     payout.getStatus(),
                     payout.getCreatedAt(),
                     order == null ? null : order.getCustomerName(),
-                    serviceType
+                    translatedServiceType
             );
         }).toList();
         return new PageResponseDto<>(items, result.getNumber(), result.getSize(),
                 result.getTotalElements(), result.getTotalPages());
+    }
+
+    private String translatedServiceType(Long partnerId, PartnerOrder order, String serviceType) {
+        if (dynamicTranslationService == null || order == null || serviceType == null || serviceType.isBlank()) {
+            return serviceType;
+        }
+        return dynamicTranslationService.translateForPartner(
+                partnerId, null, "partner_order", order.getId(), "service_type", serviceType);
     }
 
     @Transactional
@@ -197,7 +276,7 @@ public class PartnerSettlementService {
         if (amount.compareTo(properties.getMinWithdrawalAmount()) < 0) {
             throw new BadRequestException("Minimum withdrawal amount is " + properties.getMinWithdrawalAmount());
         }
-        if (amount.compareTo(withdrawableBalance(partnerId)) > 0) {
+        if (amount.compareTo(withdrawableBalanceInternal(partnerId)) > 0) {
             throw new BadRequestException("Withdrawal amount exceeds available balance");
         }
         PartnerWithdrawalRequest withdrawal = new PartnerWithdrawalRequest();
@@ -211,7 +290,7 @@ public class PartnerSettlementService {
     public PageResponseDto<PartnerWithdrawalDto> withdrawals(Long partnerId, int page, int size) {
         var result = withdrawalRepository.findByPartnerId(
                 partnerId,
-                PageRequest.of(Math.max(page, 0), limit(size), Sort.by("createdAt").descending())
+                PageRequest.of(Math.max(page, 0), limit(size), Sort.by(LexhoConstants.FIELD_CREATED_AT).descending())
         );
         return new PageResponseDto<>(result.map(this::toWithdrawal).getContent(), result.getNumber(),
                 result.getSize(), result.getTotalElements(), result.getTotalPages());
@@ -219,6 +298,10 @@ public class PartnerSettlementService {
 
     @Transactional(readOnly = true)
     public BigDecimal withdrawableBalance(Long partnerId) {
+        return withdrawableBalanceInternal(partnerId);
+    }
+
+    private BigDecimal withdrawableBalanceInternal(Long partnerId) {
         BigDecimal settled = payoutRepository.findByProviderId(partnerId).stream()
                 .filter(payout -> "SETTLED".equals(payout.getStatus()))
                 .map(this::availableAmount)
@@ -255,8 +338,7 @@ public class PartnerSettlementService {
     }
 
     private PartnerPayoutDto toPayout(Payout payout) {
-        return new PartnerPayoutDto(payout.getId(), payout.getReferenceBookingId(), gross(payout),
-                payout.getCommissionPercent(), payout.getCommissionAmount(), money(payout.getAmount()),
+        return new PartnerPayoutDto(payout.getId(), payout.getReferenceBookingId(), money(payout.getAmount()),
                 reversed(payout), payout.getCurrency(), payout.getStatus(), payout.getProcessedAt(),
                 payout.getCreatedAt());
     }

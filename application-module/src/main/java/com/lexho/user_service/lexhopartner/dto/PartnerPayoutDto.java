@@ -6,9 +6,6 @@ import java.time.LocalDateTime;
 public record PartnerPayoutDto(
         Long id,
         Long bookingId,
-        BigDecimal grossAmount,
-        BigDecimal commissionPercent,
-        BigDecimal commissionAmount,
         BigDecimal settlementAmount,
         BigDecimal reversedAmount,
         String currency,

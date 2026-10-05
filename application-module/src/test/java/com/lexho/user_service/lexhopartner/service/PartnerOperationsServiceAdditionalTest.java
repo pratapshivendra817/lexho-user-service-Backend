@@ -9,12 +9,12 @@ import com.lexho.user_service.lexhopartner.dto.PartnerServiceAreaRequest;
 import com.lexho.user_service.lexhopartner.entity.OrderStatus;
 import com.lexho.user_service.lexhopartner.entity.PartnerLeave;
 import com.lexho.user_service.lexhopartner.entity.PartnerPenalty;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
 import com.lexho.user_service.lexhopartner.entity.PartnerServiceArea;
 import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerServiceAreaRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.notification.service.NotificationManagementService;
@@ -43,7 +43,7 @@ class PartnerOperationsServiceAdditionalTest {
     private final PartnerPenaltyRepository penaltyRepository = mock(PartnerPenaltyRepository.class);
     private final PartnerWarningCommentRepository warningCommentRepository = mock(PartnerWarningCommentRepository.class);
     private final PartnerOrderRepository orderRepository = mock(PartnerOrderRepository.class);
-    private final PartnerProfileRepository profileRepository = mock(PartnerProfileRepository.class);
+    private final PartnerOperationalProfileRepository profileRepository = mock(PartnerOperationalProfileRepository.class);
     private final PartnerShiftRepository shiftRepository = mock(PartnerShiftRepository.class);
     private final ReviewRepository reviewRepository = mock(ReviewRepository.class);
     private final AuditLogService auditLogService = mock(AuditLogService.class);
@@ -56,7 +56,7 @@ class PartnerOperationsServiceAdditionalTest {
 
     @Test
     void createLeaveShouldValidateDatesAndMarkPartnerOffline() {
-        PartnerProfile profile = new PartnerProfile();
+        PartnerOperationalProfile profile = new PartnerOperationalProfile();
         profile.setOnline(true);
         PartnerShiftEntity shift = new PartnerShiftEntity();
         shift.setOnline(true);
@@ -102,7 +102,7 @@ class PartnerOperationsServiceAdditionalTest {
 
     @Test
     void performanceShouldCalculateRatesAndUseProfileRating() {
-        PartnerProfile profile = new PartnerProfile();
+        PartnerOperationalProfile profile = new PartnerOperationalProfile();
         profile.setRating(4.6);
         when(orderRepository.countByAssignedPartnerId(5L)).thenReturn(10L);
         when(orderRepository.countByAssignedPartnerIdAndStatus(5L, OrderStatus.ACCEPTED)).thenReturn(2L);

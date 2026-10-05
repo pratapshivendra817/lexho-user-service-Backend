@@ -3,13 +3,14 @@ package com.lexho.user_service.lexhopartner.controller;
 import com.lexho.user_service.lexhopartner.dto.DashboardStatsDto;
 import com.lexho.user_service.lexhopartner.dto.PartnerAvailabilityResponse;
 import com.lexho.user_service.lexhopartner.dto.PartnerBannerPageResponse;
+import com.lexho.user_service.lexhopartner.dto.PartnerOnboardingResponse;
 import com.lexho.user_service.lexhopartner.dto.UpdateAvailabilityRequest;
 import com.lexho.user_service.dispatch.dto.PartnerSkillsUpdateRequest;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.lexhopartner.service.AdminPartnerGovernanceService;
 import com.lexho.user_service.lexhopartner.service.PartnerBannerService;
 import com.lexho.user_service.lexhopartner.service.PartnerOrderService;
-import com.lexho.user_service.lexhopartner.service.PartnerProfileService;
+import com.lexho.user_service.lexhopartner.service.PartnerOperationalProfileService;
 import com.lexho.user_service.lexhopartner.service.PartnerOperationsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,13 +35,12 @@ import java.util.Map;
 @Tag(name = "Admin Partner Control")
 public class AdminPartnerControlController {
 
-    private final PartnerProfileService partnerProfileService;
+    private final PartnerOperationalProfileService partnerProfileService;
     private final PartnerOrderService partnerOrderService;
     private final PartnerBannerService partnerBannerService;
     private final AdminPartnerGovernanceService adminPartnerGovernanceService;
     private final PartnerOperationsService partnerOperationsService;
-
-    public AdminPartnerControlController(PartnerProfileService partnerProfileService,
+    public AdminPartnerControlController(PartnerOperationalProfileService partnerProfileService,
                                          PartnerOrderService partnerOrderService,
                                          PartnerBannerService partnerBannerService,
                                          AdminPartnerGovernanceService adminPartnerGovernanceService,
@@ -70,7 +70,39 @@ public class AdminPartnerControlController {
     public PartnerBannerPageResponse partnerBanners(@PathVariable Long partnerId,
                                                     @RequestParam(defaultValue = "0") int page,
                                                     @RequestParam(defaultValue = "5") int size) {
-        return partnerBannerService.partnerBanners(page, size);
+        return partnerBannerService.partnerBanners(partnerId, page, size);
+    }
+
+    @GetMapping("/onboarding")
+    @Operation(summary = "List partner onboarding applications for admin review")
+    public ApiResponse<Map<String, Object>> onboardingApplications(@RequestParam(defaultValue = "0") int page,
+                                                                   @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success("Partner onboarding applications fetched",
+                partnerProfileService.onboardingApplications(page, size));
+    }
+
+    @GetMapping("/{partnerId}/onboarding")
+    @Operation(summary = "Get partner onboarding details for admin review")
+    public ApiResponse<PartnerOnboardingResponse> onboarding(@PathVariable Long partnerId) {
+        return ApiResponse.success("Partner onboarding fetched",
+                partnerProfileService.onboardingDetails(partnerId));
+    }
+
+    @GetMapping("/{partnerId}")
+    @Operation(summary = "Get partner onboarding details for admin review")
+    public ApiResponse<PartnerOnboardingResponse> partner(@PathVariable Long partnerId) {
+        return onboarding(partnerId);
+    }
+
+    @PatchMapping("/{partnerId}/onboarding/review")
+    @Operation(summary = "Review partner onboarding application and documents")
+    public ApiResponse<PartnerOnboardingResponse> reviewOnboarding(
+            @PathVariable Long partnerId,
+            @RequestAttribute(value = "userId", required = false) Long adminId,
+            @RequestBody OnboardingReviewRequest request) {
+        return ApiResponse.success("Partner onboarding reviewed",
+                partnerProfileService.reviewOnboarding(partnerId, request.applicationStatus,
+                        request.documentStatus, request.rejectionReason, adminId));
     }
 
     @GetMapping("/settlements")
@@ -104,24 +136,6 @@ public class AdminPartnerControlController {
                                                                    @RequestBody SettlementStatusRequest request) {
         return ApiResponse.success("Withdrawal status updated",
                 adminPartnerGovernanceService.updateWithdrawalStatus(withdrawalId, request.status, request.remarks));
-    }
-
-    @PatchMapping("/{partnerId}/kyc/documents/{documentId}/review")
-    @Operation(summary = "Review partner KYC document")
-    public ApiResponse<Map<String, Object>> reviewKycDocument(@PathVariable Long partnerId,
-                                                               @PathVariable Long documentId,
-                                                               @RequestAttribute(value = "userId", required = false) Long adminId,
-                                                               @RequestBody KycDecisionRequest request) {
-        return ApiResponse.success("Document reviewed",
-                adminPartnerGovernanceService.reviewKycDocument(partnerId, documentId, request.decision, request.reason, adminId));
-    }
-
-    @PatchMapping("/{partnerId}/kyc/status")
-    @Operation(summary = "Review partner KYC status")
-    public ApiResponse<Map<String, Object>> reviewPartnerKyc(@PathVariable Long partnerId,
-                                                             @RequestBody VerificationDecisionRequest request) {
-        return ApiResponse.success("Partner KYC reviewed",
-                adminPartnerGovernanceService.reviewPartnerKyc(partnerId, request.status, request.reason));
     }
 
     @PatchMapping("/{partnerId}/bank/status")
@@ -206,11 +220,6 @@ public class AdminPartnerControlController {
         public String remarks;
     }
 
-    public static class KycDecisionRequest {
-        public String decision;
-        public String reason;
-    }
-
     public static class ForceAvailabilityRequest {
         public boolean online;
         public Integer lockMinutes;
@@ -225,6 +234,12 @@ public class AdminPartnerControlController {
     public static class VerificationDecisionRequest {
         public String status;
         public String reason;
+    }
+
+    public static class OnboardingReviewRequest {
+        public String applicationStatus;
+        public String documentStatus;
+        public String rejectionReason;
     }
 
     public static class PenaltyRequest {

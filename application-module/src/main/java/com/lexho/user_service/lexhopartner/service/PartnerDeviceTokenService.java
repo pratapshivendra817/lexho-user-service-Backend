@@ -12,6 +12,8 @@ import java.util.Map;
 
 @Service
 public class PartnerDeviceTokenService {
+    private static final String APP_TYPE_PARTNER = "PARTNER";
+    private static final String FIELD_PARTNER_ID = "partnerId";
 
     private final PartnerDeviceTokenRepository repository;
     private final PushTokenService pushTokenService;
@@ -35,11 +37,11 @@ public class PartnerDeviceTokenService {
         pushRequest.deviceId = deviceIdFor(request.token());
         pushRequest.token = request.token();
         pushRequest.platform = saved.getDeviceType();
-        pushRequest.appType = "PARTNER";
-        pushTokenService.upsert(partnerId, "PARTNER", pushRequest);
+        pushRequest.appType = APP_TYPE_PARTNER;
+        pushTokenService.upsert(partnerId, APP_TYPE_PARTNER, pushRequest);
         return Map.of(
                 "id", saved.getId(),
-                "partnerId", partnerId,
+                FIELD_PARTNER_ID, partnerId,
                 "deviceType", saved.getDeviceType(),
                 "active", saved.isActive()
         );
@@ -50,12 +52,12 @@ public class PartnerDeviceTokenService {
         PartnerDeviceToken token = repository.findByPartnerIdAndToken(partnerId, request.token())
                 .orElse(null);
         if (token == null) {
-            return Map.of("partnerId", partnerId, "deleted", false);
+            return Map.of(FIELD_PARTNER_ID, partnerId, "deleted", false);
         }
         token.setActive(false);
         repository.save(token);
-        pushTokenService.deactivate(partnerId, "PARTNER", deviceIdFor(request.token()));
-        return Map.of("partnerId", partnerId, "deleted", true);
+        pushTokenService.deactivate(partnerId, APP_TYPE_PARTNER, deviceIdFor(request.token()));
+        return Map.of(FIELD_PARTNER_ID, partnerId, "deleted", true);
     }
 
     private String deviceIdFor(String token) {

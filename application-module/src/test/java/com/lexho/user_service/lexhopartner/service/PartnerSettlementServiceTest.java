@@ -14,6 +14,7 @@ import com.lexho.user_service.lexhopartner.entity.PartnerWithdrawalRequest;
 import com.lexho.user_service.lexhopartner.repository.PartnerOrderRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerSettlementRefundRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
+import com.lexho.user_service.localization.dynamic.DynamicContentTranslationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
@@ -41,8 +42,9 @@ class PartnerSettlementServiceTest {
     private final PartnerWithdrawalRequestRepository withdrawalRepository = mock(PartnerWithdrawalRequestRepository.class);
     private final PartnerSettlementRefundRepository refundRepository = mock(PartnerSettlementRefundRepository.class);
     private final PartnerSettlementProperties properties = new PartnerSettlementProperties();
+    private final DynamicContentTranslationService dynamicTranslationService = mock(DynamicContentTranslationService.class);
     private final PartnerSettlementService service = new PartnerSettlementService(
-            payoutRepository, partnerOrderRepository, withdrawalRepository, refundRepository, properties);
+            payoutRepository, partnerOrderRepository, withdrawalRepository, refundRepository, properties, dynamicTranslationService);
 
     @Test
     void ensurePayoutShouldCreateNetPayoutForCompletedSuccessfulOrderOnly() {
@@ -74,6 +76,21 @@ class PartnerSettlementServiceTest {
     }
 
     @Test
+    void partnerVisibleAmountShouldHideGrossAndExposeNetPayableAmount() {
+        properties.setCommissionPercent(new BigDecimal("23.08"));
+        PartnerOrder inProgress = partnerOrder(130L, 5L, 130.0, OrderStatus.IN_PROGRESS, PaymentStatus.SUCCESS);
+
+        assertEquals(100.0, service.partnerVisibleAmountForOrder(inProgress));
+
+        Payout completedPayout = payout(1L, 5L, 131L, 100.0, "PENDING", LocalDateTime.now());
+        when(payoutRepository.findTopByReferenceBookingIdOrderByCreatedAtDesc(131L))
+                .thenReturn(Optional.of(completedPayout));
+        PartnerOrder completed = partnerOrder(131L, 5L, 130.0, OrderStatus.COMPLETED, PaymentStatus.SUCCESS);
+
+        assertEquals(100.0, service.partnerVisibleAmountForOrder(completed));
+    }
+
+    @Test
     void payoutsAndEarningsShouldMapPagedAndSummarizedData() {
         Payout settled = payout(1L, 5L, 100L, 1000.0, "SETTLED", LocalDateTime.now().minusDays(1));
         Payout pending = payout(2L, 5L, 101L, 500.0, "PENDING", LocalDateTime.now());
@@ -100,10 +117,14 @@ class PartnerSettlementServiceTest {
                 org.mockito.ArgumentMatchers.eq(5L), any(), any(), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(payout)));
         when(partnerOrderRepository.findById(100L)).thenReturn(Optional.of(order));
+        when(dynamicTranslationService.translateForPartner(5L, null, "partner_order", 100L, "service_type", "Cleaning"))
+                .thenReturn("Safai");
 
         var response = service.earningTransactions(5L, LocalDate.now().minusDays(1), LocalDate.now(), 0, 10);
 
         assertEquals("Customer", response.content().get(0).customerName());
+        assertEquals("Safai", response.content().get(0).serviceType());
+        assertEquals("Safai settlement", response.content().get(0).description());
         assertEquals(payout.getId(), response.content().get(0).id());
         assertEquals("EARNING", response.content().get(0).type());
         assertThrows(BadRequestException.class, () -> service.earningTransactions(

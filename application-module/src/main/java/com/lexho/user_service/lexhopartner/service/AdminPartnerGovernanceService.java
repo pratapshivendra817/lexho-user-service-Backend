@@ -2,24 +2,23 @@ package com.lexho.user_service.lexhopartner.service;
 
 import com.lexho.user_service.admin.entity.Payout;
 import com.lexho.user_service.admin.repository.PayoutRepository;
+import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.audit.service.AuditLogService;
 import com.lexho.user_service.dispatch.dto.PartnerSkillsUpdateRequest;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import com.lexho.user_service.dispatch.service.PartnerSkillService;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
-import com.lexho.user_service.lexhopartner.entity.PartnerDocument;
 import com.lexho.user_service.lexhopartner.entity.PartnerPenalty;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
 import com.lexho.user_service.lexhopartner.entity.PartnerWarningComment;
-import com.lexho.user_service.lexhopartner.entity.VerificationStatus;
-import com.lexho.user_service.lexhopartner.repository.PartnerDocumentRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerPenaltyRepository;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerWarningCommentRepository;
 import com.lexho.user_service.lexhopartner.entity.PartnerWithdrawalRequest;
 import com.lexho.user_service.lexhopartner.repository.PartnerWithdrawalRequestRepository;
 import com.lexho.user_service.notification.service.NotificationManagementService;
+import com.lexho.user_service.util.LexhoConstants;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,9 +28,20 @@ import java.util.Map;
 
 @Service
 public class AdminPartnerGovernanceService {
+    private static final String FIELD_ITEMS = "items";
+    private static final String FIELD_TOTAL_ELEMENTS = "totalElements";
+    private static final String FIELD_TOTAL_PAGES = "totalPages";
+    private static final String FIELD_PARTNER_ID = "partnerId";
+    private static final String FIELD_STATUS = "status";
+    private static final String STATUS_PENDING = "PENDING";
+    private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_APPROVED = "APPROVED";
+    private static final String STATUS_REJECTED = "REJECTED";
+    private static final String STATUS_UNDER_REVIEW = "UNDER_REVIEW";
+    private static final String PARTNER_NOT_FOUND = "Partner not found";
+    private static final String TARGET_PARTNER = "PARTNER";
 
-    private final PartnerProfileRepository partnerProfileRepository;
-    private final PartnerDocumentRepository partnerDocumentRepository;
+    private final PartnerOperationalProfileRepository partnerProfileRepository;
     private final PartnerShiftRepository partnerShiftRepository;
     private final PartnerSkillService partnerSkillService;
     private final PayoutRepository payoutRepository;
@@ -41,9 +51,20 @@ public class AdminPartnerGovernanceService {
     private final AuditLogService auditLogService;
     private final NotificationManagementService notificationManagementService;
     private final PartnerWarningRealtimeService partnerWarningRealtimeService;
+    private PartnerOperationalStatusTransitionService statusTransitionService;
+    private PartnerRepository legacyPartnerRepository;
 
-    public AdminPartnerGovernanceService(PartnerProfileRepository partnerProfileRepository,
-                                         PartnerDocumentRepository partnerDocumentRepository,
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setLegacyPartnerRepository(PartnerRepository legacyPartnerRepository) {
+        this.legacyPartnerRepository = legacyPartnerRepository;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setStatusTransitionService(PartnerOperationalStatusTransitionService statusTransitionService) {
+        this.statusTransitionService = statusTransitionService;
+    }
+
+    public AdminPartnerGovernanceService(PartnerOperationalProfileRepository partnerProfileRepository,
                                          PartnerShiftRepository partnerShiftRepository,
                                          PartnerSkillService partnerSkillService,
                                          PayoutRepository payoutRepository,
@@ -54,7 +75,6 @@ public class AdminPartnerGovernanceService {
                                          NotificationManagementService notificationManagementService,
                                          PartnerWarningRealtimeService partnerWarningRealtimeService) {
         this.partnerProfileRepository = partnerProfileRepository;
-        this.partnerDocumentRepository = partnerDocumentRepository;
         this.partnerShiftRepository = partnerShiftRepository;
         this.partnerSkillService = partnerSkillService;
         this.payoutRepository = payoutRepository;
@@ -64,6 +84,7 @@ public class AdminPartnerGovernanceService {
         this.auditLogService = auditLogService;
         this.notificationManagementService = notificationManagementService;
         this.partnerWarningRealtimeService = partnerWarningRealtimeService;
+        this.statusTransitionService = new PartnerOperationalStatusTransitionService();
     }
 
     @Transactional(readOnly = true)
@@ -72,11 +93,11 @@ public class AdminPartnerGovernanceService {
         var result = payoutRepository.search(search == null || search.isBlank() ? null : search.trim(),
                 status == null || status.isBlank() ? null : status.trim(), pageable);
         return Map.of(
-                "items", result.getContent().stream().map(this::toPayoutRow).toList(),
+                FIELD_ITEMS, result.getContent().stream().map(this::toPayoutRow).toList(),
                 "page", result.getNumber(),
                 "size", result.getSize(),
-                "totalElements", result.getTotalElements(),
-                "totalPages", result.getTotalPages()
+                FIELD_TOTAL_ELEMENTS, result.getTotalElements(),
+                FIELD_TOTAL_PAGES, result.getTotalPages()
         );
     }
 
@@ -86,7 +107,7 @@ public class AdminPartnerGovernanceService {
             throw new BadRequestException("status is required");
         }
         String normalized = status.trim().toUpperCase();
-        if (!java.util.Set.of("PENDING", "PROCESSING", "SETTLED", "FAILED", "REVERSED",
+        if (!java.util.Set.of(STATUS_PENDING, "PROCESSING", "SETTLED", STATUS_FAILED, "REVERSED",
                 "PARTIALLY_REVERSED").contains(normalized)) {
             throw new BadRequestException("Invalid settlement status");
         }
@@ -102,11 +123,11 @@ public class AdminPartnerGovernanceService {
         var result = withdrawalRepository.findAll(
                 PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)));
         return Map.of(
-                "items", result.getContent().stream().map(this::toWithdrawalRow).toList(),
+                FIELD_ITEMS, result.getContent().stream().map(this::toWithdrawalRow).toList(),
                 "page", result.getNumber(),
                 "size", result.getSize(),
-                "totalElements", result.getTotalElements(),
-                "totalPages", result.getTotalPages()
+                FIELD_TOTAL_ELEMENTS, result.getTotalElements(),
+                FIELD_TOTAL_PAGES, result.getTotalPages()
         );
     }
 
@@ -117,11 +138,11 @@ public class AdminPartnerGovernanceService {
                 PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100))
         );
         return Map.of(
-                "items", result.getContent().stream().map(this::toWarningDisputeRow).toList(),
+                FIELD_ITEMS, result.getContent().stream().map(this::toWarningDisputeRow).toList(),
                 "page", result.getNumber(),
                 "size", result.getSize(),
-                "totalElements", result.getTotalElements(),
-                "totalPages", result.getTotalPages()
+                FIELD_TOTAL_ELEMENTS, result.getTotalElements(),
+                FIELD_TOTAL_PAGES, result.getTotalPages()
         );
     }
 
@@ -131,7 +152,7 @@ public class AdminPartnerGovernanceService {
                                                     String status,
                                                     String reviewNote,
                                                     Long adminId) {
-        String normalized = requireStatus(status, java.util.Set.of("UNDER_REVIEW", "APPROVED", "REJECTED"));
+        String normalized = requireStatus(status, java.util.Set.of(STATUS_UNDER_REVIEW, STATUS_APPROVED, STATUS_REJECTED));
         PartnerPenalty warning = partnerPenaltyRepository.findByIdAndPartnerId(warningId, partnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Warning not found"));
         if (!"WARNING".equalsIgnoreCase(warning.getStatus())) {
@@ -144,17 +165,17 @@ public class AdminPartnerGovernanceService {
         warning.setDisputeReviewNote(trim(reviewNote));
         warning.setDisputeReviewedByAdminId(adminId);
         warning.setDisputeReviewedAt(LocalDateTime.now());
-        if ("APPROVED".equals(normalized)) {
+        if (STATUS_APPROVED.equals(normalized)) {
             warning.setStatus("RESOLVED");
         }
         PartnerPenalty saved = partnerPenaltyRepository.save(warning);
         PartnerWarningComment comment = new PartnerWarningComment();
         comment.setWarning(saved);
-        comment.setSenderType("ADMIN");
+        comment.setSenderType(LexhoConstants.ACTOR_ADMIN);
         comment.setSenderId(adminId);
         comment.setMessage(trim(reviewNote) == null ? "Dispute status updated to " + normalized : trim(reviewNote));
         partnerWarningCommentRepository.save(comment);
-        auditLogService.log(adminId, "ADMIN", "WARNING_DISPUTE_" + normalized, "PARTNER_WARNING",
+        auditLogService.log(adminId, LexhoConstants.ACTOR_ADMIN, "WARNING_DISPUTE_" + normalized, "PARTNER_WARNING",
                 warningId.toString(), null, reviewNote);
         notificationManagementService.createPartnerWarningDisputeStatusNotification(partnerId, warningId, normalized);
         partnerWarningRealtimeService.publish(partnerId, warningId, "warning-review", toWarningDisputeRow(saved));
@@ -167,7 +188,7 @@ public class AdminPartnerGovernanceService {
             throw new BadRequestException("status is required");
         }
         String normalized = status.trim().toUpperCase();
-        if (!java.util.Set.of("REQUESTED", "APPROVED", "REJECTED", "PROCESSING", "PAID", "FAILED")
+        if (!java.util.Set.of("REQUESTED", STATUS_APPROVED, STATUS_REJECTED, "PROCESSING", "PAID", STATUS_FAILED)
                 .contains(normalized)) {
             throw new BadRequestException("Invalid withdrawal status");
         }
@@ -175,94 +196,24 @@ public class AdminPartnerGovernanceService {
                 .orElseThrow(() -> new ResourceNotFoundException("Withdrawal request not found"));
         request.setStatus(normalized);
         request.setRemarks(remarks == null ? null : remarks.trim());
-        if (java.util.Set.of("REJECTED", "PAID", "FAILED").contains(normalized)) {
+        if (java.util.Set.of(STATUS_REJECTED, "PAID", STATUS_FAILED).contains(normalized)) {
             request.setProcessedAt(LocalDateTime.now());
         }
         return toWithdrawalRow(withdrawalRepository.save(request));
     }
 
     @Transactional
-    public Map<String, Object> reviewKycDocument(Long partnerId, Long documentId, String decision, String reason, Long adminId) {
-        PartnerProfile partner = partnerProfileRepository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
-        PartnerDocument document = partnerDocumentRepository.findById(documentId)
-                .orElseThrow(() -> new ResourceNotFoundException("Document not found"));
-        if (!document.getPartner().getId().equals(partnerId)) {
-            throw new BadRequestException("Document does not belong to partner");
-        }
-        if (decision == null || decision.isBlank()) {
-            throw new BadRequestException("decision is required");
-        }
-        VerificationStatus next;
-        try {
-            next = VerificationStatus.valueOf(decision.trim().toUpperCase());
-        } catch (Exception ex) {
-            throw new BadRequestException("decision must be APPROVED or REJECTED");
-        }
-        if (next == VerificationStatus.PENDING) {
-            throw new BadRequestException("decision must be APPROVED or REJECTED");
-        }
-        document.setVerificationStatus(next);
-        document.setReviewReason(reason == null ? null : reason.trim());
-        document.setReviewedByAdminId(adminId);
-        document.setReviewedAt(LocalDateTime.now());
-        partnerDocumentRepository.save(document);
-
-        boolean allApproved = partnerDocumentRepository.findByPartnerId(partnerId).stream()
-                .allMatch(d -> d.getVerificationStatus() == VerificationStatus.APPROVED);
-        partner.setVerified(allApproved);
-        if (allApproved) {
-            partner.setKycWorkflowStatus("APPROVED");
-            partner.setKycRejectionReason(null);
-        } else if (next == VerificationStatus.REJECTED) {
-            partner.setKycWorkflowStatus("REJECTED");
-            partner.setKycRejectionReason(reason == null ? null : reason.trim());
-        } else {
-            partner.setKycWorkflowStatus("UNDER_REVIEW");
-        }
-        partnerProfileRepository.save(partner);
-        auditLogService.log(adminId, "ADMIN", "KYC_" + next.name(), "PARTNER_DOCUMENT",
-                documentId.toString(), null, reason);
-        return Map.of(
-                "partnerId", partnerId,
-                "documentId", documentId,
-                "verificationStatus", document.getVerificationStatus().name(),
-                "reason", document.getReviewReason(),
-                "partnerVerified", partner.isVerified()
-        );
-    }
-
-    @Transactional
-    public Map<String, Object> reviewPartnerKyc(Long partnerId, String status, String reason) {
-        PartnerProfile partner = partnerProfileRepository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
-        String normalized = requireStatus(status, java.util.Set.of("PENDING", "UNDER_REVIEW", "APPROVED", "REJECTED"));
-        partner.setKycWorkflowStatus(normalized);
-        partner.setKycRejectionReason("REJECTED".equals(normalized) ? trim(reason) : null);
-        partner.setVerified("APPROVED".equals(normalized));
-        partnerProfileRepository.save(partner);
-        auditLogService.log(null, "ADMIN", "KYC_" + normalized, "PARTNER",
-                partnerId.toString(), null, reason);
-        Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("partnerId", partnerId);
-        response.put("kycStatus", partner.getKycWorkflowStatus());
-        response.put("rejectionReason", partner.getKycRejectionReason());
-        response.put("verified", partner.isVerified());
-        return response;
-    }
-
-    @Transactional
     public Map<String, Object> reviewBank(Long partnerId, String status, String reason) {
-        PartnerProfile partner = partnerProfileRepository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
-        String normalized = requireStatus(status, java.util.Set.of("PENDING", "VERIFIED", "REJECTED"));
+        PartnerOperationalProfile partner = partnerProfileRepository.findById(partnerId)
+                .orElseThrow(() -> new ResourceNotFoundException(PARTNER_NOT_FOUND));
+        String normalized = requireStatus(status, java.util.Set.of(STATUS_PENDING, "VERIFIED", STATUS_REJECTED));
         partner.setBankVerificationStatus(normalized);
-        partner.setBankRejectionReason("REJECTED".equals(normalized) ? trim(reason) : null);
+        partner.setBankRejectionReason(STATUS_REJECTED.equals(normalized) ? trim(reason) : null);
         partnerProfileRepository.save(partner);
-        auditLogService.log(null, "ADMIN", "BANK_" + normalized, "PARTNER",
+        auditLogService.log(null, LexhoConstants.ACTOR_ADMIN, "BANK_" + normalized, TARGET_PARTNER,
                 partnerId.toString(), null, reason);
         Map<String, Object> response = new java.util.LinkedHashMap<>();
-        response.put("partnerId", partnerId);
+        response.put(FIELD_PARTNER_ID, partnerId);
         response.put("bankVerificationStatus", partner.getBankVerificationStatus());
         response.put("rejectionReason", partner.getBankRejectionReason());
         return response;
@@ -270,9 +221,14 @@ public class AdminPartnerGovernanceService {
 
     @Transactional
     public Map<String, Object> forceAvailability(Long partnerId, boolean online, Integer lockMinutes, String reason) {
-        PartnerProfile partner = partnerProfileRepository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
-        partner.setOnline(online);
+        PartnerOperationalProfile partner = partnerProfileRepository.findById(partnerId)
+                .orElseThrow(() -> new ResourceNotFoundException(PARTNER_NOT_FOUND));
+        if (online
+                && (partner.getPartnerOperationalStatus() == com.lexho.user_service.lexhopartner.model.PartnerOperationalStatus.BLOCKED
+                || partner.getPartnerOperationalStatus() == com.lexho.user_service.lexhopartner.model.PartnerOperationalStatus.REJECTED)) {
+            throw new BadRequestException("Blocked or rejected partners cannot be activated");
+        }
+        statusTransitionService.setAvailability(partner, online);
         partner.setAvailabilityLockReason(reason == null ? null : reason.trim());
         if (lockMinutes != null && lockMinutes > 0) {
             partner.setAvailabilityLockedUntil(LocalDateTime.now().plusMinutes(lockMinutes));
@@ -280,15 +236,16 @@ public class AdminPartnerGovernanceService {
             partner.setAvailabilityLockedUntil(null);
         }
         partnerProfileRepository.save(partner);
-        auditLogService.log(null, "ADMIN", "PARTNER_STATUS_CHANGED", "PARTNER",
+        syncLegacyMarketplace(partner);
+        auditLogService.log(null, LexhoConstants.ACTOR_ADMIN, "PARTNER_STATUS_CHANGED", TARGET_PARTNER,
                 partnerId.toString(), null, online ? "ONLINE" : "OFFLINE");
         partnerShiftRepository.findByPartnerId(partnerId).ifPresent(shift -> {
             shift.setOnline(online);
-            shift.setUpdatedBy("ADMIN");
+        shift.setUpdatedBy(LexhoConstants.ACTOR_ADMIN);
             partnerShiftRepository.save(shift);
         });
         return Map.of(
-                "partnerId", partnerId,
+                FIELD_PARTNER_ID, partnerId,
                 "online", partner.isOnline(),
                 "availabilityLockedUntil", partner.getAvailabilityLockedUntil(),
                 "availabilityLockReason", partner.getAvailabilityLockReason()
@@ -300,10 +257,24 @@ public class AdminPartnerGovernanceService {
         return partnerSkillService.upsertSkills(partnerId, request);
     }
 
+    private void syncLegacyMarketplace(PartnerOperationalProfile profile) {
+        if (legacyPartnerRepository == null) {
+            return;
+        }
+        legacyPartnerRepository.findById(profile.getId()).ifPresent(legacy -> {
+            legacy.setName(profile.getFullName());
+            legacy.setAvailable(profile.isOnline());
+            legacy.setVerificationStatus(profile.isVerified()
+                    ? "VERIFIED"
+                    : profile.getPartnerOperationalStatus().name());
+            legacyPartnerRepository.save(legacy);
+        });
+    }
+
     @Transactional
     public Map<String, Object> riskAction(Long partnerId, String action, String reason) {
-        PartnerProfile partner = partnerProfileRepository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
+        PartnerOperationalProfile partner = partnerProfileRepository.findById(partnerId)
+                .orElseThrow(() -> new ResourceNotFoundException(PARTNER_NOT_FOUND));
         if (action == null || action.isBlank()) {
             throw new BadRequestException("action is required");
         }
@@ -326,16 +297,17 @@ public class AdminPartnerGovernanceService {
             }
             case "FLAG_FRAUD" -> {
                 partner.setFraudFlag(true);
-                partner.setRiskStatus("UNDER_REVIEW");
+                partner.setRiskStatus(STATUS_UNDER_REVIEW);
             }
             default -> throw new BadRequestException("Unsupported action");
         }
         partner.setAdminNotes(reason == null ? null : reason.trim());
         partnerProfileRepository.save(partner);
-        auditLogService.log(null, "ADMIN", "PARTNER_STATUS_CHANGED", "PARTNER",
+        syncLegacyMarketplace(partner);
+        auditLogService.log(null, LexhoConstants.ACTOR_ADMIN, "PARTNER_STATUS_CHANGED", TARGET_PARTNER,
                 partnerId.toString(), null, normalized);
         return Map.of(
-                "partnerId", partnerId,
+                FIELD_PARTNER_ID, partnerId,
                 "action", normalized,
                 "riskStatus", partner.getRiskStatus(),
                 "fraudFlag", partner.isFraudFlag(),
@@ -348,36 +320,36 @@ public class AdminPartnerGovernanceService {
         Map<String, Object> row = new java.util.LinkedHashMap<>();
         row.put("id", payout.getId());
         row.put("providerId", payout.getProviderId());
-        row.put("amount", payout.getAmount());
+        row.put(LexhoConstants.FIELD_AMOUNT, payout.getAmount());
         row.put("grossAmount", payout.getGrossAmount());
         row.put("commissionPercent", payout.getCommissionPercent());
         row.put("commissionAmount", payout.getCommissionAmount());
         row.put("currency", payout.getCurrency());
         row.put("reversedAmount", payout.getReversedAmount());
-        row.put("status", payout.getStatus());
+        row.put(FIELD_STATUS, payout.getStatus());
         row.put("referenceBookingId", payout.getReferenceBookingId());
         row.put("remarks", payout.getRemarks());
         row.put("processedAt", payout.getProcessedAt());
-        row.put("createdAt", payout.getCreatedAt());
+        row.put(LexhoConstants.FIELD_CREATED_AT, payout.getCreatedAt());
         return row;
     }
 
     private Map<String, Object> toWithdrawalRow(PartnerWithdrawalRequest request) {
         Map<String, Object> row = new java.util.LinkedHashMap<>();
         row.put("id", request.getId());
-        row.put("partnerId", request.getPartnerId());
-        row.put("amount", request.getAmount());
-        row.put("status", request.getStatus());
+        row.put(FIELD_PARTNER_ID, request.getPartnerId());
+        row.put(LexhoConstants.FIELD_AMOUNT, request.getAmount());
+        row.put(FIELD_STATUS, request.getStatus());
         row.put("remarks", request.getRemarks());
-        row.put("createdAt", request.getCreatedAt());
-        row.put("updatedAt", request.getUpdatedAt());
+        row.put(LexhoConstants.FIELD_CREATED_AT, request.getCreatedAt());
+        row.put(LexhoConstants.FIELD_UPDATED_AT, request.getUpdatedAt());
         row.put("processedAt", request.getProcessedAt());
         return row;
     }
 
     private String requireStatus(String status, java.util.Set<String> allowed) {
         if (status == null || status.isBlank()) {
-            throw new BadRequestException("status is required");
+            throw new BadRequestException(FIELD_STATUS + " is required");
         }
         String normalized = status.trim().toUpperCase();
         if (!allowed.contains(normalized)) {
@@ -394,7 +366,7 @@ public class AdminPartnerGovernanceService {
         Map<String, Object> row = new java.util.LinkedHashMap<>();
         row.put("id", warning.getId());
         row.put("warningId", warning.getId());
-        row.put("partnerId", warning.getPartnerId());
+        row.put(FIELD_PARTNER_ID, warning.getPartnerId());
         row.put("warningStatus", warning.getStatus());
         row.put("reason", warning.getReason());
         row.put("acknowledgedAt", warning.getAcknowledgedAt());
@@ -405,8 +377,8 @@ public class AdminPartnerGovernanceService {
         row.put("disputeReviewedByAdminId", warning.getDisputeReviewedByAdminId());
         row.put("disputeReviewedAt", warning.getDisputeReviewedAt());
         row.put("createdByAdminId", warning.getCreatedByAdminId());
-        row.put("createdAt", warning.getCreatedAt());
-        row.put("updatedAt", warning.getUpdatedAt());
+        row.put(LexhoConstants.FIELD_CREATED_AT, warning.getCreatedAt());
+        row.put(LexhoConstants.FIELD_UPDATED_AT, warning.getUpdatedAt());
         return row;
     }
 }

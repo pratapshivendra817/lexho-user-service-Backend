@@ -15,6 +15,24 @@ import java.util.Optional;
 
 public interface PartnerOrderRepository extends JpaRepository<PartnerOrder, Long> {
     Page<PartnerOrder> findByStatusInAndAssignedPartnerIdIsNull(Iterable<OrderStatus> statuses, Pageable pageable);
+
+    @Query(
+            value = """
+                    SELECT *
+                    FROM orders
+                    WHERE assigned_partner_id IS NULL
+                      AND status IN ('CREATED', 'CONFIRMED', 'BOOKING_CREATED', 'SCHEDULED', 'PARTNER_SEARCH', 'PARTNER_ASSIGNED')
+                    """,
+            countQuery = """
+                    SELECT COUNT(*)
+                    FROM orders
+                    WHERE assigned_partner_id IS NULL
+                      AND status IN ('CREATED', 'CONFIRMED', 'BOOKING_CREATED', 'SCHEDULED', 'PARTNER_SEARCH', 'PARTNER_ASSIGNED')
+                    """,
+            nativeQuery = true
+    )
+    Page<PartnerOrder> findPartnerVisibleOpenOrders(Pageable pageable);
+
     Page<PartnerOrder> findByAssignedPartnerId(Long partnerId, Pageable pageable);
     long countByAssignedPartnerIdAndStatus(Long partnerId, OrderStatus status);
     long countByAssignedPartnerId(Long partnerId);

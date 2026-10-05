@@ -33,4 +33,5 @@ public interface PartnerRepository extends JpaRepository<Partner, Long> {
     Page<Partner> searchPartners(@Param("search") String search,
                                  @Param("verificationStatus") String verificationStatus,
                                  Pageable pageable);
+
 }

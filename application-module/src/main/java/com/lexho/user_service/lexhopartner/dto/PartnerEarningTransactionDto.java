@@ -37,11 +37,6 @@ public record PartnerEarningTransactionDto(
         return createdAt;
     }
 
-    @JsonProperty("grossAmount")
-    public Double grossAmount() {
-        return amount;
-    }
-
     @JsonProperty("settlementStatus")
     public String settlementStatus() {
         return status;
