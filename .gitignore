@@ -48,6 +48,11 @@ logs/
 .idea/
 *.iml
 uploads/
+*_RKStorage*
+*.db
+*.sqlite
+*.sqlite3
+*.b64
 bearer_token.txt
 tok_*.json
 lan_req_*.json
