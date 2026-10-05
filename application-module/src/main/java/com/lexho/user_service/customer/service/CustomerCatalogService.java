@@ -40,7 +40,7 @@ public class CustomerCatalogService {
         Pageable pageable = PageRequest.of(safePage, safeSize);
 
         return customerCatalogRepository
-                .findByCategory_IdAndActiveTrueAndDeletedFalse(categoryId, pageable)
+                .findByCategory_IdAndActiveTrueAndDeletedFalseOrderByNameAscIdAsc(categoryId, pageable)
                 .stream()
                 .map(this::toCardResponse)
                 .toList();

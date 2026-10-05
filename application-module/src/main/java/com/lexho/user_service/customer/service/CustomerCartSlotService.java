@@ -4,6 +4,7 @@ import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.user_service.cartconfig.entity.CartConfigEntity;
 import com.lexho.user_service.cartconfig.service.CartConfigService;
+import com.lexho.user_service.cartconfig.repository.CartConfigRepository;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,12 @@ public class CustomerCartSlotService {
     private final PartnerShiftRepository partnerShiftRepository;
     private final SlotDateTimePolicy slotDateTimePolicy;
     private final CartConfigService cartConfigService;
+    private final CartConfigRepository cartConfigRepository;
+
+    public void lockSlotCapacity() {
+        cartConfigRepository.findByIdForUpdate(1L)
+                .orElseThrow(() -> new IllegalStateException("Cart configuration lock row is missing"));
+    }
 
     public Map<String, Object> slotsForDate(LocalDate date) {
         LocalDate today = slotDateTimePolicy.today();

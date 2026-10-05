@@ -123,6 +123,7 @@ class AdminManagementControllerDelegationTest {
         servletRequest.setServerPort(443);
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(servletRequest));
         when(fileUploadService.uploadServiceImage(file)).thenReturn("/uploads/banner.jpg");
+        when(fileUploadService.uploadBannerImage(file)).thenReturn("/uploads/banner.jpg");
 
         controller.createCustomerBanner(request);
         controller.updateCustomerBanner(5L, request);

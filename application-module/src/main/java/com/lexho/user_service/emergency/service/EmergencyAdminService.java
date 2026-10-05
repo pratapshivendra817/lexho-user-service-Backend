@@ -10,6 +10,7 @@ import com.lexho.user_service.emergency.repository.EmergencyEventRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.security.SecurityUtils;
+import com.lexho.user_service.util.StringSanitizers;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -22,6 +23,7 @@ import java.util.Locale;
 
 @Service
 public class EmergencyAdminService {
+    private static final String EMERGENCY_INCIDENT_NOT_FOUND = "Emergency incident not found";
 
     private final EmergencyEventRepository emergencyEventRepository;
     private final EmergencyService emergencyService;
@@ -57,14 +59,14 @@ public class EmergencyAdminService {
     @Transactional(readOnly = true)
     public DataResponse<EmergencyEventResponse> incident(Long eventId) {
         EmergencyEvent event = emergencyEventRepository.findWithLocationsById(eventId)
-                .orElseThrow(() -> new ResourceNotFoundException("Emergency incident not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(EMERGENCY_INCIDENT_NOT_FOUND));
         return new DataResponse<>(emergencyService.toResponse(event));
     }
 
     @Transactional
     public DataResponse<EmergencyEventResponse> acknowledge(Long eventId, String note) {
         EmergencyEvent event = emergencyEventRepository.findWithLocationsById(eventId)
-                .orElseThrow(() -> new ResourceNotFoundException("Emergency incident not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(EMERGENCY_INCIDENT_NOT_FOUND));
         if (event.getStatus() == EmergencyEventStatus.RESOLVED) {
             throw new BadRequestException("Resolved emergency incident cannot be acknowledged");
         }
@@ -83,7 +85,7 @@ public class EmergencyAdminService {
     @Transactional
     public DataResponse<EmergencyEventResponse> resolve(Long eventId, String note) {
         EmergencyEvent event = emergencyEventRepository.findWithLocationsById(eventId)
-                .orElseThrow(() -> new ResourceNotFoundException("Emergency incident not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(EMERGENCY_INCIDENT_NOT_FOUND));
         String actor = currentActor();
         event.setStatus(EmergencyEventStatus.RESOLVED);
         event.setResolutionNote(trimToNull(note));
@@ -119,10 +121,6 @@ public class EmergencyAdminService {
     }
 
     private String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.trim();
-        return normalized.isEmpty() ? null : normalized;
+        return StringSanitizers.trimToNull(value);
     }
 }

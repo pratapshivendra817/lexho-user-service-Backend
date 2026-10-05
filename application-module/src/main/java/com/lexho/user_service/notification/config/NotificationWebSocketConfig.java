@@ -1,6 +1,7 @@
 package com.lexho.user_service.notification.config;
 
 import com.lexho.user_service.chat.config.ChatStompAuthChannelInterceptor;
+import com.lexho.user_service.config.AllowedOriginsParser;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
@@ -9,10 +10,7 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.StringTokenizer;
 
 @Configuration
 @EnableWebSocketMessageBroker
@@ -37,6 +35,7 @@ public class NotificationWebSocketConfig implements WebSocketMessageBrokerConfig
         registry.addEndpoint("/ws/admin/notifications").setAllowedOrigins(allowedOrigins);
         registry.addEndpoint("/ws/customer/bookings").setAllowedOrigins(allowedOrigins);
         registry.addEndpoint("/ws/customer/bookings/{bookingId}").setAllowedOrigins(allowedOrigins);
+        registry.addEndpoint("/ws/partner/dispatch").setAllowedOrigins(allowedOrigins);
         registry.addEndpoint("/ws/admin/bookings/{bookingId}").setAllowedOrigins(allowedOrigins);
         registry.addEndpoint("/ws-chat").setAllowedOrigins(allowedOrigins);
     }
@@ -62,18 +61,6 @@ public class NotificationWebSocketConfig implements WebSocketMessageBrokerConfig
     }
 
     static List<String> parseAllowedOrigins(String rawOrigins) {
-        if (rawOrigins == null || rawOrigins.isBlank()) {
-            return List.of();
-        }
-
-        LinkedHashSet<String> origins = new LinkedHashSet<>();
-        StringTokenizer tokenizer = new StringTokenizer(rawOrigins, ",");
-        while (tokenizer.hasMoreTokens()) {
-            String origin = tokenizer.nextToken().trim();
-            if (!origin.isEmpty()) {
-                origins.add(origin);
-            }
-        }
-        return new ArrayList<>(origins);
+        return AllowedOriginsParser.parse(rawOrigins);
     }
 }

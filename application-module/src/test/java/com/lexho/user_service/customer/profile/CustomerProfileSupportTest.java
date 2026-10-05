@@ -139,7 +139,9 @@ class CustomerProfileSupportTest {
             @Override public long getSize() { return 10; }
             @Override public byte[] getBytes() { return new byte[0]; }
             @Override public InputStream getInputStream() throws IOException { throw new IOException("broken"); }
-            @Override public void transferTo(java.io.File dest) { }
+            @Override public void transferTo(java.io.File dest) {
+                // No-op: this broken multipart is only used to exercise getInputStream failure handling.
+            }
         };
 
         assertThrows(BadRequestException.class, () -> storageService.upload(broken));

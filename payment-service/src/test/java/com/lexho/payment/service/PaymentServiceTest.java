@@ -3,6 +3,7 @@ package com.lexho.payment.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.booking.service.OrderLifecycleService;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
 import com.lexho.payment.config.RazorpayProperties;
@@ -48,6 +49,7 @@ class PaymentServiceTest {
     @Mock PaymentMetricsService metricsService;
 
     private RazorpayProperties properties;
+    private OrderLifecycleService orderLifecycleService;
     private PaymentService service;
 
     @BeforeEach
@@ -56,11 +58,13 @@ class PaymentServiceTest {
         properties.setKeyId("key-id");
         properties.setKeySecret("key-secret");
         properties.setWebhookSecret("webhook-secret");
+        orderLifecycleService = new OrderLifecycleService(orderRepository);
         service = new PaymentService(orderRepository, transactionRepository, refundRepository,
                 webhookEventRepository, gateway, properties, signatureVerifier, new ObjectMapper(),
-                eventPublisher, metricsService);
+                eventPublisher, metricsService, orderLifecycleService);
         lenient().when(gateway.toPaise(any(BigDecimal.class)))
                 .thenAnswer(invocation -> invocation.<BigDecimal>getArgument(0).movePointRight(2).longValueExact());
+        lenient().when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -104,6 +108,8 @@ class PaymentServiceTest {
         assertThrows(PaymentException.class, () -> service.createOrder(7L, 10L, "b"));
         when(orderRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(booking(11L, 7L, 0.0, null)));
         assertThrows(PaymentException.class, () -> service.createOrder(7L, 11L, "c"));
+        when(orderRepository.findByIdForUpdate(12L)).thenReturn(Optional.of(booking(12L, null, 100.0, null)));
+        assertThrows(PaymentException.class, () -> service.createOrder(7L, 12L, "d"));
     }
 
     @Test
@@ -119,7 +125,7 @@ class PaymentServiceTest {
     @Test
     void verifyShouldReturnAlreadyPaidWithoutCallingGateway() {
         PaymentTransaction transaction = transaction(10L, 7L, PaymentTransactionStatus.PAID);
-        when(transactionRepository.findByRazorpayOrderId("order_1")).thenReturn(Optional.of(transaction));
+        when(transactionRepository.findByRazorpayOrderIdForUpdate("order_1")).thenReturn(Optional.of(transaction));
         when(orderRepository.findById(10L)).thenReturn(Optional.of(booking(10L, 7L, 100.0, PaymentStatus.SUCCESS)));
 
         var response = service.verify(7L, new VerifyPaymentRequest("order_1", "pay_1", "sig"));
@@ -133,7 +139,7 @@ class PaymentServiceTest {
     void verifyShouldMarkFailedWhenSignatureIsInvalid() {
         PaymentTransaction transaction = transaction(10L, 7L, PaymentTransactionStatus.CREATED);
         Order booking = booking(10L, 7L, 100.0, PaymentStatus.PENDING);
-        when(transactionRepository.findByRazorpayOrderId("order_1")).thenReturn(Optional.of(transaction));
+        when(transactionRepository.findByRazorpayOrderIdForUpdate("order_1")).thenReturn(Optional.of(transaction));
         when(signatureVerifier.verifyPayment("order_1", "pay_1", "bad", "key-secret")).thenReturn(false);
         when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(booking));
         when(orderRepository.findById(10L)).thenReturn(Optional.of(booking));
@@ -153,7 +159,7 @@ class PaymentServiceTest {
         PaymentTransaction transaction = transaction(10L, 7L, PaymentTransactionStatus.CREATED);
         Order booking = booking(10L, 7L, 100.0, PaymentStatus.PENDING);
         booking.setStatus(OrderStatus.CREATED);
-        when(transactionRepository.findByRazorpayOrderId("order_1")).thenReturn(Optional.of(transaction));
+        when(transactionRepository.findByRazorpayOrderIdForUpdate("order_1")).thenReturn(Optional.of(transaction));
         when(signatureVerifier.verifyPayment("order_1", "pay_1", "sig", "key-secret")).thenReturn(true);
         when(gateway.fetchPayment("pay_1"))
                 .thenReturn(new RazorpayGateway.RazorpayPayment("pay_1", "order_1", 10000L, "captured"));
@@ -171,9 +177,42 @@ class PaymentServiceTest {
     }
 
     @Test
+    void verifyShouldNotConfirmCancelledOrCompletedBooking() {
+        PaymentTransaction cancelledTransaction = transaction(10L, 7L, PaymentTransactionStatus.CREATED);
+        Order cancelledBooking = booking(10L, 7L, 100.0, PaymentStatus.PENDING);
+        cancelledBooking.setStatus(OrderStatus.CANCELLED);
+        when(transactionRepository.findByRazorpayOrderIdForUpdate("order_1")).thenReturn(Optional.of(cancelledTransaction));
+        when(signatureVerifier.verifyPayment("order_1", "pay_cancelled", "sig", "key-secret")).thenReturn(true);
+        when(gateway.fetchPayment("pay_cancelled"))
+                .thenReturn(new RazorpayGateway.RazorpayPayment("pay_cancelled", "order_1", 10000L, "captured"));
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(cancelledBooking));
+        when(orderRepository.findById(10L)).thenReturn(Optional.of(cancelledBooking));
+
+        assertTrue(service.verify(7L, new VerifyPaymentRequest("order_1", "pay_cancelled", "sig")).verified());
+
+        assertEquals(OrderStatus.CANCELLED, cancelledBooking.getStatus());
+
+        PaymentTransaction completedTransaction = transaction(11L, 7L, PaymentTransactionStatus.CREATED);
+        completedTransaction.setRazorpayOrderId("order_2");
+        completedTransaction.setAmount(new BigDecimal("100.00"));
+        Order completedBooking = booking(11L, 7L, 100.0, PaymentStatus.PENDING);
+        completedBooking.setStatus(OrderStatus.DELIVERED);
+        when(transactionRepository.findByRazorpayOrderIdForUpdate("order_2")).thenReturn(Optional.of(completedTransaction));
+        when(signatureVerifier.verifyPayment("order_2", "pay_completed", "sig", "key-secret")).thenReturn(true);
+        when(gateway.fetchPayment("pay_completed"))
+                .thenReturn(new RazorpayGateway.RazorpayPayment("pay_completed", "order_2", 10000L, "captured"));
+        when(orderRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(completedBooking));
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(completedBooking));
+
+        assertTrue(service.verify(7L, new VerifyPaymentRequest("order_2", "pay_completed", "sig")).verified());
+
+        assertEquals(OrderStatus.DELIVERED, completedBooking.getStatus());
+    }
+
+    @Test
     void verifyShouldRejectGatewayOrderAndAmountMismatch() {
         PaymentTransaction transaction = transaction(10L, 7L, PaymentTransactionStatus.CREATED);
-        when(transactionRepository.findByRazorpayOrderId("order_1")).thenReturn(Optional.of(transaction));
+        when(transactionRepository.findByRazorpayOrderIdForUpdate("order_1")).thenReturn(Optional.of(transaction));
         when(signatureVerifier.verifyPayment(anyString(), anyString(), anyString(), anyString())).thenReturn(true);
         when(gateway.fetchPayment("wrong-order"))
                 .thenReturn(new RazorpayGateway.RazorpayPayment("wrong-order", "order_2", 10000L, "captured"));

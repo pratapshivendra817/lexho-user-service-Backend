@@ -13,6 +13,7 @@ import com.lexho.user_service.addon.entity.AddonEntity;
 import com.lexho.user_service.addon.entity.CartItemAddonEntity;
 import com.lexho.user_service.addon.repository.CartItemAddonRepository;
 import com.lexho.user_service.addon.service.AddonManagementService;
+import com.lexho.user_service.coupon.service.CouponService;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.booking.exception.BookingValidationException;
 import com.lexho.user_service.customer.entity.CustomerCartItemEntity;
@@ -51,13 +52,14 @@ class OrderServiceTest {
     @Mock CartItemAddonRepository cartItemAddonRepository;
     @Mock OrderAddonRepository orderAddonRepository;
     @Mock BusinessMetricsService businessMetricsService;
+    @Mock CouponService couponService;
     private OrderService service;
 
     @BeforeEach
     void setUp() {
         service = new OrderService(orderRepository, cartRepository, customerCartItemRepository,
                 customerCatalogRepository, notificationManagementService, addonManagementService,
-                cartItemAddonRepository, orderAddonRepository, businessMetricsService);
+                cartItemAddonRepository, orderAddonRepository, businessMetricsService, couponService);
     }
 
     @Test
@@ -122,7 +124,7 @@ class OrderServiceTest {
     @Test
     void updateStatusValidatesTransitionAndTracksCompletion() {
         Order created = order(5L, 7L, OrderStatus.CREATED);
-        when(orderRepository.findById(5L)).thenReturn(Optional.of(created));
+        when(orderRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(created));
         when(orderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         assertEquals("CONFIRMED", service.updateStatus(5L, OrderStatus.CONFIRMED).getStatus());
 
@@ -137,8 +139,8 @@ class OrderServiceTest {
     @Test
     void updateStatusAlsoCompletesDeliveredOrdersAndRejectsMissingOrder() {
         Order confirmed = order(6L, 7L, OrderStatus.OUT_FOR_DELIVERY);
-        when(orderRepository.findById(6L)).thenReturn(Optional.of(confirmed));
-        when(orderRepository.findById(66L)).thenReturn(Optional.empty());
+        when(orderRepository.findByIdForUpdate(6L)).thenReturn(Optional.of(confirmed));
+        when(orderRepository.findByIdForUpdate(66L)).thenReturn(Optional.empty());
         when(orderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertEquals("DELIVERED", service.updateStatus(6L, OrderStatus.DELIVERED).getStatus());
@@ -149,13 +151,26 @@ class OrderServiceTest {
     @Test
     void cancelOrderChecksOwnershipAndLifecycle() {
         Order order = order(5L, 7L, OrderStatus.CREATED);
-        when(orderRepository.findById(5L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         assertEquals("CANCELLED", service.cancelOrder(5L, 7L).getStatus());
 
         order.setStatus(OrderStatus.DELIVERED);
         assertThrows(IllegalStateException.class, () -> service.cancelOrder(5L, 7L));
         assertThrows(UnauthorizedException.class, () -> service.cancelOrder(5L, 8L));
+    }
+
+    @Test
+    void lifecycleUpdatesAreIdempotentForRepeatedStatusAndCancel() {
+        Order confirmed = order(8L, 7L, OrderStatus.CONFIRMED);
+        when(orderRepository.findByIdForUpdate(8L)).thenReturn(Optional.of(confirmed));
+
+        assertEquals("CONFIRMED", service.updateStatus(8L, OrderStatus.CONFIRMED).getStatus());
+        verify(orderRepository, never()).save(any());
+
+        Order cancelled = order(9L, 7L, OrderStatus.CANCELLED);
+        when(orderRepository.findByIdForUpdate(9L)).thenReturn(Optional.of(cancelled));
+        assertEquals("CANCELLED", service.cancelOrder(9L).getStatus());
     }
 
     @Test
@@ -275,6 +290,30 @@ class OrderServiceTest {
 
         assertThat(dto.getItems()).hasSize(1);
         assertThat(dto.getItems().get(0).getPartnerName()).isEqualTo("Cleaner");
+    }
+
+    @Test
+    void mapToDtoCopiesCouponBreakdown() {
+        Order order = order(16L, 7L, OrderStatus.CREATED);
+        order.setOriginalAmount(500.0);
+        order.setDiscountAmount(50.0);
+        order.setTotalAmount(450.0);
+        order.setCouponCode("REFABC1234");
+
+        var dto = service.mapToDTO(order);
+
+        assertThat(dto.getOriginalAmount()).isEqualTo(500.0);
+        assertThat(dto.getDiscountAmount()).isEqualTo(50.0);
+        assertThat(dto.getTotalAmount()).isEqualTo(450.0);
+        assertThat(dto.getCouponCode()).isEqualTo("REFABC1234");
+    }
+
+    @Test
+    void firstServiceIdHandlesNullFirstItem() {
+        List<OrderItem> items = new java.util.ArrayList<>();
+        items.add(null);
+
+        assertThat((Long) ReflectionTestUtils.invokeMethod(service, "firstServiceId", items)).isNull();
     }
 
     private Order order(Long id, Long userId, OrderStatus status) {

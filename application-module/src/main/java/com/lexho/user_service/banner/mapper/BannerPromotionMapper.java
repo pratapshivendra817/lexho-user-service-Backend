@@ -42,6 +42,7 @@ public class BannerPromotionMapper {
         response.setSubtitle(banner.getSubtitle());
         response.setDescription(banner.getDescription());
         response.setBannerImageUrl(banner.getBannerImageUrl());
+        response.setImageUrl(banner.getBannerImageUrl());
         response.setPromoType(banner.getPromoType());
         response.setStatus(banner.getStatus());
         response.setSlotNumber(banner.getSlotNumber());

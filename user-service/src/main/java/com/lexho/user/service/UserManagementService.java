@@ -37,9 +37,12 @@ public class UserManagementService {
 
     private static final Logger LOG = LoggerFactory.getLogger(UserManagementService.class);
     private static final String DEFAULT_SORT_BY = "createdAt";
+    private static final String FIELD_FULL_NAME = "fullName";
+    private static final String FIELD_EMAIL = "email";
+    private static final String FIELD_PHONE_NUMBER = "phoneNumber";
     private static final int MAX_PAGE_SIZE = 100;
     private static final Collection<String> SORTABLE_FIELDS = List.of(
-            "fullName", "email", "phoneNumber", "city", "role", "status", "totalBookings", "createdAt", "updatedAt"
+            FIELD_FULL_NAME, FIELD_EMAIL, FIELD_PHONE_NUMBER, "city", "role", "status", "totalBookings", DEFAULT_SORT_BY, "updatedAt"
     );
 
     private final UserRepository userRepository;
@@ -89,14 +92,14 @@ public class UserManagementService {
             if (normalizedSearch != null) {
                 String like = likePattern(normalizedSearch);
                 predicates.add(cb.or(
-                        cb.like(cb.lower(root.get("fullName")), like),
-                        cb.like(cb.lower(root.get("phoneNumber")), like),
-                        cb.like(cb.lower(root.get("email")), like)
+                        cb.like(cb.lower(root.get(FIELD_FULL_NAME)), like),
+                        cb.like(cb.lower(root.get(FIELD_PHONE_NUMBER)), like),
+                        cb.like(cb.lower(root.get(FIELD_EMAIL)), like)
                 ));
             }
-            addLikePredicate(predicates, normalizedName, value -> cb.like(cb.lower(root.get("fullName")), value));
-            addLikePredicate(predicates, normalizedPhone, value -> cb.like(cb.lower(root.get("phoneNumber")), value));
-            addLikePredicate(predicates, normalizedEmail, value -> cb.like(cb.lower(root.get("email")), value));
+            addLikePredicate(predicates, normalizedName, value -> cb.like(cb.lower(root.get(FIELD_FULL_NAME)), value));
+            addLikePredicate(predicates, normalizedPhone, value -> cb.like(cb.lower(root.get(FIELD_PHONE_NUMBER)), value));
+            addLikePredicate(predicates, normalizedEmail, value -> cb.like(cb.lower(root.get(FIELD_EMAIL)), value));
             if (roleFilter != null) {
                 predicates.add(cb.equal(root.get("role"), roleFilter));
             }

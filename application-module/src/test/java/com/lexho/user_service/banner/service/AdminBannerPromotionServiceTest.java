@@ -71,6 +71,7 @@ class AdminBannerPromotionServiceTest {
             response.setPlacement(banner.getPlacement());
             response.setSlotNumber(banner.getSlotNumber());
             response.setBannerImageUrl(banner.getBannerImageUrl());
+            response.setImageUrl(banner.getBannerImageUrl());
             response.setCouponCode(banner.getCouponCode());
             return response;
         });
@@ -138,6 +139,29 @@ class AdminBannerPromotionServiceTest {
         assertThat(request.getPremiumUserOnly()).isFalse();
         assertThat(response.getId()).isEqualTo(15L);
         assertThat(response.getBannerImageUrl()).isEqualTo("/banners/promo.png");
+        assertThat(response.getImageUrl()).isEqualTo("/banners/promo.png");
+    }
+
+    @Test
+    void createAcceptsImageUrlAliasForAdminPreviewCompatibility() {
+        BannerUpsertRequest request = request();
+        request.setBannerImageUrl(null);
+        request.setImageUrl("https://cdn.lexho.com/banners/promo.png");
+
+        when(mediaUrlResolver.toStorablePath("https://cdn.lexho.com/banners/promo.png")).thenReturn("/banners/promo.png");
+        when(bannerPromotionRepository.save(any(BannerPromotion.class))).thenAnswer(invocation -> {
+            BannerPromotion saved = invocation.getArgument(0);
+            saved.setId(16L);
+            return saved;
+        });
+
+        BannerPromotionResponse response = adminBannerPromotionService.create(request);
+
+        ArgumentCaptor<BannerPromotion> captor = ArgumentCaptor.forClass(BannerPromotion.class);
+        verify(bannerPromotionRepository).save(captor.capture());
+        assertThat(captor.getValue().getBannerImageUrl()).isEqualTo("/banners/promo.png");
+        assertThat(response.getBannerImageUrl()).isEqualTo("/banners/promo.png");
+        assertThat(response.getImageUrl()).isEqualTo("/banners/promo.png");
     }
 
     @Test
@@ -172,7 +196,7 @@ class AdminBannerPromotionServiceTest {
         BannerPromotionResponse response = adminBannerPromotionService.update(21L, request);
 
         assertThat(response.getId()).isEqualTo(21L);
-        assertThat(existing.getBannerImageUrl()).isEqualTo(" ");
+        assertThat(existing.getBannerImageUrl()).isEqualTo("/existing.png");
         assertThat(existing.getUpdatedBy()).isEqualTo(77L);
 
         BannerUpsertRequest duplicateCouponRequest = request();

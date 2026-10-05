@@ -10,6 +10,7 @@ import com.lexho.user_service.audit.entity.AuditLog;
 import com.lexho.user_service.audit.repository.AuditLogRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import com.lexho.user_service.util.StringSanitizers;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -67,34 +68,20 @@ public class AdminAuditLogQueryService {
     }
 
     private AdminAuditLogResponse toListResponse(AuditLog auditLog) {
-        return new AdminAuditLogResponse(
-                String.valueOf(auditLog.getId()),
-                String.valueOf(auditLog.getId()),
-                auditLog.getTimestamp(),
-                auditLog.getTimestamp(),
-                auditLog.getTimestamp(),
-                firstNonBlank(auditLog.getActorIdentifier(), stringValue(auditLog.getActorId())),
-                auditLog.getActorIdentifier(),
-                auditLog.getActorIdentifier(),
-                auditLog.getActorRole(),
-                auditLog.getAction(),
-                auditLog.getEntityType(),
-                auditLog.getEntityType(),
-                auditLog.getEntityId(),
-                auditLog.getEntityId(),
-                auditLog.getRequestId(),
-                auditLog.getCorrelationId(),
-                null,
-                null,
-                null,
-                null
-        );
+        return toResponse(auditLog, null, null, null);
     }
 
     private AdminAuditLogResponse toDetailResponse(AuditLog auditLog) {
         Map<String, Object> oldValue = parseValue(auditLog.getOldValue());
         Map<String, Object> newValue = parseValue(auditLog.getNewValue());
         List<AdminAuditChangeResponse> changeHistory = buildChangeHistory(auditLog, oldValue, newValue);
+        return toResponse(auditLog, oldValue, newValue, changeHistory);
+    }
+
+    private AdminAuditLogResponse toResponse(AuditLog auditLog,
+                                             Map<String, Object> oldValue,
+                                             Map<String, Object> newValue,
+                                             List<AdminAuditChangeResponse> changeHistory) {
         return new AdminAuditLogResponse(
                 String.valueOf(auditLog.getId()),
                 String.valueOf(auditLog.getId()),
@@ -204,10 +191,6 @@ public class AdminAuditLogQueryService {
     }
 
     private String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.trim();
-        return normalized.isEmpty() ? null : normalized;
+        return StringSanitizers.trimToNull(value);
     }
 }

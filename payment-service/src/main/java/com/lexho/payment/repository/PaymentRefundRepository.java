@@ -19,6 +19,16 @@ public interface PaymentRefundRepository extends JpaRepository<PaymentRefund, Lo
     List<PaymentRefund> findByBookingIdOrderByCreatedAtDesc(Long bookingId);
 
     @Query("""
+            SELECT COUNT(r)
+            FROM PaymentRefund r
+            JOIN PaymentTransaction t ON t.id = r.paymentTransactionId
+            WHERE t.customerId = :customerId
+              AND r.refundStatus IN :statuses
+            """)
+    long countByCustomerIdAndRefundStatusIn(@Param("customerId") Long customerId,
+                                            @Param("statuses") List<PaymentRefundStatus> statuses);
+
+    @Query("""
             SELECT COALESCE(SUM(r.amount), 0)
             FROM PaymentRefund r
             WHERE r.paymentTransactionId = :transactionId

@@ -1,6 +1,7 @@
 package com.lexho.user_service.lexho.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -43,9 +44,51 @@ public final class LexhoDtos {
             String avatar,
             String role
     ) {
+        @JsonProperty("userId")
+        public Long userId() {
+            return id;
+        }
+
+        @JsonProperty("partnerId")
+        public Long partnerId() {
+            return isPartner() ? id : null;
+        }
+
+        @JsonProperty("providerId")
+        public Long providerId() {
+            return isPartner() ? id : null;
+        }
+
+        private boolean isPartner() {
+            return "PARTNER".equalsIgnoreCase(role);
+        }
     }
 
     public record AuthVerifyResponse(String token, String refreshToken, AuthUserDetails user) {
+        @JsonProperty("accessToken")
+        public String accessToken() {
+            return token;
+        }
+
+        @JsonProperty("userId")
+        public Long userId() {
+            return user == null ? null : user.id();
+        }
+
+        @JsonProperty("partnerId")
+        public Long partnerId() {
+            return user == null ? null : user.partnerId();
+        }
+
+        @JsonProperty("providerId")
+        public Long providerId() {
+            return user == null ? null : user.providerId();
+        }
+
+        @JsonProperty("role")
+        public String role() {
+            return user == null ? null : user.role();
+        }
     }
 
     public record UserProfileResponse(Long id, String mobile, String name, String email, String avatar) {
@@ -98,7 +141,7 @@ public final class LexhoDtos {
 
     public record BookingCreateRequest(
             @NotNull @Positive Long serviceId,
-            @NotNull @Positive Long addressId,
+            @NotBlank @Size(max = 64) String addressId,
             @Pattern(regexp = "INSTANT|SCHEDULED", message = "bookingType must be INSTANT or SCHEDULED")
             String bookingType,
             String date,
@@ -113,7 +156,8 @@ public final class LexhoDtos {
               CoordinatePair coordinates,
               CoordinatePair addressCoordinates,
               @JsonAlias({"totalAmount", "payableAmount", "expectedAmount"})
-              BigDecimal expectedTotal
+              BigDecimal expectedTotal,
+              @Size(max = 40) String couponCode
       ) {
         public BookingCreateRequest(
                   Long serviceId,
@@ -123,7 +167,8 @@ public final class LexhoDtos {
                   String slot,
                   String note
           ) {
-              this(serviceId, addressId, bookingType, date, slot, note, null, null, null, null, null, null, null);
+              this(serviceId, addressId == null ? null : String.valueOf(addressId), bookingType, date, slot, note,
+                      null, null, null, null, null, null, null, null);
           }
       }
 

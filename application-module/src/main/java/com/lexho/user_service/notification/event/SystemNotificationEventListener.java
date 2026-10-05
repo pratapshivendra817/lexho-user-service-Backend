@@ -5,8 +5,10 @@ import com.lexho.notification.enums.ChannelType;
 import com.lexho.notification.enums.NotificationStatus;
 import com.lexho.notification.repository.NotificationRepository;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.event.EventListener;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.List;
 
@@ -22,11 +24,19 @@ public class SystemNotificationEventListener {
         this.eventPublisher = eventPublisher;
     }
 
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onSystemEvent(SystemNotificationEvent event) {
         for (ChannelType channelType : List.of(ChannelType.IN_APP, ChannelType.PUSH)) {
             Notification notification = buildNotification(event, channelType);
-            Notification saved = notificationRepository.save(notification);
+            if (isDuplicate(notification)) {
+                continue;
+            }
+            Notification saved;
+            try {
+                saved = notificationRepository.save(notification);
+            } catch (DataIntegrityViolationException exception) {
+                continue;
+            }
             eventPublisher.publishEvent(new NotificationDispatchEvent(saved.getId(), saved.getChannelType()));
         }
     }
@@ -47,6 +57,14 @@ public class SystemNotificationEventListener {
         notification.setRedirectValue(event.getRedirectValue());
         notification.setRetryCount(0);
         notification.setDeleted(false);
+        if (event.getIdempotencyKeyPrefix() != null && !event.getIdempotencyKeyPrefix().isBlank()) {
+            notification.setIdempotencyKey(event.getIdempotencyKeyPrefix() + ":" + channelType.name());
+        }
         return notification;
+    }
+
+    private boolean isDuplicate(Notification notification) {
+        return notification.getIdempotencyKey() != null
+                && notificationRepository.existsByIdempotencyKey(notification.getIdempotencyKey());
     }
 }

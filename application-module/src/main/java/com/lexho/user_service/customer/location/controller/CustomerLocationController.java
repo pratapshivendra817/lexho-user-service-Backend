@@ -47,6 +47,9 @@ import java.time.Duration;
 @Tag(name = "Customer Location", description = "Customer location and address management APIs")
 @SecurityRequirement(name = "bearerAuth")
 public class CustomerLocationController {
+    private static final String ATTR_ROLE = "role";
+    private static final String ATTR_USER_ID = "userId";
+
     private final LocationService locationService;
     private final AddressService addressService;
     private final ReverseGeocodeService reverseGeocodeService;
@@ -68,8 +71,8 @@ public class CustomerLocationController {
     @PostMapping("/update")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Update current location")
-    public ResponseEntity<ApiResponse<LocationUpdateResponse>> update(@RequestAttribute("userId") Long customerId,
-                                                                      @RequestAttribute("role") String role,
+    public ResponseEntity<ApiResponse<LocationUpdateResponse>> update(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                      @RequestAttribute(ATTR_ROLE) String role,
                                                                       @io.swagger.v3.oas.annotations.parameters.RequestBody(
                                                                               required = true,
                                                                               content = @Content(schema = @Schema(implementation = LocationUpdateRequest.class),
@@ -84,8 +87,8 @@ public class CustomerLocationController {
     @PostMapping("/save-address")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Save customer address")
-    public ResponseEntity<ApiResponse<AddressResponse>> saveAddress(@RequestAttribute("userId") Long customerId,
-                                                                    @RequestAttribute("role") String role,
+    public ResponseEntity<ApiResponse<AddressResponse>> saveAddress(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                    @RequestAttribute(ATTR_ROLE) String role,
                                                                     @Valid @RequestBody SaveAddressRequest request) {
         assertCustomerRole(role);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -95,8 +98,8 @@ public class CustomerLocationController {
     @PutMapping("/address/{id}")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Update customer address")
-    public ResponseEntity<ApiResponse<AddressResponse>> updateAddress(@RequestAttribute("userId") Long customerId,
-                                                                      @RequestAttribute("role") String role,
+    public ResponseEntity<ApiResponse<AddressResponse>> updateAddress(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                      @RequestAttribute(ATTR_ROLE) String role,
                                                                       @PathVariable UUID id,
                                                                       @Valid @RequestBody UpdateAddressRequest request) {
         assertCustomerRole(role);
@@ -106,8 +109,8 @@ public class CustomerLocationController {
     @GetMapping("/current")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Get current location")
-    public ResponseEntity<ApiResponse<LocationUpdateResponse>> current(@RequestAttribute("userId") Long customerId,
-                                                                       @RequestAttribute("role") String role) {
+    public ResponseEntity<ApiResponse<LocationUpdateResponse>> current(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                       @RequestAttribute(ATTR_ROLE) String role) {
         assertCustomerRole(role);
         return ResponseEntity.ok(ApiResponse.success("Current location fetched successfully", locationService.getCurrentLocation(customerId)));
     }
@@ -115,8 +118,8 @@ public class CustomerLocationController {
     @GetMapping("/all")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Get all addresses with pagination and optional search")
-    public ResponseEntity<ApiResponse<PagedResponse<AddressResponse>>> all(@RequestAttribute("userId") Long customerId,
-                                                                           @RequestAttribute("role") String role,
+    public ResponseEntity<ApiResponse<PagedResponse<AddressResponse>>> all(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                           @RequestAttribute(ATTR_ROLE) String role,
                                                                            @RequestParam(defaultValue = "0") int page,
                                                                            @RequestParam(defaultValue = "10") int size,
                                                                            @RequestParam(required = false) String search,
@@ -129,8 +132,8 @@ public class CustomerLocationController {
     @GetMapping("/search")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Fallback search endpoint")
-    public ResponseEntity<ApiResponse<PagedResponse<AddressResponse>>> search(@RequestAttribute("userId") Long customerId,
-                                                                              @RequestAttribute("role") String role,
+    public ResponseEntity<ApiResponse<PagedResponse<AddressResponse>>> search(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                              @RequestAttribute(ATTR_ROLE) String role,
                                                                               @RequestParam String query,
                                                                               @RequestParam(defaultValue = "0") int page,
                                                                               @RequestParam(defaultValue = "10") int size) {
@@ -141,8 +144,8 @@ public class CustomerLocationController {
     @PatchMapping("/default/{addressId}")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Set default address")
-    public ResponseEntity<ApiResponse<AddressResponse>> setDefault(@RequestAttribute("userId") Long customerId,
-                                                                   @RequestAttribute("role") String role,
+    public ResponseEntity<ApiResponse<AddressResponse>> setDefault(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                   @RequestAttribute(ATTR_ROLE) String role,
                                                                    @PathVariable UUID addressId) {
         assertCustomerRole(role);
         return ResponseEntity.ok(ApiResponse.success("Default address updated successfully", addressService.setDefault(customerId, addressId)));
@@ -151,8 +154,8 @@ public class CustomerLocationController {
     @DeleteMapping("/{addressId}")
     @PreAuthorize("hasRole('CUSTOMER')")
     @Operation(summary = "Soft delete address")
-    public ResponseEntity<ApiResponse<Void>> delete(@RequestAttribute("userId") Long customerId,
-                                                    @RequestAttribute("role") String role,
+    public ResponseEntity<ApiResponse<Void>> delete(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                    @RequestAttribute(ATTR_ROLE) String role,
                                                     @PathVariable UUID addressId) {
         assertCustomerRole(role);
         addressService.softDelete(customerId, addressId);

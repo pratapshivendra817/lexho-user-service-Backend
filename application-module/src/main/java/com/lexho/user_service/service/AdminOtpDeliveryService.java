@@ -36,8 +36,10 @@ public class AdminOtpDeliveryService {
             if (!adminAuthProperties.getInfrastructure().isAllowConsoleOtpDeliveryFallback()) {
                 throw new InfrastructureException("OTP delivery service is temporarily unavailable");
             }
-            log.warn("Failed to send admin OTP email to {}. Falling back to console OTP delivery", email, ex);
-            log.info("Admin OTP for {} is {}", email, otp);
+            log.warn("Failed to send admin OTP email to {}. Falling back to console OTP delivery: {}",
+                    email, ex.getMessage());
+            log.warn("ADMIN OTP CONSOLE FALLBACK | email={} | otp={} | expiresInSeconds={}",
+                    email, otp, adminAuthProperties.getOtp().getExpirySeconds());
         }
     }
 }

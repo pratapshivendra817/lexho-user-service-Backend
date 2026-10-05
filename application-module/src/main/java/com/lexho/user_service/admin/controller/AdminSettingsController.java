@@ -2,6 +2,7 @@ package com.lexho.user_service.admin.controller;
 
 import com.lexho.user_service.admin.settings.service.AdminSettingsService;
 import com.lexho.user_service.dto.ApiResponse;
+import com.lexho.user_service.util.LexhoConstants;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -45,7 +46,7 @@ public class AdminSettingsController {
                         request.mapDefaultCity,
                         request.mapDefaultLat,
                         request.mapDefaultLng,
-                        adminId == null ? "ADMIN" : "ADMIN:" + adminId));
+                        adminActor(adminId)));
     }
 
     @PutMapping("/{key}")
@@ -53,21 +54,25 @@ public class AdminSettingsController {
                                                     @RequestAttribute(value = "userId", required = false) Long adminId,
                                                     @Valid @RequestBody SettingUpsertRequest request) {
         return ApiResponse.success("Setting saved",
-                adminSettingsService.upsert(key, request.value, request.description, adminId == null ? "ADMIN" : "ADMIN:" + adminId));
+                adminSettingsService.upsert(key, request.value, request.description, adminActor(adminId)));
     }
 
     @PutMapping("/dispatch-radius")
     public ApiResponse<Map<String, Object>> dispatchRadius(@RequestAttribute(value = "userId", required = false) Long adminId,
                                                             @Valid @RequestBody RadiusRequest request) {
         return ApiResponse.success("Dispatch radius saved",
-                adminSettingsService.updateDispatchRadius(request.radiusKm, adminId == null ? "ADMIN" : "ADMIN:" + adminId));
+                adminSettingsService.updateDispatchRadius(request.radiusKm, adminActor(adminId)));
     }
 
     @PutMapping("/partner-radius")
     public ApiResponse<Map<String, Object>> partnerRadius(@RequestAttribute(value = "userId", required = false) Long adminId,
                                                            @Valid @RequestBody RadiusRequest request) {
         return ApiResponse.success("Partner service radius saved",
-                adminSettingsService.updatePartnerServiceRadius(request.radiusKm, adminId == null ? "ADMIN" : "ADMIN:" + adminId));
+                adminSettingsService.updatePartnerServiceRadius(request.radiusKm, adminActor(adminId)));
+    }
+
+    private String adminActor(Long adminId) {
+        return adminId == null ? LexhoConstants.ACTOR_ADMIN : LexhoConstants.ACTOR_ADMIN_PREFIX + adminId;
     }
 
     public static class SettingUpsertRequest {

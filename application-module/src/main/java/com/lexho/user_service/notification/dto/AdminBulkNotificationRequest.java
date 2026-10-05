@@ -42,7 +42,7 @@ public class AdminBulkNotificationRequest {
     private List<ChannelType> channels;
 
     @NotNull(message = "targetUserType is required")
-    @JsonAlias({"userType"})
+    @JsonAlias({"userType", "audience", "appType"})
     private NotificationUserType targetUserType;
 
     private List<Long> userIds;
@@ -64,6 +64,47 @@ public class AdminBulkNotificationRequest {
         if (channelType == null) {
             return;
         }
+        addChannel(channelType);
+    }
+
+    @JsonSetter("userId")
+    public void setUserId(Long userId) {
+        addUserId(userId);
+    }
+
+    @JsonSetter("partnerId")
+    public void setPartnerId(Long partnerId) {
+        addUserId(partnerId);
+    }
+
+    @JsonSetter("providerId")
+    public void setProviderId(Long providerId) {
+        addUserId(providerId);
+    }
+
+    @JsonSetter("audience")
+    public void setAudience(String audience) {
+        this.targetUserType = parseUserType(audience);
+    }
+
+    @JsonSetter("appType")
+    public void setAppType(String appType) {
+        this.targetUserType = parseUserType(appType);
+    }
+
+    private void addUserId(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        if (this.userIds == null) {
+            this.userIds = new ArrayList<>();
+        }
+        if (!this.userIds.contains(userId)) {
+            this.userIds.add(userId);
+        }
+    }
+
+    private void addChannel(ChannelType channelType) {
         if (this.channels == null) {
             this.channels = new ArrayList<>();
         }
@@ -119,6 +160,28 @@ public class AdminBulkNotificationRequest {
             case "OFFER", "OFFERS", "PROMOTIONAL_OFFERS" -> "PROMOTIONAL_OFFER";
             case "PAYMENT_SUCCESS" -> "PAYMENT_SUCCESSFUL";
             case "SUBSCRIPTION_PURCHASED" -> "REMINDER";
+            case "ONBOARDING", "PARTNER_ONBOARDING", "ONBOARDING_STATUS" -> "SYSTEM";
+            case "PUSH" -> {
+                addChannel(ChannelType.IN_APP);
+                addChannel(ChannelType.PUSH);
+                yield "SYSTEM";
+            }
+            case "IN_APP" -> {
+                addChannel(ChannelType.IN_APP);
+                yield "SYSTEM";
+            }
+            case "EMAIL" -> {
+                addChannel(ChannelType.EMAIL);
+                yield "SYSTEM";
+            }
+            case "SMS" -> {
+                addChannel(ChannelType.SMS);
+                yield "SYSTEM";
+            }
+            case "WHATSAPP" -> {
+                addChannel(ChannelType.WHATSAPP);
+                yield "SYSTEM";
+            }
             default -> normalized;
         };
         return NotificationType.valueOf(normalized);

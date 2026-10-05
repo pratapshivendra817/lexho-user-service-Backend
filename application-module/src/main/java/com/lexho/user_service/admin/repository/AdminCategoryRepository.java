@@ -37,5 +37,7 @@ public interface AdminCategoryRepository extends JpaRepository<AdminCategoryEnti
 
     java.util.List<AdminCategoryEntity> findAllByDeletedFalseOrderByCreatedAtDesc(Pageable pageable);
 
+    java.util.List<AdminCategoryEntity> findByDeletedFalseOrderByDisplayOrderAscNameAsc();
+
     java.util.List<AdminCategoryEntity> findByActiveTrueAndDeletedFalseOrderByCreatedAtDesc(Pageable pageable);
 }

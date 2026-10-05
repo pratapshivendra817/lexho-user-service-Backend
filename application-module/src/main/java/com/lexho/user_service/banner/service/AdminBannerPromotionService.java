@@ -34,6 +34,8 @@ import java.util.List;
 @Service
 public class AdminBannerPromotionService {
     private static final Logger log = LoggerFactory.getLogger(AdminBannerPromotionService.class);
+    private static final String CREATED_AT_KEY = "createdAt";
+    private static final String UPDATED_AT_KEY = "updatedAt";
 
     private final BannerPromotionRepository bannerPromotionRepository;
     private final BannerPromotionMapper bannerPromotionMapper;
@@ -54,11 +56,11 @@ public class AdminBannerPromotionService {
     @CacheEvict(value = "homepageBanners", allEntries = true)
     public BannerPromotionResponse create(BannerUpsertRequest request) {
         log.info("Create banner payload={}", request);
-        normalizeBannerImagePath(request);
+        String storableImagePath = normalizeBannerImagePath(request);
         validateRequest(request, null, null);
         BannerPromotion banner = new BannerPromotion();
         bannerPromotionMapper.apply(banner, request);
-        banner.setBannerImageUrl(mediaUrlResolver.toStorablePath(request.getBannerImageUrl()));
+        banner.setBannerImageUrl(storableImagePath);
         log.info("Creating banner: title={}, incomingImage={}, resolvedImage={}",
                 request.getTitle(), request.getBannerImageUrl(), banner.getBannerImageUrl());
         banner.setDeleted(false);
@@ -72,12 +74,14 @@ public class AdminBannerPromotionService {
     @CacheEvict(value = "homepageBanners", allEntries = true)
     public BannerPromotionResponse update(Long id, BannerUpsertRequest request) {
         log.info("Update banner id={}, payload={}", id, request);
-        normalizeBannerImagePath(request);
+        String storableImagePath = normalizeBannerImagePath(request);
         BannerPromotion banner = getBanner(id);
         log.info("Updating banner id={}: payload title={}, payloadImage={}", id, request.getTitle(), request.getBannerImageUrl());
         validateRequest(request, id, banner);
         bannerPromotionMapper.apply(banner, request);
-        banner.setBannerImageUrl(mediaUrlResolver.toStorablePath(request.getBannerImageUrl()));
+        if (storableImagePath != null) {
+            banner.setBannerImageUrl(storableImagePath);
+        }
         log.info("Resolved banner image path for id={}: {}", id, banner.getBannerImageUrl());
         banner.setUpdatedBy(currentUserId());
         BannerPromotion saved = bannerPromotionRepository.save(banner);
@@ -229,34 +233,44 @@ public class AdminBannerPromotionService {
         if (request.getEndDate().isBefore(request.getStartDate())) {
             throw new BannerValidationException("End date must be greater than or equal to start date");
         }
-        if (request.getStatus() == BannerStatus.ACTIVE) {
-            boolean slotExists = id == null
-                    ? bannerPromotionRepository.existsByStatusAndPlacementAndSlotNumberAndDeletedFalse(
-                    BannerStatus.ACTIVE, request.getPlacement(), request.getSlotNumber())
-                    : bannerPromotionRepository.existsByStatusAndPlacementAndSlotNumberAndDeletedFalseAndIdNot(
-                    BannerStatus.ACTIVE, request.getPlacement(), request.getSlotNumber(), id);
-            if (slotExists) {
-                throw new BannerValidationException("Active banner slot already in use for placement "
-                        + request.getPlacement() + ": " + request.getSlotNumber());
-            }
+        validateActiveSlotAvailable(request, id);
+        validateCouponCodeAvailable(request.getCouponCode(), id);
+    }
+
+    private void validateActiveSlotAvailable(BannerUpsertRequest request, Long id) {
+        if (request.getStatus() != BannerStatus.ACTIVE) {
+            return;
         }
-        if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
-            boolean couponExists = id == null
-                    ? bannerPromotionRepository.existsByCouponCodeIgnoreCaseAndDeletedFalse(request.getCouponCode())
-                    : bannerPromotionRepository.existsByCouponCodeIgnoreCaseAndDeletedFalseAndIdNot(request.getCouponCode(), id);
-            if (couponExists) {
-                throw new BannerValidationException("Coupon code already exists");
-            }
+        boolean slotExists = id == null
+                ? bannerPromotionRepository.existsByStatusAndPlacementAndSlotNumberAndDeletedFalse(
+                BannerStatus.ACTIVE, request.getPlacement(), request.getSlotNumber())
+                : bannerPromotionRepository.existsByStatusAndPlacementAndSlotNumberAndDeletedFalseAndIdNot(
+                BannerStatus.ACTIVE, request.getPlacement(), request.getSlotNumber(), id);
+        if (slotExists) {
+            throw new BannerValidationException("Active banner slot already in use for placement "
+                    + request.getPlacement() + ": " + request.getSlotNumber());
+        }
+    }
+
+    private void validateCouponCodeAvailable(String couponCode, Long id) {
+        if (couponCode == null || couponCode.isBlank()) {
+            return;
+        }
+        boolean couponExists = id == null
+                ? bannerPromotionRepository.existsByCouponCodeIgnoreCaseAndDeletedFalse(couponCode)
+                : bannerPromotionRepository.existsByCouponCodeIgnoreCaseAndDeletedFalseAndIdNot(couponCode, id);
+        if (couponExists) {
+            throw new BannerValidationException("Coupon code already exists");
         }
     }
 
     private String normalizeSortBy(String sortBy) {
         if (sortBy == null || sortBy.isBlank()) {
-            return "createdAt";
+            return CREATED_AT_KEY;
         }
         return switch (sortBy) {
-            case "priority", "slotNumber", "startDate", "endDate", "createdAt", "updatedAt", "title" -> sortBy;
-            default -> "createdAt";
+            case "priority", "slotNumber", "startDate", "endDate", CREATED_AT_KEY, UPDATED_AT_KEY, "title" -> sortBy;
+            default -> CREATED_AT_KEY;
         };
     }
 
@@ -266,16 +280,30 @@ public class AdminBannerPromotionService {
 
     private BannerPromotionResponse toPublicResponse(BannerPromotion banner) {
         BannerPromotionResponse response = bannerPromotionMapper.toResponse(banner);
-        response.setBannerImageUrl(mediaUrlResolver.toPublicUrl(response.getBannerImageUrl()));
+        String publicUrl = mediaUrlResolver.toPublicUrl(response.getBannerImageUrl());
+        response.setBannerImageUrl(publicUrl);
+        response.setImageUrl(publicUrl);
         return response;
     }
 
-    private void normalizeBannerImagePath(BannerUpsertRequest request) {
+    private String normalizeBannerImagePath(BannerUpsertRequest request) {
         if (request == null) {
-            return;
+            return null;
         }
-        String rawValue = request.getBannerImageUrl();
+        String rawValue = firstNonBlank(request.getBannerImageUrl(), request.getImageUrl());
         String storablePath = mediaUrlResolver.toStorablePath(rawValue);
         request.setBannerImageUrl(storablePath);
+        request.setImageUrl(storablePath);
+        return storablePath;
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.trim().isBlank()) {
+            return first;
+        }
+        if (second != null && !second.trim().isBlank()) {
+            return second;
+        }
+        return null;
     }
 }

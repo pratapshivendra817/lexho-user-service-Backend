@@ -4,6 +4,9 @@ import com.lexho.user_service.partnerrequest.model.PartnerServiceRequestStatus;
 
 public class PartnerRequestActionResponse {
     private Long requestId;
+    private Long orderId;
+    public Long getOrderId() { return orderId; }
+    public void setOrderId(Long orderId) { this.orderId = orderId; }
     private PartnerServiceRequestStatus status;
 
     public Long getRequestId() {

@@ -11,8 +11,8 @@ import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
 import com.lexho.user_service.dispatch.repository.BookingEventRepository;
 import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.exception.BadRequestException;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,7 +64,8 @@ class LexhoExperienceControllerBranchTest {
         assertThat((String) invoke("normalizeMode", (String) null)).isEqualTo("UPI");
         assertThat((String) invoke("normalizeMode", " ")).isEqualTo("UPI");
         assertThat((String) invoke("normalizeMode", " card ")).isEqualTo("CARD");
-        assertThat((String) invoke("normalizeMode", "cod")).isEqualTo("COD");
+        assertThatThrownBy(() -> invoke("normalizeMode", "cod"))
+                .isInstanceOf(BadRequestException.class);
         assertThatThrownBy(() -> invoke("normalizeMode", "cash"))
                 .isInstanceOf(BadRequestException.class);
 
@@ -241,8 +242,8 @@ class LexhoExperienceControllerBranchTest {
                 (ReviewRepository) ReflectionTestUtils.getField(controller, "reviewRepository");
         com.lexho.provider.repository.PartnerRepository partnerRepository =
                 (com.lexho.provider.repository.PartnerRepository) ReflectionTestUtils.getField(controller, "partnerRepository");
-        PartnerProfileRepository partnerProfileRepository =
-                (PartnerProfileRepository) ReflectionTestUtils.getField(controller, "partnerProfileRepository");
+        PartnerOperationalProfileRepository partnerProfileRepository =
+                (PartnerOperationalProfileRepository) ReflectionTestUtils.getField(controller, "partnerProfileRepository");
 
         CurrentPartnerLocationEntity location = new CurrentPartnerLocationEntity();
         location.setPartnerId(44L);
@@ -289,12 +290,11 @@ class LexhoExperienceControllerBranchTest {
         partner.setImage("/legacy.png");
         when(partnerRepository.findById(44L)).thenReturn(Optional.of(partner));
 
-        PartnerProfile partnerProfile = new PartnerProfile();
+        PartnerOperationalProfile partnerProfile = new PartnerOperationalProfile();
         partnerProfile.setId(44L);
         partnerProfile.setName("Assigned Partner");
         partnerProfile.setMobileNumber("+91 98765 43210");
         partnerProfile.setRating(4.8);
-        partnerProfile.setProfileImage("/profile.png");
         when(partnerProfileRepository.findById(44L)).thenReturn(Optional.of(partnerProfile));
 
         com.lexho.user_service.dto.OrderResponseDTO orderResponse = new com.lexho.user_service.dto.OrderResponseDTO();

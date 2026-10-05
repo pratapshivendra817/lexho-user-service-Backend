@@ -14,13 +14,15 @@ class JwtTokenServiceTest {
         JwtTokenService service = new JwtTokenService(
                 "this-is-a-very-long-test-secret-with-min-32-bytes",
                 60_000,
-                "test-issuer"
+                "test-issuer",
+                "test-audience"
         );
         String token = service.generateAccessToken(42L, Role.ADMIN);
         Claims claims = service.validateAndParse(token);
 
         assertEquals("42", claims.getSubject());
         assertEquals("test-issuer", claims.getIssuer());
+        assertEquals("test-audience", claims.get("aud", String.class));
         assertEquals("ADMIN", claims.get("role", String.class));
     }
 
@@ -29,15 +31,36 @@ class JwtTokenServiceTest {
         JwtTokenService issuerA = new JwtTokenService(
                 "this-is-a-very-long-test-secret-with-min-32-bytes",
                 60_000,
-                "issuer-a"
+                "issuer-a",
+                "test-audience"
         );
         JwtTokenService issuerB = new JwtTokenService(
                 "this-is-a-very-long-test-secret-with-min-32-bytes",
                 60_000,
-                "issuer-b"
+                "issuer-b",
+                "test-audience"
         );
 
         String token = issuerA.generateAccessToken(1L, Role.CUSTOMER);
         assertThrows(IllegalArgumentException.class, () -> issuerB.validateAndParse(token));
+    }
+
+    @Test
+    void shouldRejectTokenWhenAudienceMismatch() {
+        JwtTokenService audienceA = new JwtTokenService(
+                "this-is-a-very-long-test-secret-with-min-32-bytes",
+                60_000,
+                "test-issuer",
+                "audience-a"
+        );
+        JwtTokenService audienceB = new JwtTokenService(
+                "this-is-a-very-long-test-secret-with-min-32-bytes",
+                60_000,
+                "test-issuer",
+                "audience-b"
+        );
+
+        String token = audienceA.generateAccessToken(1L, Role.CUSTOMER);
+        assertThrows(IllegalArgumentException.class, () -> audienceB.validateAndParse(token));
     }
 }

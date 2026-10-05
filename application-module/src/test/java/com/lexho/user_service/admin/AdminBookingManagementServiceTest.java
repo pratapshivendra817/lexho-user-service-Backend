@@ -68,7 +68,7 @@ class AdminBookingManagementServiceTest {
     @Test
     void updateStatusShouldValidateAndDelegateToOrderService() {
         Order order = order(1L, OrderStatus.CREATED, PaymentStatus.PENDING);
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
         OrderResponseDTO dto = new OrderResponseDTO();
         dto.setId(1L);
         dto.setStatus("CONFIRMED");
@@ -86,13 +86,15 @@ class AdminBookingManagementServiceTest {
     @Test
     void cancelShouldSoftCancelOnlyCancellableOrders() {
         Order order = order(1L, OrderStatus.CREATED, PaymentStatus.PENDING);
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
-        when(orderRepository.save(order)).thenReturn(order);
+        OrderResponseDTO cancelled = new OrderResponseDTO();
+        cancelled.setId(1L);
+        cancelled.setStatus("CANCELLED");
+        when(orderService.cancelOrder(1L)).thenReturn(cancelled);
 
         assertEquals("CANCELLED", service.cancel(1L).get("status"));
 
         Order delivered = order(2L, OrderStatus.DELIVERED, PaymentStatus.SUCCESS);
-        when(orderRepository.findById(2L)).thenReturn(Optional.of(delivered));
+        when(orderService.cancelOrder(2L)).thenThrow(new IllegalStateException("not cancellable"));
         assertThrows(BadRequestException.class, () -> service.cancel(2L));
     }
 

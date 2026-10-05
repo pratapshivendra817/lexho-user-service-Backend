@@ -52,7 +52,7 @@ class CustomerCatalogServiceTest {
         service.setNew(true);
 
         when(adminCategoryRepository.findByIdAndDeletedFalse(1L)).thenReturn(Optional.of(category));
-        when(customerCatalogRepository.findByCategory_IdAndActiveTrueAndDeletedFalse(
+        when(customerCatalogRepository.findByCategory_IdAndActiveTrueAndDeletedFalseOrderByNameAscIdAsc(
                 ArgumentMatchers.eq(1L), ArgumentMatchers.any())).thenReturn(new PageImpl<>(List.of(service)));
         when(bookingModeMapper.bookingModes(service)).thenReturn(List.of("FIXED"));
 

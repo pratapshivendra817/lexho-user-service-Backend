@@ -6,7 +6,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "lexho_referral_codes", indexes = {
-        @Index(name = "idx_lexho_ref_user", columnList = "userId"),
+        @Index(name = "idx_lexho_ref_user", columnList = "user_id"),
         @Index(name = "idx_lexho_ref_code", columnList = "code", unique = true)
 })
 public class LexhoReferralCode {
@@ -15,16 +15,16 @@ public class LexhoReferralCode {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @Column(name = "user_id", nullable = false)
     private Long userId;
 
     @Column(nullable = false, length = 40, unique = true)
     private String code;
 
-    @Column(nullable = false)
+    @Column(name = "used_count", nullable = false)
     private Integer usedCount;
 
-    @Column(nullable = false, updatable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @PrePersist

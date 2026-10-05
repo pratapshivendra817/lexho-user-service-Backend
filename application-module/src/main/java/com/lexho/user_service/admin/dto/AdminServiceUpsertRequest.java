@@ -2,6 +2,7 @@ package com.lexho.user_service.admin.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -34,6 +35,12 @@ public class AdminServiceUpsertRequest {
     @Min(value = 1, message = "Duration must be at least 1 minute")
     @Max(value = 1440, message = "Duration must be at most 1440 minutes")
     private Integer durationMinutes;
+
+    @DecimalMin(value = "0.0", inclusive = true, message = "Commission percent must be at least 0")
+    @DecimalMax(value = "100.0", inclusive = true, message = "Commission percent must be at most 100")
+    private BigDecimal commissionPercent;
+
+    private Boolean reviewEnabled;
 
     @DecimalMin(value = "0.0", inclusive = true, message = "Rating must be at least 0")
     private Double rating;
@@ -97,6 +104,22 @@ public class AdminServiceUpsertRequest {
 
     public void setDurationMinutes(Integer durationMinutes) {
         this.durationMinutes = durationMinutes;
+    }
+
+    public BigDecimal getCommissionPercent() {
+        return commissionPercent;
+    }
+
+    public void setCommissionPercent(BigDecimal commissionPercent) {
+        this.commissionPercent = commissionPercent;
+    }
+
+    public Boolean getReviewEnabled() {
+        return reviewEnabled;
+    }
+
+    public void setReviewEnabled(Boolean reviewEnabled) {
+        this.reviewEnabled = reviewEnabled;
     }
 
     public Double getRating() {

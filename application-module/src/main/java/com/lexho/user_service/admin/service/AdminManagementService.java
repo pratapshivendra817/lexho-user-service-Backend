@@ -3,7 +3,6 @@ package com.lexho.user_service.admin.service;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
-import com.lexho.provider.entity.Partner;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.dto.*;
 import com.lexho.user_service.admin.entity.*;
@@ -12,6 +11,7 @@ import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.security.SecurityUtils;
 import com.lexho.user_service.support.service.SupportRealtimeService;
+import com.lexho.user_service.util.StringSanitizers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -27,7 +27,32 @@ import java.util.stream.Collectors;
 @Service
 public class AdminManagementService {
 
-    private final PartnerRepository partnerRepository;
+    private static final String ID_KEY = "id";
+    private static final String STATUS_KEY = "status";
+    private static final String MESSAGE_KEY = "message";
+    private static final String CREATED_AT_KEY = "createdAt";
+    private static final String UPDATED_AT_KEY = "updatedAt";
+    private static final String PAYMENT_STATUS_KEY = "paymentStatus";
+    private static final String BOOKING_ID_KEY = "bookingId";
+    private static final String AMOUNT_KEY = "amount";
+    private static final String NAME_KEY = "name";
+    private static final String IMAGE_URL_KEY = "imageUrl";
+    private static final String ATTACHMENT_URLS_KEY = "attachmentUrls";
+    private static final String SENDER_KEY = "sender";
+    private static final String SUPPORT_TICKETS_ENTITY = "support_tickets";
+    private static final String SUPPORT_SENDER_TYPE = "SUPPORT";
+    private static final String CUSTOMER_REQUESTER_TYPE = "CUSTOMER";
+    private static final String PARTNER_REQUESTER_TYPE = "PARTNER";
+    private static final String PARTNER_CATEGORY_PREFIX = "PARTNER:";
+    private static final String STATUS_ACTIVE = "ACTIVE";
+    private static final String STATUS_INACTIVE = "INACTIVE";
+    private static final String STATUS_CLOSED = "CLOSED";
+    private static final String STATUS_IN_PROGRESS = "IN_PROGRESS";
+    private static final String SUPPORT_TICKET_NOT_FOUND_MESSAGE = "Support ticket not found";
+    private static final String TICKET_CODE_PREFIX = "TCK-";
+    private static final Set<String> SUPPORT_TICKET_STATUSES = Set.of("OPEN", STATUS_IN_PROGRESS, "RESOLVED",
+            STATUS_CLOSED);
+
     private final OrderRepository orderRepository;
     private final AdminServiceEntityRepository adminServiceEntityRepository;
     private final BannerRepository bannerRepository;
@@ -37,9 +62,7 @@ public class AdminManagementService {
     private final SupportTicketReplyRepository supportTicketReplyRepository;
     private final AdminAuditService adminAuditService;
     private final SecurityUtils securityUtils;
-
-    @Autowired(required = false)
-    private SupportRealtimeService supportRealtimeService;
+    private final SupportRealtimeService supportRealtimeService;
 
     public AdminManagementService(PartnerRepository partnerRepository,
                                   OrderRepository orderRepository,
@@ -51,7 +74,23 @@ public class AdminManagementService {
                                   SupportTicketReplyRepository supportTicketReplyRepository,
                                   AdminAuditService adminAuditService,
                                   SecurityUtils securityUtils) {
-        this.partnerRepository = partnerRepository;
+        this(partnerRepository, orderRepository, adminServiceEntityRepository, bannerRepository, payoutRepository,
+                activityLogRepository, supportTicketRepository, supportTicketReplyRepository, adminAuditService,
+                securityUtils, Optional.empty());
+    }
+
+    @Autowired
+    public AdminManagementService(PartnerRepository partnerRepository,
+                                  OrderRepository orderRepository,
+                                  AdminServiceEntityRepository adminServiceEntityRepository,
+                                  BannerRepository bannerRepository,
+                                  PayoutRepository payoutRepository,
+                                  ActivityLogRepository activityLogRepository,
+                                  SupportTicketRepository supportTicketRepository,
+                                  SupportTicketReplyRepository supportTicketReplyRepository,
+                                  AdminAuditService adminAuditService,
+                                  SecurityUtils securityUtils,
+                                  Optional<SupportRealtimeService> supportRealtimeService) {
         this.orderRepository = orderRepository;
         this.adminServiceEntityRepository = adminServiceEntityRepository;
         this.bannerRepository = bannerRepository;
@@ -61,10 +100,11 @@ public class AdminManagementService {
         this.supportTicketReplyRepository = supportTicketReplyRepository;
         this.adminAuditService = adminAuditService;
         this.securityUtils = securityUtils;
+        this.supportRealtimeService = supportRealtimeService.orElse(null);
     }
 
     public PagedDataResponse<Map<String, Object>> bookings(int page, int limit, String search, String status) {
-        Pageable pageable = page(page, limit, "id");
+        Pageable pageable = page(page, limit, ID_KEY);
         OrderStatus orderStatus = parseOrderStatus(status);
         Page<Order> result = orderRepository.searchOrders(normalize(search), orderStatus, pageable);
         return new PagedDataResponse<>(result.getContent().stream().map(this::mapOrder).collect(Collectors.toList()), result.getTotalElements());
@@ -75,60 +115,37 @@ public class AdminManagementService {
         return new DataResponse<>(mapOrder(order));
     }
 
-    public PagedDataResponse<Map<String, Object>> partners(int page, int limit, String search, String status) {
-        Pageable pageable = page(page, limit, "id");
-        Page<Partner> result = partnerRepository.searchPartners(normalize(search), normalize(status), pageable);
-        return new PagedDataResponse<>(result.getContent().stream().map(this::mapProvider).collect(Collectors.toList()), result.getTotalElements());
-    }
-
-    public DataResponse<Map<String, Object>> providerById(Long id) {
-        Partner partner = partnerRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
-        return new DataResponse<>(mapProvider(partner));
-    }
-
-    @Transactional
-    public DataResponse<Map<String, Object>> updateProviderVerification(Long id, String status) {
-        if (status == null || status.isBlank()) {
-            throw new BadRequestException("Verification status is required");
-        }
-        Partner partner = partnerRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
-        partner.setVerificationStatus(status.trim().toUpperCase(Locale.ROOT));
-        partnerRepository.save(partner);
-        audit("PROVIDER_VERIFICATION_UPDATE", "partners", partner.getId(), "status=" + partner.getVerificationStatus());
-        return new DataResponse<>(mapProvider(partner));
-    }
-
     public PagedDataResponse<Map<String, Object>> services(int page, int limit, String search, String status) {
-        Pageable pageable = page(page, limit, "createdAt");
+        Pageable pageable = page(page, limit, CREATED_AT_KEY);
         Page<AdminServiceEntity> result = adminServiceEntityRepository.search(normalize(search), normalize(status), pageable);
         return new PagedDataResponse<>(result.getContent().stream().map(this::mapService).collect(Collectors.toList()), result.getTotalElements());
     }
 
     public PagedDataResponse<Map<String, Object>> banners(int page, int limit, String search, String status) {
-        Pageable pageable = page(page, limit, "createdAt");
-        Boolean active = parseActiveStatus(status);
+        Pageable pageable = page(page, limit, CREATED_AT_KEY);
+        Boolean active = parseActiveStatus(status).orElse(null);
         Page<Banner> result = bannerRepository.search(normalize(search), active, pageable);
         return new PagedDataResponse<>(result.getContent().stream().map(this::mapBanner).collect(Collectors.toList()), result.getTotalElements());
     }
 
     public PagedDataResponse<Map<String, Object>> payouts(int page, int limit, String search, String status) {
-        Pageable pageable = page(page, limit, "createdAt");
+        Pageable pageable = page(page, limit, CREATED_AT_KEY);
         Page<Payout> result = payoutRepository.search(normalize(search), normalize(status), pageable);
         return new PagedDataResponse<>(result.getContent().stream().map(this::mapPayout).collect(Collectors.toList()), result.getTotalElements());
     }
 
     public PagedDataResponse<Map<String, Object>> activityLogs(int page, int limit, String search) {
-        Pageable pageable = page(page, limit, "createdAt");
+        Pageable pageable = page(page, limit, CREATED_AT_KEY);
         Page<ActivityLog> result = activityLogRepository.search(normalize(search), pageable);
         List<Map<String, Object>> items = result.getContent().stream().map(log -> {
             Map<String, Object> map = new HashMap<>();
-            map.put("id", log.getId());
+            map.put(ID_KEY, log.getId());
             map.put("adminId", log.getAdminId());
             map.put("action", log.getAction());
             map.put("entity", log.getEntity());
             map.put("entityId", log.getEntityId());
             map.put("metaData", log.getMetaData());
-            map.put("createdAt", log.getCreatedAt());
+            map.put(CREATED_AT_KEY, log.getCreatedAt());
             return map;
         }).collect(Collectors.toList());
         return new PagedDataResponse<>(items, result.getTotalElements());
@@ -140,7 +157,7 @@ public class AdminManagementService {
                                                                  String status,
                                                                  String categoryId,
                                                                  String priority) {
-        Pageable pageable = page(page, limit, "updatedAt");
+        Pageable pageable = page(page, limit, UPDATED_AT_KEY);
         Page<SupportTicket> result = supportTicketRepository.search(
                 normalize(search),
                 normalize(status),
@@ -176,7 +193,7 @@ public class AdminManagementService {
                                                                                  String categoryId,
                                                                                  String priority,
                                                                                  boolean partnerTickets) {
-        Pageable pageable = page(page, limit, "updatedAt");
+        Pageable pageable = page(page, limit, UPDATED_AT_KEY);
         Page<SupportTicket> result = supportTicketRepository.searchByRequesterType(
                 normalize(search),
                 normalize(status),
@@ -190,13 +207,13 @@ public class AdminManagementService {
 
     public DataResponse<Map<String, Object>> supportTicketDetail(Long id) {
         SupportTicket ticket = supportTicketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Support ticket not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(SUPPORT_TICKET_NOT_FOUND_MESSAGE));
         return new DataResponse<>(mapTicket(ticket));
     }
 
     public SseEmitter supportTicketStream(Long id) {
         SupportTicket ticket = supportTicketRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Support ticket not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(SUPPORT_TICKET_NOT_FOUND_MESSAGE));
         if (supportRealtimeService == null) {
             throw new BadRequestException("Support realtime stream is not available");
         }
@@ -209,18 +226,19 @@ public class AdminManagementService {
             throw new BadRequestException("Status is required");
         }
         String normalized = status.trim().toUpperCase(Locale.ROOT);
-        if (!Set.of("OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED").contains(normalized)) {
+        if (!SUPPORT_TICKET_STATUSES.contains(normalized)) {
             throw new BadRequestException("Status must be OPEN, IN_PROGRESS, RESOLVED or CLOSED");
         }
-        SupportTicket ticket = supportTicketRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Support ticket not found"));
+        SupportTicket ticket = supportTicketRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException(SUPPORT_TICKET_NOT_FOUND_MESSAGE));
         ticket.setStatus(normalized);
         supportTicketRepository.save(ticket);
         Map<String, Object> statusPayload = new HashMap<>();
-        statusPayload.put("id", "TCK-" + (10000 + ticket.getId()));
-        statusPayload.put("status", ticket.getStatus());
-        statusPayload.put("updatedAt", String.valueOf(ticket.getUpdatedAt()));
+        statusPayload.put(ID_KEY, TICKET_CODE_PREFIX + (10000 + ticket.getId()));
+        statusPayload.put(STATUS_KEY, ticket.getStatus());
+        statusPayload.put(UPDATED_AT_KEY, String.valueOf(ticket.getUpdatedAt()));
         publishSupportEvent(ticket, "ticket-status", statusPayload);
-        audit("SUPPORT_STATUS_UPDATE", "support_tickets", ticket.getId(), "status=" + ticket.getStatus());
+        audit("SUPPORT_STATUS_UPDATE", SUPPORT_TICKETS_ENTITY, ticket.getId(), "status=" + ticket.getStatus());
         return new DataResponse<>(mapTicket(ticket));
     }
 
@@ -229,29 +247,30 @@ public class AdminManagementService {
         if (message == null || message.isBlank()) {
             throw new BadRequestException("Reply message is required");
         }
-        SupportTicket ticket = supportTicketRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Support ticket not found"));
+        SupportTicket ticket = supportTicketRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException(SUPPORT_TICKET_NOT_FOUND_MESSAGE));
         SupportTicketReply reply = new SupportTicketReply();
         reply.setTicket(ticket);
         reply.setAdminId(currentAdminId());
-        reply.setSenderType("SUPPORT");
+        reply.setSenderType(SUPPORT_SENDER_TYPE);
         reply.setMessage(message.trim());
         supportTicketReplyRepository.save(reply);
 
-        if (!"CLOSED".equalsIgnoreCase(ticket.getStatus())) {
-            ticket.setStatus("IN_PROGRESS");
+        if (!STATUS_CLOSED.equalsIgnoreCase(ticket.getStatus())) {
+            ticket.setStatus(STATUS_IN_PROGRESS);
             supportTicketRepository.save(ticket);
         }
         Map<String, Object> messagePayload = new HashMap<>();
         Map<String, Object> messageBody = new HashMap<>();
-        messageBody.put("sender", "SUPPORT");
+        messageBody.put(SENDER_KEY, SUPPORT_SENDER_TYPE);
         messageBody.put("text", reply.getMessage());
-        messageBody.put("attachmentUrls", deserializeAttachmentUrls(reply.getAttachmentUrls()));
-        messageBody.put("createdAt", String.valueOf(reply.getCreatedAt()));
-        messagePayload.put("ticketId", "TCK-" + (10000 + ticket.getId()));
-        messagePayload.put("status", ticket.getStatus());
-        messagePayload.put("message", messageBody);
+        messageBody.put(ATTACHMENT_URLS_KEY, deserializeAttachmentUrls(reply.getAttachmentUrls()));
+        messageBody.put(CREATED_AT_KEY, String.valueOf(reply.getCreatedAt()));
+        messagePayload.put("ticketId", TICKET_CODE_PREFIX + (10000 + ticket.getId()));
+        messagePayload.put(STATUS_KEY, ticket.getStatus());
+        messagePayload.put(MESSAGE_KEY, messageBody);
         publishSupportEvent(ticket, "ticket-message", messagePayload);
-        audit("SUPPORT_REPLY", "support_tickets", ticket.getId(), null);
+        audit("SUPPORT_REPLY", SUPPORT_TICKETS_ENTITY, ticket.getId(), null);
         return new DataResponse<>(mapTicket(ticket));
     }
 
@@ -262,23 +281,19 @@ public class AdminManagementService {
     }
 
     private String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return StringSanitizers.trimToNull(value);
     }
 
-    private Boolean parseActiveStatus(String status) {
+    private Optional<Boolean> parseActiveStatus(String status) {
         String normalized = normalize(status);
         if (normalized == null) {
-            return null;
+            return Optional.empty();
         }
-        if ("ACTIVE".equalsIgnoreCase(normalized)) {
-            return true;
+        if (STATUS_ACTIVE.equalsIgnoreCase(normalized)) {
+            return Optional.of(true);
         }
-        if ("INACTIVE".equalsIgnoreCase(normalized)) {
-            return false;
+        if (STATUS_INACTIVE.equalsIgnoreCase(normalized)) {
+            return Optional.of(false);
         }
         throw new BadRequestException("Invalid status filter");
     }
@@ -297,94 +312,83 @@ public class AdminManagementService {
 
     private Map<String, Object> mapOrder(Order order) {
         Map<String, Object> map = new HashMap<>();
-        map.put("id", order.getId());
+        map.put(ID_KEY, order.getId());
         map.put("userId", order.getUserId());
         map.put("totalAmount", order.getTotalAmount());
-        map.put("status", order.getStatus());
-        map.put("paymentStatus", order.getPaymentStatus());
+        map.put(STATUS_KEY, order.getStatus());
+        map.put(PAYMENT_STATUS_KEY, order.getPaymentStatus());
         map.put("address", order.getAddress());
-        return map;
-    }
-
-    private Map<String, Object> mapProvider(Partner partner) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("id", partner.getId());
-        map.put("name", partner.getName());
-        map.put("categoryId", partner.getCategoryId());
-        map.put("subCategoryId", partner.getSubCategoryId());
-        map.put("rating", partner.getRating());
-        map.put("price", partner.getPrice());
-        map.put("available", partner.getAvailable());
-        map.put("experience", partner.getExperience());
-        map.put("verificationStatus", partner.getVerificationStatus());
         return map;
     }
 
     private Map<String, Object> mapService(AdminServiceEntity service) {
         Map<String, Object> map = new HashMap<>();
-        map.put("id", service.getId());
-        map.put("name", service.getName());
-        map.put("status", service.getStatus());
+        map.put(ID_KEY, service.getId());
+        map.put(NAME_KEY, service.getName());
+        map.put(STATUS_KEY, service.getStatus());
         map.put("categoryName", service.getCategoryName());
-        map.put("createdAt", service.getCreatedAt());
+        map.put(CREATED_AT_KEY, service.getCreatedAt());
         return map;
     }
 
     private Map<String, Object> mapBanner(Banner banner) {
         Map<String, Object> map = new HashMap<>();
-        map.put("id", banner.getId());
+        map.put(ID_KEY, banner.getId());
         map.put("title", banner.getTitle());
-        map.put("imageUrl", banner.getImageUrl());
+        map.put(IMAGE_URL_KEY, banner.getImageUrl());
         map.put("active", banner.isActive());
-        map.put("createdAt", banner.getCreatedAt());
+        map.put(CREATED_AT_KEY, banner.getCreatedAt());
         return map;
     }
 
     private Map<String, Object> mapPayout(Payout payout) {
         Map<String, Object> map = new HashMap<>();
-        map.put("id", payout.getId());
+        map.put(ID_KEY, payout.getId());
         map.put("providerId", payout.getProviderId());
-        map.put("amount", payout.getAmount());
-        map.put("status", payout.getStatus());
-        map.put("createdAt", payout.getCreatedAt());
+        map.put(AMOUNT_KEY, payout.getAmount());
+        map.put(STATUS_KEY, payout.getStatus());
+        map.put(CREATED_AT_KEY, payout.getCreatedAt());
         return map;
     }
 
     private Map<String, Object> mapTicket(SupportTicket ticket) {
         Map<String, Object> map = new HashMap<>();
         boolean partnerTicket = isPartnerTicket(ticket);
-        map.put("id", ticket.getId());
+        map.put(ID_KEY, ticket.getId());
         map.put("userId", ticket.getUserId());
-        map.put("requesterType", partnerTicket ? "PARTNER" : "CUSTOMER");
+        map.put("requesterType", partnerTicket ? PARTNER_REQUESTER_TYPE : CUSTOMER_REQUESTER_TYPE);
         map.put("subject", ticket.getSubject());
-        map.put("message", ticket.getMessage());
-        map.put("status", ticket.getStatus());
+        map.put(MESSAGE_KEY, ticket.getMessage());
+        map.put(STATUS_KEY, ticket.getStatus());
         map.put("categoryId", displayCategoryId(ticket.getCategoryId()));
         map.put("rawCategoryId", ticket.getCategoryId());
-        map.put("bookingId", ticket.getBookingId());
+        map.put(BOOKING_ID_KEY, ticket.getBookingId());
+        map.put("requesterName", ticket.getRequesterName());
+        map.put("requesterEmail", ticket.getRequesterEmail());
+        map.put("requesterPhone", ticket.getRequesterPhone());
         map.put("priority", ticket.getPriority());
-        map.put("attachmentUrls", deserializeAttachmentUrls(ticket.getAttachmentUrls()));
-        map.put("ticketId", "TCK-" + (10000 + ticket.getId()));
-        map.put("createdAt", ticket.getCreatedAt());
-        map.put("updatedAt", ticket.getUpdatedAt());
+        map.put(ATTACHMENT_URLS_KEY, deserializeAttachmentUrls(ticket.getAttachmentUrls()));
+        map.put("ticketId", TICKET_CODE_PREFIX + (10000 + ticket.getId()));
+        map.put(CREATED_AT_KEY, ticket.getCreatedAt());
+        map.put(UPDATED_AT_KEY, ticket.getUpdatedAt());
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(Map.of(
-                "id", "MSG-1",
-                "sender", partnerTicket ? "PARTNER" : "CUSTOMER",
-                "message", ticket.getMessage(),
-                "attachmentUrls", deserializeAttachmentUrls(ticket.getAttachmentUrls()),
-                "createdAt", ticket.getCreatedAt()
+                ID_KEY, "MSG-1",
+                SENDER_KEY, partnerTicket ? PARTNER_REQUESTER_TYPE : CUSTOMER_REQUESTER_TYPE,
+                MESSAGE_KEY, ticket.getMessage(),
+                ATTACHMENT_URLS_KEY, deserializeAttachmentUrls(ticket.getAttachmentUrls()),
+                CREATED_AT_KEY, ticket.getCreatedAt()
         ));
         List<SupportTicketReply> replies = supportTicketReplyRepository.findByTicket_IdOrderByCreatedAtAsc(ticket.getId());
         for (int i = 0; i < replies.size(); i++) {
             SupportTicketReply reply = replies.get(i);
             messages.add(Map.of(
-                    "id", "MSG-" + (i + 2),
-                    "sender", normalizeReplySender(reply),
+                    ID_KEY, "MSG-" + (i + 2),
+                    SENDER_KEY, normalizeReplySender(reply),
                     "adminId", reply.getAdminId(),
-                    "message", reply.getMessage(),
-                    "attachmentUrls", deserializeAttachmentUrls(reply.getAttachmentUrls()),
-                    "createdAt", reply.getCreatedAt()
+                    MESSAGE_KEY, reply.getMessage(),
+                    ATTACHMENT_URLS_KEY, deserializeAttachmentUrls(reply.getAttachmentUrls()),
+                    CREATED_AT_KEY, reply.getCreatedAt()
             ));
         }
         map.put("messages", messages);
@@ -406,20 +410,20 @@ public class AdminManagementService {
     private String normalizeReplySender(SupportTicketReply reply) {
         String senderType = reply.getSenderType();
         if (senderType == null || senderType.isBlank()) {
-            return "SUPPORT";
+            return SUPPORT_SENDER_TYPE;
         }
         return senderType.trim().toUpperCase(Locale.ROOT);
     }
 
     private boolean isPartnerTicket(SupportTicket ticket) {
-        return ticket.getCategoryId() != null && ticket.getCategoryId().startsWith("PARTNER:");
+        return ticket.getCategoryId() != null && ticket.getCategoryId().startsWith(PARTNER_CATEGORY_PREFIX);
     }
 
     private String displayCategoryId(String categoryId) {
         if (categoryId == null) {
             return null;
         }
-        return categoryId.startsWith("PARTNER:") ? categoryId.substring("PARTNER:".length()) : categoryId;
+        return categoryId.startsWith(PARTNER_CATEGORY_PREFIX) ? categoryId.substring(PARTNER_CATEGORY_PREFIX.length()) : categoryId;
     }
 
     private void audit(String action, String entity, Long entityId, String meta) {
@@ -430,7 +434,7 @@ public class AdminManagementService {
         if (supportRealtimeService == null) {
             return;
         }
-        String requesterType = isPartnerTicket(ticket) ? "PARTNER" : "CUSTOMER";
+        String requesterType = isPartnerTicket(ticket) ? PARTNER_REQUESTER_TYPE : CUSTOMER_REQUESTER_TYPE;
         supportRealtimeService.publish(ticket, requesterType, eventName, payload);
     }
 

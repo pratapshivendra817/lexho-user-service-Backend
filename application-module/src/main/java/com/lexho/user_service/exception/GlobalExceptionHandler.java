@@ -1,14 +1,18 @@
 package com.lexho.user_service.exception;
 
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.booking.exception.BookingValidationException;
 import com.lexho.user_service.booking.exception.InstantBookingUnavailableException;
 import com.lexho.user_service.notification.exception.NotificationValidationException;
 import com.lexho.user_service.subscription.exception.SubscriptionValidationException;
+import com.lexho.user_service.localization.service.PartnerLocalizationService;
+import com.lexho.user_service.util.LexhoConstants;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +23,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
@@ -29,6 +34,22 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private static final String CODE_KEY = "code";
+    private static final String ERROR_CODE_KEY = "errorCode";
+    private static final String MESSAGE_KEY = "message";
+    private static final String INVALID_REQUEST_MESSAGE = "Invalid request";
+    private static final String FILE_TOO_LARGE_CODE = "FILE_TOO_LARGE";
+    private static final String RATE_LIMIT_EXCEEDED_CODE = "RATE_LIMIT_EXCEEDED";
+    private final PartnerLocalizationService localizationService;
+
+    public GlobalExceptionHandler() {
+        this(null);
+    }
+
+    @Autowired
+    public GlobalExceptionHandler(PartnerLocalizationService localizationService) {
+        this.localizationService = localizationService;
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex,
@@ -36,25 +57,25 @@ public class GlobalExceptionHandler {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .findFirst()
                 .map(FieldError::getDefaultMessage)
-                .orElse("Invalid request");
+                .orElse(INVALID_REQUEST_MESSAGE);
         return error("VALIDATION_FAILED", message, HttpStatus.BAD_REQUEST, request);
     }
 
     @ExceptionHandler({ConstraintViolationException.class, HttpMessageNotReadableException.class})
     public ResponseEntity<ApiResponse<?>> handleMalformedRequest(Exception ex) {
-        return new ResponseEntity<>(ApiResponse.failure("Invalid request"), HttpStatus.BAD_REQUEST);
+        return new ResponseEntity<>(ApiResponse.failure(malformedRequestMessage(ex)), HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<ApiResponse<?>> handleBadRequest(BadRequestException ex) {
-        String message = ex.getMessage() == null || ex.getMessage().isBlank() ? "Invalid request" : ex.getMessage();
+        String message = ex.getMessage() == null || ex.getMessage().isBlank() ? INVALID_REQUEST_MESSAGE : ex.getMessage();
         return new ResponseEntity<>(ApiResponse.failure(errorCodeFor(message), message), HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(CodedValidationException.class)
     public ResponseEntity<ErrorResponse> handleCodedValidation(CodedValidationException ex,
                                                                HttpServletRequest request) {
-        String message = ex.getMessage() == null || ex.getMessage().isBlank() ? "Invalid request" : ex.getMessage();
+        String message = ex.getMessage() == null || ex.getMessage().isBlank() ? INVALID_REQUEST_MESSAGE : ex.getMessage();
         return error(ex.getErrorCode(), message, ex.getStatus(), request);
     }
 
@@ -74,8 +95,8 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleInstantUnavailable(InstantBookingUnavailableException ex) {
         java.util.Map<String, Object> payload = java.util.Map.of(
                 "assignmentStatus", "REJECTED",
-                "errorCode", ex.getErrorCode(),
-                "message", ex.getMessage()
+                ERROR_CODE_KEY, ex.getErrorCode(),
+                MESSAGE_KEY, ex.getMessage()
         );
         return new ResponseEntity<>(new ApiResponse<>(false, ex.getErrorCode(), ex.getMessage(), payload), HttpStatus.CONFLICT);
     }
@@ -83,8 +104,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BookingValidationException.class)
     public ResponseEntity<ApiResponse<?>> handleBookingValidation(BookingValidationException ex) {
         java.util.Map<String, Object> payload = java.util.Map.of(
-                "errorCode", ex.getErrorCode(),
-                "message", ex.getMessage()
+                ERROR_CODE_KEY, ex.getErrorCode(),
+                MESSAGE_KEY, ex.getMessage()
         );
         HttpStatus status = HttpStatus.BAD_REQUEST;
         if ("BOOKING_OUTSIDE_SERVICE_ZONE".equals(ex.getErrorCode())
@@ -99,6 +120,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<ApiResponse<?>> handleUnauthorized(UnauthorizedException ex) {
         String message = ex.getMessage() == null || ex.getMessage().isBlank() ? "Unauthorized" : ex.getMessage();
+        return new ResponseEntity<>(ApiResponse.failure(message), HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(ServletRequestBindingException.class)
+    public ResponseEntity<ApiResponse<?>> handleServletRequestBinding(ServletRequestBindingException ex) {
+        String message = ex.getMessage() != null && ex.getMessage().contains("userId")
+                ? "Authentication user id is required"
+                : INVALID_REQUEST_MESSAGE;
         return new ResponseEntity<>(ApiResponse.failure(message), HttpStatus.UNAUTHORIZED);
     }
 
@@ -123,7 +152,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({IllegalArgumentException.class, MissingServletRequestPartException.class})
     public ResponseEntity<ApiResponse<?>> handleBadInput(Exception ex) {
-        String message = ex.getMessage() == null || ex.getMessage().isBlank() ? "Invalid request" : ex.getMessage();
+        String message = ex.getMessage() == null || ex.getMessage().isBlank() ? INVALID_REQUEST_MESSAGE : ex.getMessage();
         return new ResponseEntity<>(ApiResponse.failure(message), HttpStatus.BAD_REQUEST);
     }
 
@@ -142,13 +171,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ErrorResponse> handleMaxUploadSize(MaxUploadSizeExceededException ex,
                                                              HttpServletRequest request) {
-        return error("FILE_TOO_LARGE", "File size must be 5 MB or less", HttpStatus.PAYLOAD_TOO_LARGE, request);
+        return error(FILE_TOO_LARGE_CODE,
+                "Upload payload is too large. Each file must be 5 MB or less and the total request must be 30 MB or less",
+                HttpStatus.PAYLOAD_TOO_LARGE, request);
     }
 
     @ExceptionHandler(FileUploadException.class)
     public ResponseEntity<ErrorResponse> handleFileUpload(FileUploadException ex,
                                                           HttpServletRequest request) {
-        HttpStatus status = "FILE_TOO_LARGE".equals(ex.getCode()) ? HttpStatus.PAYLOAD_TOO_LARGE : HttpStatus.BAD_REQUEST;
+        HttpStatus status = FILE_TOO_LARGE_CODE.equals(ex.getCode()) ? HttpStatus.PAYLOAD_TOO_LARGE : HttpStatus.BAD_REQUEST;
         return error(ex.getCode(), ex.getMessage(), status, request);
     }
 
@@ -165,8 +196,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
                 .body(java.util.Map.of(
-                        "code", "RATE_LIMIT_EXCEEDED",
-                        "message", message,
+                        CODE_KEY, RATE_LIMIT_EXCEEDED_CODE,
+                        MESSAGE_KEY, message,
                         "retryAfterSeconds", ex.getRetryAfterSeconds()
                 ));
     }
@@ -202,7 +233,33 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<ErrorResponse> error(String code, String message, HttpStatus status, HttpServletRequest request) {
         String path = request == null ? "" : request.getRequestURI();
-        return ResponseEntity.status(status).body(new ErrorResponse(code, message, java.time.Instant.now(), path));
+        String localized = isPartnerApi(path) && localizationService != null
+                ? localizationService.translateMessage(message)
+                : message;
+        return ResponseEntity.status(status).body(new ErrorResponse(code, localized, java.time.Instant.now(), path));
+    }
+
+    private boolean isPartnerApi(String path) {
+        return path != null && (path.startsWith("/api/partner/") || path.startsWith("/api/v1/partner/"));
+    }
+
+    private String malformedRequestMessage(Exception ex) {
+        if (ex instanceof HttpMessageNotReadableException notReadable
+                && notReadable.getCause() instanceof InvalidFormatException invalidFormat) {
+            String field = invalidFormat.getPath().stream()
+                    .map(com.fasterxml.jackson.databind.JsonMappingException.Reference::getFieldName)
+                    .filter(java.util.Objects::nonNull)
+                    .reduce((first, second) -> second)
+                    .orElse("request body");
+            if ("dateOfBirth".equals(field)) {
+                return "dateOfBirth must use YYYY-MM-DD";
+            }
+            return "Invalid " + field;
+        }
+        if (ex instanceof HttpMessageNotReadableException) {
+            return "Malformed JSON request body";
+        }
+        return INVALID_REQUEST_MESSAGE;
     }
 
     private String errorCodeFor(String message) {
@@ -216,10 +273,10 @@ public class GlobalExceptionHandler {
         if (normalized.contains("PAYMENT") && normalized.contains("EXPIRED")) {
             return "PAYMENT_EXPIRED";
         }
-        if (normalized.contains("SUBSCRIPTION") && normalized.contains("PAUSED")) {
+        if (normalized.contains(LexhoConstants.TYPE_SUBSCRIPTION) && normalized.contains("PAUSED")) {
             return "SUBSCRIPTION_PAUSED";
         }
-        if (normalized.contains("SUBSCRIPTION") && normalized.contains("CANCELLED")) {
+        if (normalized.contains(LexhoConstants.TYPE_SUBSCRIPTION) && normalized.contains("CANCELLED")) {
             return "SUBSCRIPTION_CANCELLED";
         }
         if (normalized.contains("PARTNER") && normalized.contains("UNAVAILABLE")) {

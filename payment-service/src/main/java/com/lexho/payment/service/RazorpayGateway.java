@@ -14,6 +14,8 @@ import java.util.Map;
 @Component
 public class RazorpayGateway {
 
+    private static final String AMOUNT_KEY = "amount";
+
     private final RazorpayProperties properties;
 
     public RazorpayGateway(RazorpayProperties properties) {
@@ -24,14 +26,14 @@ public class RazorpayGateway {
         requireCredentials();
         try {
             JSONObject request = new JSONObject();
-            request.put("amount", toPaise(amount));
+            request.put(AMOUNT_KEY, toPaise(amount));
             request.put("currency", properties.getCurrency());
             request.put("receipt", "lexho_booking_" + bookingId);
             request.put("notes", new JSONObject(Map.of("bookingId", String.valueOf(bookingId))));
             com.razorpay.Order order = client().orders.create(request);
             return new RazorpayOrder(
                     toText(order.get("id")),
-                    toLong(order.get("amount")),
+                    toLong(order.get(AMOUNT_KEY)),
                     toText(order.get("currency"))
             );
         } catch (RazorpayException exception) {
@@ -46,7 +48,7 @@ public class RazorpayGateway {
             return new RazorpayPayment(
                     toText(payment.get("id")),
                     toText(payment.get("order_id")),
-                    toLong(payment.get("amount")),
+                    toLong(payment.get(AMOUNT_KEY)),
                     toText(payment.get("status"))
             );
         } catch (RazorpayException exception) {
@@ -58,13 +60,13 @@ public class RazorpayGateway {
         requireCredentials();
         try {
             JSONObject request = new JSONObject();
-            request.put("amount", toPaise(amount));
+            request.put(AMOUNT_KEY, toPaise(amount));
             request.put("notes", new JSONObject(Map.of("bookingId", String.valueOf(bookingId))));
             com.razorpay.Refund refund = client().payments.refund(paymentId, request);
             return new RazorpayRefund(
                     toText(refund.get("id")),
                     toText(refund.get("payment_id")),
-                    toLong(refund.get("amount")),
+                    toLong(refund.get(AMOUNT_KEY)),
                     toText(refund.get("status"))
             );
         } catch (RazorpayException exception) {

@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class LexhoProfileService {
+    private static final String USER_NOT_FOUND = "User not found";
 
     private final LexhoUserProfileRepository profileRepository;
 
@@ -18,14 +19,14 @@ public class LexhoProfileService {
 
     public LexhoDtos.UserProfileResponse getProfile(Long userId) {
         LexhoUserProfile profile = profileRepository.findById(userId)
-                .orElseThrow(() -> new BadRequestException("User not found"));
+                .orElseThrow(() -> new BadRequestException(USER_NOT_FOUND));
         return toProfileResponse(profile);
     }
 
     @Transactional
     public LexhoDtos.UserProfileResponse updateProfile(Long userId, LexhoDtos.UserProfileUpdateRequest request) {
         LexhoUserProfile profile = profileRepository.findById(userId)
-                .orElseThrow(() -> new BadRequestException("User not found"));
+                .orElseThrow(() -> new BadRequestException(USER_NOT_FOUND));
         if (request.name() != null) {
             profile.setName(request.name());
         }
@@ -41,7 +42,7 @@ public class LexhoProfileService {
     @Transactional
     public LexhoDtos.UserProfileResponse updateProfileImage(Long userId, String profileImageUrl) {
         LexhoUserProfile profile = profileRepository.findById(userId)
-                .orElseThrow(() -> new BadRequestException("User not found"));
+                .orElseThrow(() -> new BadRequestException(USER_NOT_FOUND));
         profile.setProfileImage(profileImageUrl);
         return toProfileResponse(profileRepository.save(profile));
     }

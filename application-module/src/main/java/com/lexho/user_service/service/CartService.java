@@ -9,6 +9,7 @@ import com.lexho.user_service.dto.CartResponseDTO;
 import com.lexho.user_service.dto.CartSummaryDTO;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.exception.UnauthorizedException;
+import com.lexho.user_service.util.CartImageUrlResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -99,44 +100,6 @@ public class CartService {
     }
 
     private String toDeviceReachableImageUrl(String raw) {
-        String base = sanitizeBaseUrl(mediaPublicBaseUrl);
-        if (raw == null || raw.isBlank()) {
-            return base + "/defaults/service.png";
-        }
-        String trimmed = raw.trim();
-        String lower = trimmed.toLowerCase();
-        if (lower.startsWith("http://") || lower.startsWith("https://")) {
-            if (lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("0.0.0.0")) {
-                String path = extractPath(trimmed);
-                return path == null ? base + "/defaults/service.png" : base + path;
-            }
-            return lower.startsWith("http://") ? "https://" + trimmed.substring(7) : trimmed;
-        }
-        String normalized = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
-        return base + normalized;
-    }
-
-    private String sanitizeBaseUrl(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return "https://cdn.lexho.com";
-        }
-        String trimmed = baseUrl.trim();
-        if (trimmed.endsWith("/")) {
-            return trimmed.substring(0, trimmed.length() - 1);
-        }
-        return trimmed;
-    }
-
-    private String extractPath(String url) {
-        try {
-            java.net.URI uri = java.net.URI.create(url);
-            String path = uri.getPath();
-            if (path == null || path.isBlank()) {
-                return null;
-            }
-            return path.startsWith("/") ? path : "/" + path;
-        } catch (IllegalArgumentException ex) {
-            return null;
-        }
+        return CartImageUrlResolver.toDeviceReachableImageUrl(raw, mediaPublicBaseUrl);
     }
 }

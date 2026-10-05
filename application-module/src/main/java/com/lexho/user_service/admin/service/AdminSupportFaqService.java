@@ -7,13 +7,16 @@ import com.lexho.user_service.admin.entity.SupportFaq;
 import com.lexho.user_service.admin.entity.SupportFaqCategory;
 import com.lexho.user_service.admin.repository.SupportFaqCategoryRepository;
 import com.lexho.user_service.admin.repository.SupportFaqRepository;
+import com.lexho.user_service.audit.service.AuditLogService;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -21,11 +24,20 @@ public class AdminSupportFaqService {
 
     private final SupportFaqCategoryRepository categoryRepository;
     private final SupportFaqRepository faqRepository;
+    private final AuditLogService auditLogService;
 
     public AdminSupportFaqService(SupportFaqCategoryRepository categoryRepository,
                                   SupportFaqRepository faqRepository) {
+        this(categoryRepository, faqRepository, Optional.empty());
+    }
+
+    @Autowired
+    public AdminSupportFaqService(SupportFaqCategoryRepository categoryRepository,
+                                  SupportFaqRepository faqRepository,
+                                  Optional<AuditLogService> auditLogService) {
         this.categoryRepository = categoryRepository;
         this.faqRepository = faqRepository;
+        this.auditLogService = auditLogService.orElse(null);
     }
 
     public DataResponse<List<Map<String, Object>>> listCategories() {
@@ -81,7 +93,9 @@ public class AdminSupportFaqService {
         faq.setFaqKey(key);
         faq.setCategory(category);
         applyFaq(faq, request);
-        return new DataResponse<>(mapFaq(faqRepository.save(faq)));
+        SupportFaq saved = faqRepository.save(faq);
+        audit("FAQ_CREATED", saved);
+        return new DataResponse<>(mapFaq(saved));
     }
 
     @Transactional
@@ -90,7 +104,9 @@ public class AdminSupportFaqService {
         SupportFaq faq = findFaq(faqId);
         faq.setCategory(category);
         applyFaq(faq, request);
-        return new DataResponse<>(mapFaq(faqRepository.save(faq)));
+        SupportFaq saved = faqRepository.save(faq);
+        audit("FAQ_UPDATED", saved);
+        return new DataResponse<>(mapFaq(saved));
     }
 
     @Transactional
@@ -98,6 +114,7 @@ public class AdminSupportFaqService {
         findCategory(categoryId);
         SupportFaq faq = findFaq(faqId);
         faqRepository.delete(faq);
+        audit("FAQ_DELETED", faq);
         return new DataResponse<>(Map.of("deleted", true));
     }
 
@@ -112,6 +129,7 @@ public class AdminSupportFaqService {
         faq.setAnswer(request.getAnswer().trim());
         faq.setDisplayOrder(request.getDisplayOrder());
         faq.setActive(Boolean.TRUE.equals(request.getActive()));
+        faq.setUserType(normalizeUserType(request.getUserType()));
     }
 
     private SupportFaqCategory findCategory(String categoryId) {
@@ -147,7 +165,25 @@ public class AdminSupportFaqService {
                 "answer", faq.getAnswer(),
                 "displayOrder", faq.getDisplayOrder(),
                 "active", faq.isActive(),
+                "userType", faq.getUserType(),
                 "categoryId", faq.getCategory().getCategoryKey()
         );
+    }
+
+    private String normalizeUserType(String userType) {
+        if (userType == null || userType.isBlank()) {
+            return "GENERAL";
+        }
+        String normalized = userType.trim().toUpperCase();
+        if (!List.of("CUSTOMER", "PARTNER", "GENERAL").contains(normalized)) {
+            throw new BadRequestException("Unsupported FAQ userType");
+        }
+        return normalized;
+    }
+
+    private void audit(String action, SupportFaq faq) {
+        if (auditLogService != null) {
+            auditLogService.log(null, "ADMIN", action, "FAQ", faq.getFaqKey(), null, faq.getQuestion());
+        }
     }
 }

@@ -137,12 +137,14 @@ class AdminCatalogServiceTest {
 
         AdminCategoryUpsertRequest request = new AdminCategoryUpsertRequest();
         request.setName(" Cleaning ");
+        request.setDescription(" Home services ");
         request.setActive(true);
         request.setIconUrl(" /clean.png ");
 
         var response = adminCatalogService.createCategory(request).getData();
 
         assertEquals("Cleaning", response.getName());
+        assertEquals("Home services", response.getDescription());
         assertTrue(response.isActive());
         assertEquals(1, response.getTotalServicesCount());
         assertEquals(4, response.getTotalBookingsCount());

@@ -14,6 +14,14 @@ public interface SupportFaqRepository extends JpaRepository<SupportFaq, Long> {
 
     List<SupportFaq> findByCategoryAndActiveTrueOrderByDisplayOrderAscIdAsc(SupportFaqCategory category);
 
-    List<SupportFaq> findByCategoryOrderByDisplayOrderAscIdAsc(SupportFaqCategory category);
-}
+    List<SupportFaq> findByCategoryAndUserTypeInAndActiveTrueOrderByDisplayOrderAscIdAsc(
+            SupportFaqCategory category,
+            List<String> userTypes
+    );
 
+    List<SupportFaq> findByCategoryOrderByDisplayOrderAscIdAsc(SupportFaqCategory category);
+
+    List<SupportFaq> findByActiveTrueOrderByDisplayOrderAscIdAsc();
+
+    List<SupportFaq> findByUserTypeInAndActiveTrueOrderByDisplayOrderAscIdAsc(List<String> userTypes);
+}

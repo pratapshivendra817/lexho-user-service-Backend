@@ -8,6 +8,10 @@ public class PlaceOrderRequest {
     private LocalDateTime scheduledAt;
     private String bookingType;
     private BigDecimal expectedTotal;
+    private String couponCode;
+    private Long dispatchAddressId;
+    private Long dispatchServiceId;
+    private Integer dispatchQuantity;
 
     public String getAddress() {
         return address;
@@ -39,5 +43,37 @@ public class PlaceOrderRequest {
 
     public void setExpectedTotal(BigDecimal expectedTotal) {
         this.expectedTotal = expectedTotal;
+    }
+
+    public String getCouponCode() {
+        return couponCode;
+    }
+
+    public void setCouponCode(String couponCode) {
+        this.couponCode = couponCode;
+    }
+
+    public Long getDispatchAddressId() {
+        return dispatchAddressId;
+    }
+
+    public void setDispatchAddressId(Long dispatchAddressId) {
+        this.dispatchAddressId = dispatchAddressId;
+    }
+
+    public Long getDispatchServiceId() {
+        return dispatchServiceId;
+    }
+
+    public void setDispatchServiceId(Long dispatchServiceId) {
+        this.dispatchServiceId = dispatchServiceId;
+    }
+
+    public Integer getDispatchQuantity() {
+        return dispatchQuantity;
+    }
+
+    public void setDispatchQuantity(Integer dispatchQuantity) {
+        this.dispatchQuantity = dispatchQuantity;
     }
 }

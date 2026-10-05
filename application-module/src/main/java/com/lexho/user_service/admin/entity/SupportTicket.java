@@ -34,6 +34,15 @@ public class SupportTicket {
     @Column(name = "booking_id", length = 100)
     private String bookingId;
 
+    @Column(name = "requester_name", length = 120)
+    private String requesterName;
+
+    @Column(name = "requester_email", length = 190)
+    private String requesterEmail;
+
+    @Column(name = "requester_phone", length = 30)
+    private String requesterPhone;
+
     @Column(length = 20)
     private String priority;
 
@@ -116,6 +125,30 @@ public class SupportTicket {
 
     public void setBookingId(String bookingId) {
         this.bookingId = bookingId;
+    }
+
+    public String getRequesterName() {
+        return requesterName;
+    }
+
+    public void setRequesterName(String requesterName) {
+        this.requesterName = requesterName;
+    }
+
+    public String getRequesterEmail() {
+        return requesterEmail;
+    }
+
+    public void setRequesterEmail(String requesterEmail) {
+        this.requesterEmail = requesterEmail;
+    }
+
+    public String getRequesterPhone() {
+        return requesterPhone;
+    }
+
+    public void setRequesterPhone(String requesterPhone) {
+        this.requesterPhone = requesterPhone;
     }
 
     public String getPriority() {

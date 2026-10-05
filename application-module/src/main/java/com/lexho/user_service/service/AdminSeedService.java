@@ -4,6 +4,7 @@ import com.lexho.admin.entity.Admin;
 import com.lexho.admin.repository.AdminRepository;
 import com.lexho.common.enums.Role;
 import com.lexho.user_service.config.AdminSeedProperties;
+import com.lexho.user_service.util.StringSanitizers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -57,9 +58,10 @@ public class AdminSeedService implements CommandLineRunner {
     }
 
     private String normalize(String value) {
-        if (value == null || value.trim().isEmpty()) {
+        String normalized = StringSanitizers.trimToNull(value);
+        if (normalized == null) {
             return null;
         }
-        return value.trim().toLowerCase(Locale.ROOT);
+        return normalized.toLowerCase(Locale.ROOT);
     }
 }

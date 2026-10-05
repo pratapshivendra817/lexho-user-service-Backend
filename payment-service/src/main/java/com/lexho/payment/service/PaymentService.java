@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.booking.service.OrderLifecycleService;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
 import com.lexho.payment.config.RazorpayProperties;
@@ -27,7 +28,9 @@ import com.lexho.payment.repository.PaymentWebhookEventRepository;
 import org.slf4j.MDC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,11 +38,23 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class PaymentService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PaymentService.class);
+    private static final String BOOKING_NOT_FOUND = "Booking not found";
+    private static final String PAYMENT_TRANSACTION_NOT_FOUND = "Payment transaction not found";
+    private static final String WEBHOOK_ENTITY = "entity";
+    private static final String WEBHOOK_EVENT = "event";
+    private static final String WEBHOOK_ORDER_ID = "order_id";
+    private static final String WEBHOOK_PAYMENT = "payment";
+    private static final String WEBHOOK_PAYMENT_ID = "payment_id";
+    private static final String WEBHOOK_PAYLOAD = "payload";
+    private static final String WEBHOOK_REFUND = "refund";
+    private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_PENDING = "PENDING";
     private static final String CORRELATION_ID_MDC_KEY = "correlationId";
     private static final String REQUEST_ID_MDC_KEY = "requestId";
     private static final List<Duration> WEBHOOK_RETRY_DELAYS = List.of(
@@ -60,7 +75,10 @@ public class PaymentService {
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final PaymentMetricsService metricsService;
+    private final OrderLifecycleService orderLifecycleService;
+    private final PaymentService self;
 
+    @Autowired
     public PaymentService(OrderRepository orderRepository,
                           PaymentTransactionRepository transactionRepository,
                           PaymentRefundRepository refundRepository,
@@ -70,7 +88,9 @@ public class PaymentService {
                           PaymentSignatureVerifier signatureVerifier,
                           ObjectMapper objectMapper,
                           ApplicationEventPublisher eventPublisher,
-                          PaymentMetricsService metricsService) {
+                          PaymentMetricsService metricsService,
+                          OrderLifecycleService orderLifecycleService,
+                          @Lazy PaymentService self) {
         this.orderRepository = orderRepository;
         this.transactionRepository = transactionRepository;
         this.refundRepository = refundRepository;
@@ -81,6 +101,23 @@ public class PaymentService {
         this.objectMapper = objectMapper;
         this.eventPublisher = eventPublisher;
         this.metricsService = metricsService;
+        this.orderLifecycleService = orderLifecycleService;
+        this.self = self == null ? this : self;
+    }
+
+    PaymentService(OrderRepository orderRepository,
+                   PaymentTransactionRepository transactionRepository,
+                   PaymentRefundRepository refundRepository,
+                   PaymentWebhookEventRepository webhookEventRepository,
+                   RazorpayGateway gateway,
+                   RazorpayProperties properties,
+                   PaymentSignatureVerifier signatureVerifier,
+                   ObjectMapper objectMapper,
+                   ApplicationEventPublisher eventPublisher,
+                   PaymentMetricsService metricsService,
+                   OrderLifecycleService orderLifecycleService) {
+        this(orderRepository, transactionRepository, refundRepository, webhookEventRepository, gateway, properties,
+                signatureVerifier, objectMapper, eventPublisher, metricsService, orderLifecycleService, null);
     }
 
     @Transactional
@@ -89,10 +126,21 @@ public class PaymentService {
         PaymentTransaction existing = transactionRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
         if (existing != null) {
             assertOwner(existing, customerId);
+            if (!Objects.equals(existing.getBookingId(), bookingId)) {
+                throw new PaymentException("Idempotency key is already used for another booking");
+            }
             return toCreateOrderResponse(existing);
         }
 
         Order booking = findOwnedBookingForUpdate(bookingId, customerId);
+        existing = transactionRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
+        if (existing != null) {
+            assertOwner(existing, customerId);
+            if (!Objects.equals(existing.getBookingId(), bookingId)) {
+                throw new PaymentException("Idempotency key is already used for another booking");
+            }
+            return toCreateOrderResponse(existing);
+        }
         BigDecimal amount = bookingAmount(booking);
         RazorpayGateway.RazorpayOrder razorpayOrder = gateway.createOrder(bookingId, amount);
 
@@ -125,12 +173,12 @@ public class PaymentService {
         String retryKey = idempotencyKey == null || idempotencyKey.isBlank()
                 ? "retry-" + bookingId + "-" + System.currentTimeMillis()
                 : idempotencyKey;
-        return createOrder(customerId, bookingId, retryKey);
+        return self.createOrder(customerId, bookingId, retryKey);
     }
 
     @Transactional
     public PaymentResponse verify(Long customerId, VerifyPaymentRequest request) {
-        PaymentTransaction transaction = findByRazorpayOrderId(request.razorpayOrderId());
+        PaymentTransaction transaction = findByRazorpayOrderIdForUpdate(request.razorpayOrderId());
         assertOwner(transaction, customerId);
         if (transaction.getPaymentStatus() == PaymentTransactionStatus.PAID) {
             return toResponse(transaction, true);
@@ -161,20 +209,20 @@ public class PaymentService {
     @Transactional(readOnly = true)
     public PaymentResponse getLatest(Long customerId, Long bookingId) {
         Order booking = orderRepository.findById(bookingId)
-                .orElseThrow(() -> new PaymentException("Booking not found"));
-        if (!booking.getUserId().equals(customerId)) {
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
+        if (!Objects.equals(booking.getUserId(), customerId)) {
             throw new PaymentException("You are not allowed to access this booking payment");
         }
         PaymentTransaction transaction = transactionRepository.findTopByBookingIdOrderByCreatedAtDesc(bookingId)
-                .orElseThrow(() -> new PaymentException("Payment transaction not found"));
+                .orElseThrow(() -> new PaymentException(PAYMENT_TRANSACTION_NOT_FOUND));
         return toResponse(transaction, transaction.getPaymentStatus() == PaymentTransactionStatus.PAID);
     }
 
     @Transactional(readOnly = true)
     public void assertPayableBooking(Long customerId, Long bookingId) {
         Order booking = orderRepository.findById(bookingId)
-                .orElseThrow(() -> new PaymentException("Booking not found"));
-        if (!booking.getUserId().equals(customerId)) {
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
+        if (!Objects.equals(booking.getUserId(), customerId)) {
             throw new PaymentException("You are not allowed to access this booking payment");
         }
         if (booking.getTotalAmount() == null || booking.getTotalAmount() <= 0) {
@@ -191,7 +239,7 @@ public class PaymentService {
         }
 
         JsonNode payload = readTree(rawBody);
-        String eventType = payload.path("event").asText();
+        String eventType = payload.path(WEBHOOK_EVENT).asText();
         String paymentId = extractPaymentId(payload);
         String idempotencyKey = idempotencyKey(eventId, eventType, paymentId);
         PaymentWebhookEvent existing = webhookEventRepository.findByIdempotencyKeyForUpdate(idempotencyKey).orElse(null);
@@ -283,8 +331,8 @@ public class PaymentService {
     }
 
     private void handleAuthorized(JsonNode payload) {
-        JsonNode payment = payload.path("payload").path("payment").path("entity");
-        PaymentTransaction transaction = findByRazorpayOrderId(payment.path("order_id").asText());
+        JsonNode payment = payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_PAYMENT).path(WEBHOOK_ENTITY);
+        PaymentTransaction transaction = findByRazorpayOrderId(payment.path(WEBHOOK_ORDER_ID).asText());
         transaction.setRazorpayPaymentId(blankToNull(payment.path("id").asText()));
         if (transaction.getPaymentStatus() == null) {
             transaction.setPaymentStatus(PaymentTransactionStatus.CREATED);
@@ -293,9 +341,9 @@ public class PaymentService {
     }
 
     private void handleRefundCreated(JsonNode payload) {
-        JsonNode refundPayload = payload.path("payload").path("refund").path("entity");
+        JsonNode refundPayload = payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_REFUND).path(WEBHOOK_ENTITY);
         String refundId = refundPayload.path("id").asText();
-        String paymentId = refundPayload.path("payment_id").asText();
+        String paymentId = refundPayload.path(WEBHOOK_PAYMENT_ID).asText();
         PaymentTransaction transaction = transactionRepository.findByRazorpayPaymentId(paymentId)
                 .orElseThrow(() -> new PaymentException("Payment transaction not found for refund"));
         PaymentRefund refund = refundRepository.findByRazorpayRefundId(refundId)
@@ -305,8 +353,8 @@ public class PaymentService {
     }
 
     private void handleCaptured(JsonNode payload) {
-        JsonNode payment = payload.path("payload").path("payment").path("entity");
-        String orderId = payment.path("order_id").asText();
+        JsonNode payment = payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_PAYMENT).path(WEBHOOK_ENTITY);
+        String orderId = payment.path(WEBHOOK_ORDER_ID).asText();
         String paymentId = payment.path("id").asText();
         PaymentTransaction transaction = findByRazorpayOrderIdForUpdate(orderId);
         if (transaction.getPaymentStatus() == PaymentTransactionStatus.PAID) {
@@ -317,8 +365,8 @@ public class PaymentService {
     }
 
     private void handleFailed(JsonNode payload) {
-        JsonNode payment = payload.path("payload").path("payment").path("entity");
-        PaymentTransaction transaction = findByRazorpayOrderIdForUpdate(payment.path("order_id").asText());
+        JsonNode payment = payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_PAYMENT).path(WEBHOOK_ENTITY);
+        PaymentTransaction transaction = findByRazorpayOrderIdForUpdate(payment.path(WEBHOOK_ORDER_ID).asText());
         if (transaction.getPaymentStatus() != PaymentTransactionStatus.PAID) {
             transaction.setRazorpayPaymentId(blankToNull(payment.path("id").asText()));
             markFailed(transaction, blankToNull(payment.path("error_description").asText()));
@@ -326,9 +374,9 @@ public class PaymentService {
     }
 
     private void handleRefunded(JsonNode payload) {
-        JsonNode refundPayload = payload.path("payload").path("refund").path("entity");
+        JsonNode refundPayload = payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_REFUND).path(WEBHOOK_ENTITY);
         String refundId = refundPayload.path("id").asText();
-        String paymentId = refundPayload.path("payment_id").asText();
+        String paymentId = refundPayload.path(WEBHOOK_PAYMENT_ID).asText();
         PaymentTransaction transaction = transactionRepository.findByRazorpayPaymentIdForUpdate(paymentId)
                 .orElseThrow(() -> new PaymentException("Payment transaction not found for refund"));
         PaymentRefund refund = refundRepository.findByRazorpayRefundId(refundId)
@@ -348,7 +396,7 @@ public class PaymentService {
         transaction.setPaymentStatus(PaymentTransactionStatus.REFUNDED);
         transactionRepository.save(transaction);
         Order booking = orderRepository.findByIdForUpdate(transaction.getBookingId())
-                .orElseThrow(() -> new PaymentException("Booking not found"));
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
         booking.setPaymentStatus(PaymentStatus.REFUNDED);
         orderRepository.save(booking);
     }
@@ -367,6 +415,7 @@ public class PaymentService {
     }
 
     private void markPaid(PaymentTransaction transaction, String paymentId, String signature) {
+        boolean newlyPaid = transaction.getPaymentStatus() != PaymentTransactionStatus.PAID;
         transaction.setRazorpayPaymentId(paymentId);
         transaction.setRazorpaySignature(signature);
         transaction.setPaymentStatus(PaymentTransactionStatus.PAID);
@@ -375,14 +424,19 @@ public class PaymentService {
         transactionRepository.save(transaction);
 
         Order booking = orderRepository.findByIdForUpdate(transaction.getBookingId())
-                .orElseThrow(() -> new PaymentException("Booking not found"));
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
         booking.setPaymentStatus(PaymentStatus.SUCCESS);
         if (booking.getStatus() == OrderStatus.CREATED) {
-            booking.setStatus(OrderStatus.CONFIRMED);
+            orderRepository.save(booking);
+            booking = orderLifecycleService.transitionIfCurrent(
+                    booking.getId(), OrderStatus.CREATED, OrderStatus.CONFIRMED);
+        } else {
+            orderRepository.save(booking);
         }
-        orderRepository.save(booking);
-        eventPublisher.publishEvent(new PaymentCapturedEvent(booking.getId()));
-        metricsService.incrementPaymentSuccess();
+        if (newlyPaid) {
+            eventPublisher.publishEvent(new PaymentCapturedEvent(booking.getId()));
+            metricsService.incrementPaymentSuccess();
+        }
         LOG.info("Marked booking {} as paid using payment {}", booking.getId(), paymentId);
     }
 
@@ -391,7 +445,7 @@ public class PaymentService {
         transaction.setFailureReason(reason);
         transactionRepository.save(transaction);
         Order booking = orderRepository.findByIdForUpdate(transaction.getBookingId())
-                .orElseThrow(() -> new PaymentException("Booking not found"));
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
         booking.setPaymentStatus(PaymentStatus.FAILED);
         orderRepository.save(booking);
         eventPublisher.publishEvent(new PaymentFailedEvent(booking.getId(), reason));
@@ -409,8 +463,8 @@ public class PaymentService {
 
     private Order findOwnedBookingForUpdate(Long bookingId, Long customerId) {
         Order booking = orderRepository.findByIdForUpdate(bookingId)
-                .orElseThrow(() -> new PaymentException("Booking not found"));
-        if (!booking.getUserId().equals(customerId)) {
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
+        if (!Objects.equals(booking.getUserId(), customerId)) {
             throw new PaymentException("You are not allowed to pay for this booking");
         }
         return booking;
@@ -426,13 +480,13 @@ public class PaymentService {
     private PaymentTransaction findByRazorpayOrderId(String orderId) {
         requireText(orderId, "razorpayOrderId is required");
         return transactionRepository.findByRazorpayOrderId(orderId)
-                .orElseThrow(() -> new PaymentException("Payment transaction not found"));
+                .orElseThrow(() -> new PaymentException(PAYMENT_TRANSACTION_NOT_FOUND));
     }
 
     private PaymentTransaction findByRazorpayOrderIdForUpdate(String orderId) {
         requireText(orderId, "razorpayOrderId is required");
         return transactionRepository.findByRazorpayOrderIdForUpdate(orderId)
-                .orElseThrow(() -> new PaymentException("Payment transaction not found"));
+                .orElseThrow(() -> new PaymentException(PAYMENT_TRANSACTION_NOT_FOUND));
     }
 
     private void assertOwner(PaymentTransaction transaction, Long customerId) {
@@ -481,18 +535,18 @@ public class PaymentService {
     }
 
     private boolean retryPaymentAllowed(String paymentStatus) {
-        return "FAILED".equals(paymentStatus) || "EXPIRED".equals(paymentStatus);
+        return STATUS_FAILED.equals(paymentStatus) || "EXPIRED".equals(paymentStatus);
     }
 
     private String paymentStatus(PaymentTransactionStatus status) {
         if (status == null || status == PaymentTransactionStatus.CREATED) {
-            return "PENDING";
+            return STATUS_PENDING;
         }
         return switch (status) {
             case PAID -> "SUCCESS";
-            case FAILED -> "FAILED";
+            case FAILED -> STATUS_FAILED;
             case REFUNDED -> "REFUNDED";
-            case CREATED -> "PENDING";
+            case CREATED -> STATUS_PENDING;
         };
     }
 
@@ -501,7 +555,7 @@ public class PaymentService {
         if (booking == null || booking.getBookingType() == null || !"SUBSCRIPTION".equalsIgnoreCase(booking.getBookingType())) {
             return null;
         }
-        return "SUCCESS".equals(paymentStatus) ? "ACTIVE" : "PENDING";
+        return "SUCCESS".equals(paymentStatus) ? "ACTIVE" : STATUS_PENDING;
     }
 
     private JsonNode readTree(String rawBody) {
@@ -513,15 +567,19 @@ public class PaymentService {
     }
 
     private Long extractBookingId(JsonNode payload) {
-        String eventType = payload.path("event").asText();
+        String eventType = payload.path(WEBHOOK_EVENT).asText();
         try {
             if (eventType != null && eventType.startsWith("refund.")) {
-                String paymentId = payload.path("payload").path("refund").path("entity").path("payment_id").asText();
+                String paymentId = payload.path(WEBHOOK_PAYLOAD)
+                        .path(WEBHOOK_REFUND)
+                        .path(WEBHOOK_ENTITY)
+                        .path(WEBHOOK_PAYMENT_ID)
+                        .asText();
                 return transactionRepository.findByRazorpayPaymentId(paymentId)
                         .map(PaymentTransaction::getBookingId)
                         .orElse(null);
             }
-            String orderId = payload.path("payload").path("payment").path("entity").path("order_id").asText();
+            String orderId = payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_PAYMENT).path(WEBHOOK_ENTITY).path(WEBHOOK_ORDER_ID).asText();
             return transactionRepository.findByRazorpayOrderId(orderId)
                     .map(PaymentTransaction::getBookingId)
                     .orElse(null);
@@ -531,11 +589,11 @@ public class PaymentService {
     }
 
     private String extractPaymentId(JsonNode payload) {
-        String eventType = payload.path("event").asText();
+        String eventType = payload.path(WEBHOOK_EVENT).asText();
         if (eventType != null && eventType.startsWith("refund.")) {
-            return blankToNull(payload.path("payload").path("refund").path("entity").path("payment_id").asText());
+            return blankToNull(payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_REFUND).path(WEBHOOK_ENTITY).path(WEBHOOK_PAYMENT_ID).asText());
         }
-        return blankToNull(payload.path("payload").path("payment").path("entity").path("id").asText());
+        return blankToNull(payload.path(WEBHOOK_PAYLOAD).path(WEBHOOK_PAYMENT).path(WEBHOOK_ENTITY).path("id").asText());
     }
 
     private String idempotencyKey(String eventId, String eventType, String paymentId) {

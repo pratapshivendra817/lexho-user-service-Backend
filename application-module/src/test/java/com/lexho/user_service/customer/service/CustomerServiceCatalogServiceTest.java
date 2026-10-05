@@ -10,6 +10,7 @@ import com.lexho.user_service.admin.repository.ServiceDetailRepository;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogPageResponse;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogResponse;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import com.lexho.user_service.util.MediaUrlResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,6 +37,7 @@ class CustomerServiceCatalogServiceTest {
     @Mock AdminServiceEntityRepository adminServiceEntityRepository;
     @Mock ServiceDetailRepository serviceDetailRepository;
     @Mock AddonManagementService addonManagementService;
+    @Mock MediaUrlResolver mediaUrlResolver;
 
     private CustomerServiceCatalogService service;
 
@@ -44,7 +46,8 @@ class CustomerServiceCatalogServiceTest {
         service = new CustomerServiceCatalogService(
                 adminServiceEntityRepository,
                 serviceDetailRepository,
-                addonManagementService);
+                addonManagementService,
+                mediaUrlResolver);
     }
 
     @Test
@@ -65,6 +68,7 @@ class CustomerServiceCatalogServiceTest {
                 .thenReturn(List.of(detail("How long does it take?")));
         when(serviceDetailRepository.findByService_IdAndType(9L, DetailType.INSTRUCTION))
                 .thenReturn(List.of(detail("Keep area accessible")));
+        when(mediaUrlResolver.toPublicUrl("images/service.png")).thenReturn("https://api.lexho.test/images/service.png");
 
         CustomerServiceCatalogPageResponse response = service.listServices(-1, 500, "  clean ");
 
@@ -78,7 +82,7 @@ class CustomerServiceCatalogServiceTest {
         assertThat(response.getSize()).isEqualTo(100);
         assertThat(response.getItems()).hasSize(1);
         assertThat(response.getItems().get(0).getPrice()).isEqualTo(new BigDecimal("249.00"));
-        assertThat(response.getItems().get(0).getImageUrl()).isEqualTo("https://cdn.lexho.com/images/service.png");
+        assertThat(response.getItems().get(0).getImageUrl()).isEqualTo("https://api.lexho.test/images/service.png");
         assertThat(response.getItems().get(0).getAddons()).hasSize(1);
         assertThat(response.getItems().get(0).getIncluded()).containsExactly("Bucket included");
         assertThat(response.getItems().get(0).getExcluded()).containsExactly("Balcony excluded");
@@ -103,10 +107,11 @@ class CustomerServiceCatalogServiceTest {
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(12L)).thenReturn(Optional.of(active));
         when(addonManagementService.availableAddonsForService(active)).thenReturn(List.of());
         when(serviceDetailRepository.findByService_IdAndType(eq(12L), any())).thenReturn(List.of());
+        when(mediaUrlResolver.toPublicUrl("http://cdn.lexho.com/cook.png")).thenReturn("http://cdn.lexho.com/cook.png");
 
         CustomerServiceCatalogResponse response = service.getServiceById(12L);
 
-        assertThat(response.getImageUrl()).isEqualTo("https://cdn.lexho.com/cook.png");
+        assertThat(response.getImageUrl()).isEqualTo("http://cdn.lexho.com/cook.png");
         assertThat(response.getServiceName()).isEqualTo("Cook");
         assertThat(response.getPrice()).isEqualTo(new BigDecimal("249.00"));
     }

@@ -22,6 +22,8 @@ import java.util.UUID;
 
 @Service
 public class AddressServiceImpl implements AddressService {
+    private static final String ADDRESS_NOT_FOUND = "Address not found";
+    private static final String CUSTOMER_ACTOR_PREFIX = "CUSTOMER:";
 
     private final CustomerAddressRepository repository;
     private final ReverseGeocodeService reverseGeocodeService;
@@ -59,8 +61,8 @@ public class AddressServiceImpl implements AddressService {
         address.setMobile(normalizeMobile(request.mobile));
         address.setDeleted(false);
         address.setDefault(!repository.existsByCustomerIdAndIsDeletedFalse(customerId));
-        address.setCreatedBy("CUSTOMER:" + customerId);
-        address.setUpdatedBy("CUSTOMER:" + customerId);
+        address.setCreatedBy(customerActor(customerId));
+        address.setUpdatedBy(customerActor(customerId));
         return mapper.toResponse(repository.save(address));
     }
 
@@ -68,26 +70,10 @@ public class AddressServiceImpl implements AddressService {
     @Transactional
     public AddressResponse update(Long customerId, UUID addressId, UpdateAddressRequest request) {
         CustomerAddress address = repository.findByIdAndCustomerIdAndIsDeletedFalse(addressId, customerId)
-                .orElseThrow(() -> new AddressNotFoundException("Address not found"));
-        if (request.type != null) address.setType(request.type);
-        if (request.customLabel != null) address.setCustomLabel(normalizeText(request.customLabel));
-        if (request.flatNo != null) address.setFlatNo(normalizeText(request.flatNo));
-        if (request.floor != null) address.setFloor(normalizeText(request.floor));
-        if (request.buildingName != null) address.setBuildingName(normalizeText(request.buildingName));
-        if (request.landmark != null) address.setLandmark(normalizeText(request.landmark));
-        if (request.addressLine != null) address.setAddressLine(normalizeAddressLine(request.addressLine));
-        if (request.area != null) address.setArea(ReverseGeocodingService.normalizeLocality(request.area));
-        if (request.sector != null) address.setSector(normalizeText(request.sector));
-        if (request.mobile != null) address.setMobile(normalizeMobile(request.mobile));
-        if (request.latitude != null) address.setLatitude(BigDecimal.valueOf(request.latitude));
-        if (request.longitude != null) address.setLongitude(BigDecimal.valueOf(request.longitude));
-        if (request.latitude != null && request.longitude != null) {
-            ReverseGeocodeResponse reverse = reverseGeocodeService.reverse(request.latitude, request.longitude);
-            if (reverse.city != null && !reverse.city.isBlank()) address.setCity(ReverseGeocodingService.normalizeLocality(reverse.city));
-            if (reverse.state != null && !reverse.state.isBlank()) address.setState(ReverseGeocodingService.normalizeAddressText(reverse.state));
-            if (reverse.pincode != null && !reverse.pincode.isBlank()) address.setPincode(ReverseGeocodingService.normalizePincode(reverse.pincode));
-        }
-        address.setUpdatedBy("CUSTOMER:" + customerId);
+                .orElseThrow(() -> new AddressNotFoundException(ADDRESS_NOT_FOUND));
+        applyPatch(address, request);
+        refreshReverseGeocode(address, request);
+        address.setUpdatedBy(customerActor(customerId));
         return mapper.toResponse(repository.save(address));
     }
 
@@ -108,10 +94,10 @@ public class AddressServiceImpl implements AddressService {
     @Transactional
     public AddressResponse setDefault(Long customerId, UUID addressId) {
         CustomerAddress target = repository.findByIdAndCustomerIdAndIsDeletedFalse(addressId, customerId)
-                .orElseThrow(() -> new AddressNotFoundException("Address not found"));
+                .orElseThrow(() -> new AddressNotFoundException(ADDRESS_NOT_FOUND));
         repository.clearDefault(customerId);
         target.setDefault(true);
-        target.setUpdatedBy("CUSTOMER:" + customerId);
+        target.setUpdatedBy(customerActor(customerId));
         return mapper.toResponse(repository.save(target));
     }
 
@@ -119,16 +105,16 @@ public class AddressServiceImpl implements AddressService {
     @Transactional
     public void softDelete(Long customerId, UUID addressId) {
         CustomerAddress address = repository.findByIdAndCustomerIdAndIsDeletedFalse(addressId, customerId)
-                .orElseThrow(() -> new AddressNotFoundException("Address not found"));
+                .orElseThrow(() -> new AddressNotFoundException(ADDRESS_NOT_FOUND));
         boolean wasDefault = address.isDefault();
         address.setDeleted(true);
         address.setDefault(false);
-        address.setUpdatedBy("CUSTOMER:" + customerId);
+        address.setUpdatedBy(customerActor(customerId));
         repository.save(address);
         if (wasDefault) {
             repository.findFirstByCustomerIdAndIsDeletedFalseOrderByIsDefaultDescCreatedAtAsc(customerId).ifPresent(next -> {
                 next.setDefault(true);
-                next.setUpdatedBy("CUSTOMER:" + customerId);
+                next.setUpdatedBy(customerActor(customerId));
                 repository.save(next);
             });
         }
@@ -136,6 +122,65 @@ public class AddressServiceImpl implements AddressService {
 
     private String normalizeText(String raw) {
         return ReverseGeocodingService.normalizeAddressText(raw);
+    }
+
+    private void applyPatch(CustomerAddress address, UpdateAddressRequest request) {
+        if (request.type != null) {
+            address.setType(request.type);
+        }
+        if (request.customLabel != null) {
+            address.setCustomLabel(normalizeText(request.customLabel));
+        }
+        if (request.flatNo != null) {
+            address.setFlatNo(normalizeText(request.flatNo));
+        }
+        if (request.floor != null) {
+            address.setFloor(normalizeText(request.floor));
+        }
+        if (request.buildingName != null) {
+            address.setBuildingName(normalizeText(request.buildingName));
+        }
+        if (request.landmark != null) {
+            address.setLandmark(normalizeText(request.landmark));
+        }
+        if (request.addressLine != null) {
+            address.setAddressLine(normalizeAddressLine(request.addressLine));
+        }
+        if (request.area != null) {
+            address.setArea(ReverseGeocodingService.normalizeLocality(request.area));
+        }
+        if (request.sector != null) {
+            address.setSector(normalizeText(request.sector));
+        }
+        if (request.mobile != null) {
+            address.setMobile(normalizeMobile(request.mobile));
+        }
+        if (request.latitude != null) {
+            address.setLatitude(BigDecimal.valueOf(request.latitude));
+        }
+        if (request.longitude != null) {
+            address.setLongitude(BigDecimal.valueOf(request.longitude));
+        }
+    }
+
+    private void refreshReverseGeocode(CustomerAddress address, UpdateAddressRequest request) {
+        if (request.latitude == null || request.longitude == null) {
+            return;
+        }
+        ReverseGeocodeResponse reverse = reverseGeocodeService.reverse(request.latitude, request.longitude);
+        if (reverse.city != null && !reverse.city.isBlank()) {
+            address.setCity(ReverseGeocodingService.normalizeLocality(reverse.city));
+        }
+        if (reverse.state != null && !reverse.state.isBlank()) {
+            address.setState(ReverseGeocodingService.normalizeAddressText(reverse.state));
+        }
+        if (reverse.pincode != null && !reverse.pincode.isBlank()) {
+            address.setPincode(ReverseGeocodingService.normalizePincode(reverse.pincode));
+        }
+    }
+
+    private String customerActor(Long customerId) {
+        return CUSTOMER_ACTOR_PREFIX + customerId;
     }
 
     private String normalizeAddressLine(String raw) {

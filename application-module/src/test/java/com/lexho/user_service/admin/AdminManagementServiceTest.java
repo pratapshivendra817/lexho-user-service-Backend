@@ -4,7 +4,6 @@ import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
-import com.lexho.provider.entity.Partner;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.entity.ActivityLog;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
@@ -82,31 +81,6 @@ class AdminManagementServiceTest {
         assertThrows(BadRequestException.class, () -> service.bookings(1, 10, null, "wrong"));
         when(orderRepository.findById(9L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> service.bookingById(9L));
-    }
-
-    @Test
-    void partnersAndProviderDetailMapRepositoryResults() {
-        Partner partner = partner(3L);
-        when(partnerRepository.searchPartners(eq("clean"), eq("active"), any(Pageable.class)))
-                .thenReturn(new PageImpl<>(List.of(partner)));
-        assertEquals("Partner", service.partners(1, 10, " clean ", " active ").getData().get(0).get("name"));
-
-        when(partnerRepository.findById(3L)).thenReturn(Optional.of(partner));
-        assertEquals(3L, service.providerById(3L).getData().get("id"));
-    }
-
-    @Test
-    void updateVerificationValidatesPersistsAndAudits() {
-        assertThrows(BadRequestException.class, () -> service.updateProviderVerification(3L, " "));
-        Partner partner = partner(3L);
-        when(partnerRepository.findById(3L)).thenReturn(Optional.of(partner));
-        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(77L));
-
-        var result = service.updateProviderVerification(3L, " verified ");
-
-        assertEquals("VERIFIED", result.getData().get("verificationStatus"));
-        verify(partnerRepository).save(partner);
-        verify(auditService).log(77L, "PROVIDER_VERIFICATION_UPDATE", "partners", 3L, "status=VERIFIED");
     }
 
     @Test
@@ -264,13 +238,6 @@ class AdminManagementServiceTest {
         verify(ticketRepository, never()).save(ticket);
         verify(auditService).log(0L, "SUPPORT_REPLY", "support_tickets", 6L, null);
         assertEquals("CLOSED", data.get("status"));
-    }
-
-    private Partner partner(Long id) {
-        Partner partner = new Partner();
-        partner.setId(id); partner.setName("Partner"); partner.setCategoryId(1L);
-        partner.setRating(4.5); partner.setPrice(100.0); partner.setAvailable(true);
-        return partner;
     }
 
     private SupportTicket ticket(Long id, String status) {

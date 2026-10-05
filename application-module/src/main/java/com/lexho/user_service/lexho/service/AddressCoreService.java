@@ -10,6 +10,7 @@ import java.util.List;
 
 @Service
 public class AddressCoreService {
+    private static final String ADDRESS_NOT_FOUND = "Address not found";
 
     private final LexhoAddressRepository addressRepository;
 
@@ -19,21 +20,25 @@ public class AddressCoreService {
 
     @Transactional(readOnly = true)
     public List<LexhoAddress> listActive(Long userId) {
+        return activeAddresses(userId);
+    }
+
+    private List<LexhoAddress> activeAddresses(Long userId) {
         return addressRepository.findByUserIdAndIsDeletedFalse(userId);
     }
 
     @Transactional(readOnly = true)
     public LexhoAddress findOwnedActive(Long userId, Long addressId) {
         return addressRepository.findByIdAndUserIdAndIsDeletedFalse(addressId, userId)
-                .orElseThrow(() -> new BadRequestException("Address not found"));
+                .orElseThrow(() -> new BadRequestException(ADDRESS_NOT_FOUND));
     }
 
     @Transactional(readOnly = true)
     public LexhoAddress getCurrent(Long userId) {
-        List<LexhoAddress> addresses = listActive(userId);
+        List<LexhoAddress> addresses = activeAddresses(userId);
         return addresses.stream().filter(LexhoAddress::isDefault).findFirst()
                 .orElseGet(() -> addresses.stream().findFirst()
-                        .orElseThrow(() -> new BadRequestException("Address not found")));
+                        .orElseThrow(() -> new BadRequestException(ADDRESS_NOT_FOUND)));
     }
 
     @Transactional
@@ -45,7 +50,7 @@ public class AddressCoreService {
                 .findFirst()
                 .orElse(null);
         if (selected == null) {
-            throw new BadRequestException("Address not found");
+            throw new BadRequestException(ADDRESS_NOT_FOUND);
         }
 
         // Step 1: clear existing default(s), flush, then set target default.
@@ -70,14 +75,14 @@ public class AddressCoreService {
 
     @Transactional
     public void softDelete(Long userId, Long addressId) {
-        List<LexhoAddress> addresses = listActive(userId);
+        List<LexhoAddress> addresses = activeAddresses(userId);
         if (addresses.size() <= 1) {
             throw new BadRequestException("Cannot delete last address");
         }
         LexhoAddress target = addresses.stream()
                 .filter(a -> a.getId().equals(addressId))
                 .findFirst()
-                .orElseThrow(() -> new BadRequestException("Address not found"));
+                .orElseThrow(() -> new BadRequestException(ADDRESS_NOT_FOUND));
 
         boolean wasDefault = target.isDefault();
         target.setDeleted(true);

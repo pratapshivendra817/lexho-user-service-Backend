@@ -18,14 +18,16 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class LexhoAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(LexhoAuthService.class);
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final String INVALID_OR_EXPIRED_OTP = "Invalid or expired OTP";
 
     private final JwtUtil jwtUtil;
     private final LexhoUserProfileRepository profileRepository;
@@ -78,7 +80,7 @@ public class LexhoAuthService {
                     }
                 });
 
-        String otp = String.valueOf(ThreadLocalRandom.current().nextInt(100000, 1000000));
+        String otp = generateOtp();
         LexhoOtpChallenge challenge = new LexhoOtpChallenge();
         challenge.setMobile(mobile);
         challenge.setRole(role.name());
@@ -98,12 +100,12 @@ public class LexhoAuthService {
         LocalDateTime now = LocalDateTime.now();
         LexhoOtpChallenge challenge = otpChallengeRepository
                 .findTopByMobileAndRoleAndConsumedAtIsNullOrderByCreatedAtDesc(mobile, role.name())
-                .orElseThrow(() -> new BadRequestException("Invalid or expired OTP"));
+                .orElseThrow(() -> new BadRequestException(INVALID_OR_EXPIRED_OTP));
 
         if (challenge.getExpiresAt().isBefore(now)) {
             challenge.setConsumedAt(now);
             otpChallengeRepository.save(challenge);
-            throw new BadRequestException("Invalid or expired OTP");
+            throw new BadRequestException(INVALID_OR_EXPIRED_OTP);
         }
         if (challenge.getAttempts() >= otpMaxAttempts) {
             challenge.setConsumedAt(now);
@@ -118,13 +120,13 @@ public class LexhoAuthService {
                 throw new BadRequestException("Maximum OTP attempts exceeded");
             }
             otpChallengeRepository.save(challenge);
-            throw new BadRequestException("Invalid or expired OTP");
+            throw new BadRequestException(INVALID_OR_EXPIRED_OTP);
         }
 
         challenge.setConsumedAt(now);
         otpChallengeRepository.save(challenge);
 
-        LexhoUserProfile profile = profileRepository.findByMobile(mobile).orElseGet(() -> {
+        LexhoUserProfile profile = profileRepository.findByMobileAndRole(mobile, role).orElseGet(() -> {
             LexhoUserProfile created = new LexhoUserProfile();
             created.setMobile(mobile);
             created.setName("Lexho User");
@@ -132,10 +134,6 @@ public class LexhoAuthService {
             return profileRepository.save(created);
         });
         if (profile.getRole() == null) {
-            profile.setRole(role);
-        } else if (profile.getRole() == Role.ADMIN && role != Role.ADMIN) {
-            throw new BadRequestException("Role mismatch for this account");
-        } else if (profile.getRole() != role) {
             profile.setRole(role);
         }
         profileRepository.save(profile);
@@ -207,5 +205,9 @@ public class LexhoAuthService {
 
     private String hashRefreshToken(String refreshTokenValue) {
         return TokenDigests.sha256Hex(refreshTokenValue);
+    }
+
+    private String generateOtp() {
+        return String.valueOf(SECURE_RANDOM.nextInt(900000) + 100000);
     }
 }

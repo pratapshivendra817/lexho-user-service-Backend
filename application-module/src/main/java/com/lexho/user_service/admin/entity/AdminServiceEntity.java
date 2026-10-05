@@ -1,5 +1,6 @@
 package com.lexho.user_service.admin.entity;
 
+import com.lexho.user_service.util.LexhoConstants;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
@@ -36,6 +37,12 @@ public class AdminServiceEntity {
 
     @Column(name = "duration_minutes")
     private Integer durationMinutes;
+
+    @Column(name = "commission_percent", precision = 5, scale = 2)
+    private BigDecimal commissionPercent;
+
+    @Column(name = "review_enabled", nullable = false)
+    private boolean reviewEnabled = true;
 
     @Column(name = "avg_rating")
     private Double avgRating;
@@ -76,7 +83,7 @@ public class AdminServiceEntity {
         this.createdAt = now;
         this.updatedAt = now;
         if (this.status == null || this.status.isBlank()) {
-            this.status = this.active ? "ACTIVE" : "INACTIVE";
+            this.status = this.active ? LexhoConstants.STATUS_ACTIVE : LexhoConstants.STATUS_INACTIVE;
         }
         if (this.totalBookings == null) {
             this.totalBookings = 0L;
@@ -93,7 +100,7 @@ public class AdminServiceEntity {
     @PreUpdate
     public void onUpdate() {
         this.updatedAt = LocalDateTime.now();
-        this.status = this.active ? "ACTIVE" : "INACTIVE";
+        this.status = this.active ? LexhoConstants.STATUS_ACTIVE : LexhoConstants.STATUS_INACTIVE;
         syncCategoryName();
     }
 
@@ -157,6 +164,22 @@ public class AdminServiceEntity {
         this.discountedPrice = discountedPrice;
     }
 
+    public BigDecimal getCommissionPercent() {
+        return commissionPercent;
+    }
+
+    public void setCommissionPercent(BigDecimal commissionPercent) {
+        this.commissionPercent = commissionPercent;
+    }
+
+    public boolean isReviewEnabled() {
+        return reviewEnabled;
+    }
+
+    public void setReviewEnabled(boolean reviewEnabled) {
+        this.reviewEnabled = reviewEnabled;
+    }
+
     public Double getAvgRating() {
         return avgRating;
     }
@@ -203,7 +226,7 @@ public class AdminServiceEntity {
 
     public void setActive(boolean active) {
         this.active = active;
-        this.status = active ? "ACTIVE" : "INACTIVE";
+        this.status = active ? LexhoConstants.STATUS_ACTIVE : LexhoConstants.STATUS_INACTIVE;
     }
 
     public boolean isDeleted() {
@@ -220,7 +243,7 @@ public class AdminServiceEntity {
 
     public void setStatus(String status) {
         this.status = status;
-        this.active = status != null && "ACTIVE".equalsIgnoreCase(status);
+        this.active = status != null && LexhoConstants.STATUS_ACTIVE.equalsIgnoreCase(status);
     }
 
     public String getCategoryName() {

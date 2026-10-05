@@ -12,19 +12,23 @@ import java.util.Map;
 @RestControllerAdvice(basePackages = "com.lexho.user_service.review")
 public class ReviewExceptionHandler {
 
+    private static final String CODE_KEY = "code";
+    private static final String MESSAGE_KEY = "message";
+    private static final String SUCCESS_KEY = "success";
+
     @ExceptionHandler(ReviewNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(ReviewNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(ReviewAccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleForbidden(ReviewAccessDeniedException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(ReviewValidationException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(ReviewValidationException ex) {
-        return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.badRequest().body(error(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -34,6 +38,15 @@ public class ReviewExceptionHandler {
                 .findFirst()
                 .map(FieldError::getDefaultMessage)
                 .orElse("Invalid request");
-        return ResponseEntity.badRequest().body(Map.of("message", message));
+        boolean ratingInvalid = ex.getBindingResult().getFieldErrors()
+                .stream()
+                .map(FieldError::getField)
+                .anyMatch("rating"::equals);
+        String code = ratingInvalid ? "INVALID_RATING" : "INVALID_REVIEW";
+        return ResponseEntity.badRequest().body(error(code, message));
+    }
+
+    private Map<String, Object> error(String code, String message) {
+        return Map.of(SUCCESS_KEY, false, CODE_KEY, code, MESSAGE_KEY, message);
     }
 }

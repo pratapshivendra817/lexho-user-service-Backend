@@ -7,7 +7,9 @@ import com.lexho.auth.security.JwtTokenService;
 import com.lexho.auth.support.AuthRequestSupport;
 import com.lexho.common.enums.Role;
 import com.lexho.common.security.TokenDigests;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,13 +22,23 @@ public class AuthTokenService {
     private final JwtTokenService jwtTokenService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final long refreshExpiryDays;
+    private final AuthTokenService self;
 
+    @Autowired
     public AuthTokenService(JwtTokenService jwtTokenService,
                             RefreshTokenRepository refreshTokenRepository,
-                            @Value("${security.jwt.refresh-expiry-days:30}") long refreshExpiryDays) {
+                            @Value("${security.jwt.refresh-expiry-days:30}") long refreshExpiryDays,
+                            @Lazy AuthTokenService self) {
         this.jwtTokenService = jwtTokenService;
         this.refreshTokenRepository = refreshTokenRepository;
         this.refreshExpiryDays = refreshExpiryDays;
+        this.self = self == null ? this : self;
+    }
+
+    AuthTokenService(JwtTokenService jwtTokenService,
+                     RefreshTokenRepository refreshTokenRepository,
+                     long refreshExpiryDays) {
+        this(jwtTokenService, refreshTokenRepository, refreshExpiryDays, null);
     }
 
     @Transactional
@@ -47,7 +59,7 @@ public class AuthTokenService {
         }
 
         revoke(token);
-        return issueTokens(token.getUserId(), AuthRequestSupport.parseRole(token.getRole()));
+        return self.issueTokens(token.getUserId(), AuthRequestSupport.parseRole(token.getRole()));
     }
 
     @Transactional

@@ -1,5 +1,6 @@
 package com.lexho.user_service.emergency.repository;
 
+import com.lexho.testconfig.LexhoInfrastructureTest;
 import com.lexho.user_service.emergency.entity.EmergencyContact;
 import com.lexho.user_service.emergency.entity.EmergencyEvent;
 import com.lexho.user_service.emergency.entity.EmergencyEventStatus;
@@ -9,10 +10,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 
@@ -22,10 +25,12 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
+@LexhoInfrastructureTest
+@ActiveProfiles("it")
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ContextConfiguration(classes = EmergencyRepositoryIntegrationTest.JpaTestConfig.class)
 @TestPropertySource(properties = {
         "spring.flyway.enabled=false",
-        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 class EmergencyRepositoryIntegrationTest {

@@ -26,6 +26,9 @@ public class AdminSupportFaqUpsertRequest {
     @NotNull
     private Boolean active;
 
+    @Size(max = 30)
+    private String userType;
+
     public String getId() {
         return id;
     }
@@ -65,5 +68,12 @@ public class AdminSupportFaqUpsertRequest {
     public void setActive(Boolean active) {
         this.active = active;
     }
-}
 
+    public String getUserType() {
+        return userType;
+    }
+
+    public void setUserType(String userType) {
+        this.userType = userType;
+    }
+}

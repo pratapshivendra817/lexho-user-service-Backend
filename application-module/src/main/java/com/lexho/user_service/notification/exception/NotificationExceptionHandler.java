@@ -12,19 +12,21 @@ import java.util.Map;
 @RestControllerAdvice
 public class NotificationExceptionHandler {
 
+    private static final String MESSAGE_KEY = "message";
+
     @ExceptionHandler(NotificationNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(NotificationNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler(NotificationAccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleAccessDenied(NotificationAccessDeniedException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler(NotificationValidationException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(NotificationValidationException ex) {
-        return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -34,6 +36,6 @@ public class NotificationExceptionHandler {
                 .findFirst()
                 .map(FieldError::getDefaultMessage)
                 .orElse("Invalid request");
-        return ResponseEntity.badRequest().body(Map.of("message", message));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, message));
     }
 }

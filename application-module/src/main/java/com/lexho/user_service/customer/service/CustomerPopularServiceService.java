@@ -25,6 +25,7 @@ import java.util.Optional;
 public class CustomerPopularServiceService {
 
     private static final Logger log = LoggerFactory.getLogger(CustomerPopularServiceService.class);
+    private static final String CATEGORY_CLEANING = "cleaning";
 
     private final CustomerPopularServiceRepository customerPopularServiceRepository;
     private final AdminCategoryRepository adminCategoryRepository;
@@ -33,6 +34,10 @@ public class CustomerPopularServiceService {
     @Transactional(readOnly = true)
     @Cacheable(value = "customerPopularServices", key = "'popular_services_' + #categoryId + '_' + #page + '_' + #size")
     public List<CustomerPopularServiceResponse> getPopularServices(Long categoryId, int page, int size) {
+        return popularServices(categoryId, page, size);
+    }
+
+    private List<CustomerPopularServiceResponse> popularServices(Long categoryId, int page, int size) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
         Pageable pageable = PageRequest.of(safePage, safeSize);
@@ -62,7 +67,7 @@ public class CustomerPopularServiceService {
 
     @Transactional(readOnly = true)
     public List<CustomerPopularServiceResponse> getPopularServices(Long categoryId) {
-        return getPopularServices(categoryId, 0, 20);
+        return popularServices(categoryId, 0, 20);
     }
 
     @Transactional(readOnly = true)
@@ -73,18 +78,18 @@ public class CustomerPopularServiceService {
             throw new BadRequestException("Cook category is inactive");
         }
 
-        return getPopularServices(cookCategory.getId());
+        return popularServices(cookCategory.getId(), 0, 20);
     }
 
     @Transactional(readOnly = true)
     public List<CustomerPopularServiceResponse> getPopularCleaningServices() {
-        AdminCategoryEntity cleaningCategory = resolveCategory("cleaning");
+        AdminCategoryEntity cleaningCategory = resolveCategory(CATEGORY_CLEANING);
 
         if (!cleaningCategory.isActive()) {
             throw new BadRequestException("Cleaning category is inactive");
         }
 
-        return getPopularServices(cleaningCategory.getId());
+        return popularServices(cleaningCategory.getId(), 0, 20);
     }
 
     @Transactional(readOnly = true)
@@ -93,7 +98,7 @@ public class CustomerPopularServiceService {
         if (!category.isActive()) {
             throw new BadRequestException("Category is inactive");
         }
-        return getPopularServices(category.getId());
+        return popularServices(category.getId(), 0, 20);
     }
 
     private AdminCategoryEntity resolveCategory(String categoryKey) {
@@ -109,10 +114,10 @@ public class CustomerPopularServiceService {
                     "Cook category not found"
             );
         }
-        if (normalized.equals("cleaning")) {
+        if (normalized.equals(CATEGORY_CLEANING)) {
             return resolveByAliases(
                     List.of("Cleaning", "Cleaning at home", "Home Cleaning"),
-                    List.of("cleaning", "clean"),
+                    List.of(CATEGORY_CLEANING, "clean"),
                     "Cleaning category not found"
             );
         }

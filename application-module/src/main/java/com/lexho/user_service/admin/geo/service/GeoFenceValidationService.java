@@ -1,5 +1,6 @@
 package com.lexho.user_service.admin.geo.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.user_service.admin.geo.entity.ZoneEntity;
@@ -10,6 +11,8 @@ import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRe
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceabilityRuleRepository;
 import com.lexho.user_service.booking.exception.BookingValidationException;
 import com.lexho.user_service.lexho.entity.LexhoAddress;
+import com.lexho.user_service.util.GeoDistanceCalculator;
+import com.lexho.user_service.util.LexhoConstants;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -42,93 +45,115 @@ public class GeoFenceValidationService {
             return GeoResolution.notServiceable("MISSING_LOCATION_INPUT");
         }
 
-        List<RuleArea> candidateAreas = new ArrayList<>();
-        if (normalizedPincode != null) {
-            candidateAreas.addAll(fromRules(serviceabilityRuleRepository.findByPincodeAndActiveTrueAndDeletedFalse(normalizedPincode)));
-            if (candidateAreas.isEmpty()) {
-                candidateAreas.addAll(fromAreas(serviceableAreaRepository.findByPincodeAndActiveTrueAndDeletedFalse(normalizedPincode)));
-            }
-        }
-        if (candidateAreas.isEmpty() && normalizedCity != null) {
-            candidateAreas.addAll(fromRules(serviceabilityRuleRepository.findByCityIgnoreCaseAndActiveTrueAndDeletedFalse(normalizedCity)));
-            if (candidateAreas.isEmpty()) {
-                candidateAreas.addAll(fromAreas(serviceableAreaRepository.findByCityIgnoreCaseAndActiveTrueAndDeletedFalse(normalizedCity)));
-            }
-        }
-        if (candidateAreas.isEmpty() && lat != null && lng != null) {
-            candidateAreas.addAll(fromRules(serviceabilityRuleRepository.findByActiveTrueAndDeletedFalse()));
-            if (candidateAreas.isEmpty()) {
-                candidateAreas.addAll(fromAreas(serviceableAreaRepository.findByActiveTrueAndDeletedFalse()));
-            }
-        }
+        List<RuleArea> candidateAreas = candidateAreas(normalizedPincode, normalizedCity, lat, lng);
         if (candidateAreas.isEmpty()) {
             return GeoResolution.notServiceable("NO_MATCHING_SERVICEABLE_AREA");
         }
 
-        RuleArea matchedArea = null;
-        Long matchedZoneId = null;
-        Long matchedCityId = null;
+        AreaMatch match = findMatchingArea(candidateAreas, normalizedPincode, lat, lng);
+
+        if (!match.matched()) {
+            if (match.pincodeMatchedAreaExists()) {
+                return GeoResolution.notServiceable("PARTIAL_AREA_UNSUPPORTED");
+            }
+            return GeoResolution.notServiceable(match.rejectReason() == null ? "OUTSIDE_GEOFENCE" : match.rejectReason());
+        }
+
+        return GeoResolution.serviceable(
+                match.cityId(),
+                match.zoneId(),
+                clean(match.area().pincode())
+        );
+    }
+
+    private List<RuleArea> candidateAreas(String normalizedPincode, String normalizedCity, Double lat, Double lng) {
+        List<RuleArea> candidateAreas = candidateAreasByPincode(normalizedPincode);
+        if (candidateAreas.isEmpty()) {
+            candidateAreas.addAll(candidateAreasByCity(normalizedCity));
+        }
+        if (candidateAreas.isEmpty() && lat != null && lng != null) {
+            candidateAreas.addAll(candidateAreasByAnyActiveRuleOrArea());
+        }
+        return candidateAreas;
+    }
+
+    private List<RuleArea> candidateAreasByPincode(String normalizedPincode) {
+        if (normalizedPincode == null) {
+            return new ArrayList<>();
+        }
+        List<RuleArea> candidateAreas = fromRules(
+                serviceabilityRuleRepository.findByPincodeAndActiveTrueAndDeletedFalse(normalizedPincode));
+        return candidateAreas.isEmpty()
+                ? fromAreas(serviceableAreaRepository.findByPincodeAndActiveTrueAndDeletedFalse(normalizedPincode))
+                : candidateAreas;
+    }
+
+    private List<RuleArea> candidateAreasByCity(String normalizedCity) {
+        if (normalizedCity == null) {
+            return new ArrayList<>();
+        }
+        List<RuleArea> candidateAreas = fromRules(
+                serviceabilityRuleRepository.findByCityIgnoreCaseAndActiveTrueAndDeletedFalse(normalizedCity));
+        return candidateAreas.isEmpty()
+                ? fromAreas(serviceableAreaRepository.findByCityIgnoreCaseAndActiveTrueAndDeletedFalse(normalizedCity))
+                : candidateAreas;
+    }
+
+    private List<RuleArea> candidateAreasByAnyActiveRuleOrArea() {
+        List<RuleArea> candidateAreas = fromRules(serviceabilityRuleRepository.findByActiveTrueAndDeletedFalse());
+        return candidateAreas.isEmpty()
+                ? fromAreas(serviceableAreaRepository.findByActiveTrueAndDeletedFalse())
+                : candidateAreas;
+    }
+
+    private AreaMatch findMatchingArea(List<RuleArea> candidateAreas, String normalizedPincode, Double lat, Double lng) {
         String rejectReason = "OUTSIDE_GEOFENCE";
         boolean pincodeMatchedAreaExists = false;
 
         for (RuleArea area : candidateAreas) {
-            if (normalizedPincode != null && normalizedPincode.equals(clean(area.pincode()))) {
-                pincodeMatchedAreaExists = true;
+            pincodeMatchedAreaExists = pincodeMatchedAreaExists
+                    || pincodeMatches(normalizedPincode, area);
+            AreaFence fence = areaFence(area);
+            if (fence.empty()) {
+                return AreaMatch.matched(area, fence.zoneId(), fence.cityId(), pincodeMatchedAreaExists);
             }
-            Long areaZoneId = area.zoneId();
-            Long areaCityId = area.cityId();
-
-            List<List<double[]>> polygons = new ArrayList<>();
-            polygons.addAll(extractPolygons(area.polygonJson()));
-            List<CircleFence> circles = new ArrayList<>();
-            circles.addAll(extractCircles(area.polygonJson()));
-            if (areaZoneId != null) {
-                ZoneEntity zone = zoneRepository.findById(areaZoneId).orElse(null);
-                if (zone != null && !zone.isDeleted() && zone.isActive()) {
-                    polygons.addAll(extractPolygons(zone.getPolygonJson()));
-                    circles.addAll(extractCircles(zone.getPolygonJson()));
-                    if (areaCityId == null && zone.getCity() != null) {
-                        areaCityId = zone.getCity().getId();
-                    }
-                }
-            }
-
-            if (polygons.isEmpty() && circles.isEmpty()) {
-                matchedArea = area;
-                matchedZoneId = areaZoneId;
-                matchedCityId = areaCityId;
-                rejectReason = null;
-                break;
-            }
-
             if (lat == null || lng == null) {
                 rejectReason = "COORDINATES_REQUIRED_FOR_GEOFENCE";
                 continue;
             }
-
-            boolean inside = polygons.stream().anyMatch(poly -> isInsidePolygon(lat, lng, poly))
-                    || circles.stream().anyMatch(circle -> isInsideCircle(lat, lng, circle));
-            if (inside) {
-                matchedArea = area;
-                matchedZoneId = areaZoneId;
-                matchedCityId = areaCityId;
-                rejectReason = null;
-                break;
+            if (fence.contains(lat, lng)) {
+                return AreaMatch.matched(area, fence.zoneId(), fence.cityId(), pincodeMatchedAreaExists);
             }
         }
 
-        if (matchedArea == null) {
-            if (pincodeMatchedAreaExists) {
-                return GeoResolution.notServiceable("PARTIAL_AREA_UNSUPPORTED");
-            }
-            return GeoResolution.notServiceable(rejectReason == null ? "OUTSIDE_GEOFENCE" : rejectReason);
+        return AreaMatch.rejected(rejectReason, pincodeMatchedAreaExists);
+    }
+
+    private boolean pincodeMatches(String normalizedPincode, RuleArea area) {
+        return normalizedPincode != null && normalizedPincode.equals(clean(area.pincode()));
+    }
+
+    private AreaFence areaFence(RuleArea area) {
+        Long areaZoneId = area.zoneId();
+        Long areaCityId = area.cityId();
+        List<List<double[]>> polygons = new ArrayList<>(extractPolygons(area.polygonJson()));
+        List<CircleFence> circles = new ArrayList<>(extractCircles(area.polygonJson()));
+
+        if (areaZoneId == null) {
+            return new AreaFence(areaZoneId, areaCityId, polygons, circles);
         }
 
-        return GeoResolution.serviceable(
-                matchedCityId,
-                matchedZoneId,
-                clean(matchedArea.pincode())
-        );
+        ZoneEntity zone = zoneRepository.findById(areaZoneId).orElse(null);
+        if (zone == null || zone.isDeleted() || !zone.isActive()) {
+            return new AreaFence(areaZoneId, areaCityId, polygons, circles);
+        }
+
+        polygons.addAll(extractPolygons(zone.getPolygonJson()));
+        circles.addAll(extractCircles(zone.getPolygonJson()));
+        if (areaCityId == null && zone.getCity() != null) {
+            areaCityId = zone.getCity().getId();
+        }
+        return new AreaFence(areaZoneId, areaCityId, polygons, circles);
     }
 
     public void validateBookingAddress(LexhoAddress address) {
@@ -159,16 +184,7 @@ public class GeoFenceValidationService {
                     "Saved address coordinates are missing. Send latitude/longitude in booking request or update the saved address.");
         }
 
-        List<List<double[]>> polygons = new ArrayList<>();
-        for (ServiceableAreaEntity area : candidateAreas) {
-            polygons.addAll(extractPolygons(area.getPolygonJson()));
-            if (area.getZoneId() != null) {
-                ZoneEntity zone = zoneRepository.findById(area.getZoneId()).orElse(null);
-                if (zone != null && !zone.isDeleted() && zone.isActive()) {
-                    polygons.addAll(extractPolygons(zone.getPolygonJson()));
-                }
-            }
-        }
+        List<List<double[]>> polygons = bookingPolygons(candidateAreas);
 
         if (polygons.isEmpty()) {
             // No polygon configured yet for this area; keep serviceability by area match.
@@ -182,6 +198,26 @@ public class GeoFenceValidationService {
         }
     }
 
+    private List<List<double[]>> bookingPolygons(List<ServiceableAreaEntity> candidateAreas) {
+        List<List<double[]>> polygons = new ArrayList<>();
+        for (ServiceableAreaEntity area : candidateAreas) {
+            polygons.addAll(extractPolygons(area.getPolygonJson()));
+            polygons.addAll(activeZonePolygons(area.getZoneId()));
+        }
+        return polygons;
+    }
+
+    private List<List<double[]>> activeZonePolygons(Long zoneId) {
+        if (zoneId == null) {
+            return List.of();
+        }
+        ZoneEntity zone = zoneRepository.findById(zoneId).orElse(null);
+        if (zone == null || zone.isDeleted() || !zone.isActive()) {
+            return List.of();
+        }
+        return extractPolygons(zone.getPolygonJson());
+    }
+
     private List<List<double[]>> extractPolygons(String polygonJson) {
         List<List<double[]>> polygons = new ArrayList<>();
         if (polygonJson == null || polygonJson.isBlank()) {
@@ -190,7 +226,7 @@ public class GeoFenceValidationService {
         try {
             JsonNode root = objectMapper.readTree(polygonJson);
             collectPolygons(root, polygons);
-        } catch (Exception ignored) {
+        } catch (JsonProcessingException ignored) {
             // Invalid polygon JSON should not crash booking flow.
         }
         return polygons;
@@ -204,7 +240,7 @@ public class GeoFenceValidationService {
         try {
             JsonNode root = objectMapper.readTree(polygonJson);
             collectCircles(root, circles);
-        } catch (Exception ignored) {
+        } catch (JsonProcessingException ignored) {
             // Keep tolerant parsing.
         }
         return circles;
@@ -215,27 +251,7 @@ public class GeoFenceValidationService {
             return;
         }
         if (node.isObject()) {
-            JsonNode type = node.get("type");
-            if (type != null && "Circle".equalsIgnoreCase(type.asText())) {
-                Double radius = parseDoubleNode(node.get("radiusMeters"));
-                JsonNode center = node.get("center");
-                if (center != null && center.isArray() && center.size() >= 2) {
-                    Double centerLng = parseDoubleNode(center.get(0));
-                    Double centerLat = parseDoubleNode(center.get(1));
-                    if (centerLat != null && centerLng != null && radius != null && radius > 0) {
-                        out.add(new CircleFence(centerLat, centerLng, radius));
-                    }
-                }
-            } else if (type != null && "Feature".equalsIgnoreCase(type.asText())) {
-                collectCircles(node.get("geometry"), out);
-            } else if (type != null && "FeatureCollection".equalsIgnoreCase(type.asText())) {
-                JsonNode features = node.get("features");
-                if (features != null && features.isArray()) {
-                    for (JsonNode feature : features) {
-                        collectCircles(feature, out);
-                    }
-                }
-            }
+            collectCirclesFromObject(node, out);
             return;
         }
         if (node.isArray()) {
@@ -245,40 +261,95 @@ public class GeoFenceValidationService {
         }
     }
 
+    private void collectCirclesFromObject(JsonNode node, List<CircleFence> out) {
+        String type = geoJsonType(node);
+        if ("Circle".equalsIgnoreCase(type)) {
+            addCircleFence(node, out);
+        } else if ("Feature".equalsIgnoreCase(type)) {
+            collectCircles(node.get("geometry"), out);
+        } else if ("FeatureCollection".equalsIgnoreCase(type)) {
+            collectCircleFeatures(node.get("features"), out);
+        }
+    }
+
+    private void addCircleFence(JsonNode node, List<CircleFence> out) {
+        Double radius = parseDoubleNode(node.get("radiusMeters"));
+        JsonNode center = node.get("center");
+        if (center == null || !center.isArray() || center.size() < 2) {
+            return;
+        }
+        Double centerLng = parseDoubleNode(center.get(0));
+        Double centerLat = parseDoubleNode(center.get(1));
+        if (centerLat != null && centerLng != null && radius != null && radius > 0) {
+            out.add(new CircleFence(centerLat, centerLng, radius));
+        }
+    }
+
+    private void collectCircleFeatures(JsonNode features, List<CircleFence> out) {
+        if (features == null || !features.isArray()) {
+            return;
+        }
+        for (JsonNode feature : features) {
+            collectCircles(feature, out);
+        }
+    }
+
     private void collectPolygons(JsonNode node, List<List<double[]>> out) {
         if (node == null || node.isNull()) {
             return;
         }
         if (node.isObject()) {
-            JsonNode type = node.get("type");
-            if (type != null && "Polygon".equalsIgnoreCase(type.asText())) {
-                JsonNode coordinates = node.get("coordinates");
-                extractPolygonCoordinates(coordinates, out);
-            } else if (type != null && "Feature".equalsIgnoreCase(type.asText())) {
-                collectPolygons(node.get("geometry"), out);
-            } else if (type != null && "FeatureCollection".equalsIgnoreCase(type.asText())) {
-                JsonNode features = node.get("features");
-                if (features != null && features.isArray()) {
-                    for (JsonNode feature : features) {
-                        collectPolygons(feature, out);
-                    }
-                }
-            } else if (node.has("coordinates")) {
-                extractPolygonCoordinates(node.get("coordinates"), out);
-            }
+            collectPolygonsFromObject(node, out);
             return;
         }
         if (node.isArray()) {
-            // Raw array support: either [[[lng,lat]...]] or [[lng,lat]...]
-            if (node.size() > 0 && node.get(0).isArray() && node.get(0).size() > 0 && node.get(0).get(0).isArray()) {
-                extractPolygonCoordinates(node, out);
-            } else {
-                List<double[]> ring = extractRing(node);
-                if (ring.size() >= 3) {
-                    out.add(ring);
-                }
-            }
+            collectPolygonArray(node, out);
         }
+    }
+
+    private void collectPolygonsFromObject(JsonNode node, List<List<double[]>> out) {
+        String type = geoJsonType(node);
+        if ("Polygon".equalsIgnoreCase(type)) {
+            extractPolygonCoordinates(node.get(LexhoConstants.FIELD_COORDINATES), out);
+        } else if ("Feature".equalsIgnoreCase(type)) {
+            collectPolygons(node.get("geometry"), out);
+        } else if ("FeatureCollection".equalsIgnoreCase(type)) {
+            collectPolygonFeatures(node.get("features"), out);
+        } else if (node.has(LexhoConstants.FIELD_COORDINATES)) {
+            extractPolygonCoordinates(node.get(LexhoConstants.FIELD_COORDINATES), out);
+        }
+    }
+
+    private void collectPolygonFeatures(JsonNode features, List<List<double[]>> out) {
+        if (features == null || !features.isArray()) {
+            return;
+        }
+        for (JsonNode feature : features) {
+            collectPolygons(feature, out);
+        }
+    }
+
+    private void collectPolygonArray(JsonNode node, List<List<double[]>> out) {
+        if (isPolygonCoordinateArray(node)) {
+            extractPolygonCoordinates(node, out);
+            return;
+        }
+        List<double[]> ring = extractRing(node);
+        if (ring.size() >= 3) {
+            out.add(ring);
+        }
+    }
+
+    private boolean isPolygonCoordinateArray(JsonNode node) {
+        return node.size() > 0
+                && node.get(0).isArray()
+                && node.get(0).size() > 0
+                && node.get(0).get(0).isArray();
+    }
+
+    private String geoJsonType(JsonNode node) {
+        JsonNode type = node.get("type");
+        return type == null ? null : type.asText();
     }
 
     private void extractPolygonCoordinates(JsonNode coordinates, List<List<double[]>> out) {
@@ -310,7 +381,7 @@ public class GeoFenceValidationService {
         return ring;
     }
 
-    private boolean isInsidePolygon(double lat, double lng, List<double[]> polygon) {
+    private static boolean isPointInsidePolygon(double lat, double lng, List<double[]> polygon) {
         boolean inside = false;
         int n = polygon.size();
         for (int i = 0, j = n - 1; i < n; j = i++) {
@@ -328,19 +399,12 @@ public class GeoFenceValidationService {
         return inside;
     }
 
-    private boolean isInsideCircle(double lat, double lng, CircleFence circle) {
-        return haversineMeters(lat, lng, circle.centerLat, circle.centerLng) <= circle.radiusMeters;
+    private boolean isInsidePolygon(double lat, double lng, List<double[]> polygon) {
+        return isPointInsidePolygon(lat, lng, polygon);
     }
 
-    private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
-        final double earthRadius = 6371000.0d;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadius * c;
+    private boolean isInsideCircle(double lat, double lng, CircleFence circle) {
+        return GeoDistanceCalculator.haversineMeters(lat, lng, circle.centerLat, circle.centerLng) <= circle.radiusMeters;
     }
 
     private Double parseDoubleNode(JsonNode node) {
@@ -365,11 +429,7 @@ public class GeoFenceValidationService {
     }
 
     private String clean(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return AdminGeoText.clean(value);
     }
 
     private List<RuleArea> fromRules(List<ServiceabilityRuleEntity> rules) {
@@ -433,6 +493,33 @@ public class GeoFenceValidationService {
     }
 
     private record CircleFence(double centerLat, double centerLng, double radiusMeters) {
+    }
+
+    private record AreaFence(Long zoneId, Long cityId, List<List<double[]>> polygons, List<CircleFence> circles) {
+        private boolean empty() {
+            return polygons.isEmpty() && circles.isEmpty();
+        }
+
+        private boolean contains(double lat, double lng) {
+            return polygons.stream().anyMatch(poly -> GeoFenceValidationService.isPointInsidePolygon(lat, lng, poly))
+                    || circles.stream().anyMatch(circle -> GeoDistanceCalculator.haversineMeters(
+                    lat, lng, circle.centerLat, circle.centerLng) <= circle.radiusMeters);
+        }
+    }
+
+    private record AreaMatch(RuleArea area, Long zoneId, Long cityId, String rejectReason,
+                             boolean pincodeMatchedAreaExists) {
+        private static AreaMatch matched(RuleArea area, Long zoneId, Long cityId, boolean pincodeMatchedAreaExists) {
+            return new AreaMatch(area, zoneId, cityId, null, pincodeMatchedAreaExists);
+        }
+
+        private static AreaMatch rejected(String rejectReason, boolean pincodeMatchedAreaExists) {
+            return new AreaMatch(null, null, null, rejectReason, pincodeMatchedAreaExists);
+        }
+
+        private boolean matched() {
+            return area != null;
+        }
     }
 
     private record RuleArea(String pincode, Long cityId, Long zoneId, String polygonJson) {

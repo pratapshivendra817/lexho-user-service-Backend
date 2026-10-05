@@ -28,6 +28,9 @@ public class SupportFaq {
     @Column(name = "display_order", nullable = false)
     private Integer displayOrder;
 
+    @Column(name = "user_type", nullable = false, length = 30)
+    private String userType = "GENERAL";
+
     @Column(nullable = false)
     private boolean active = true;
 
@@ -101,6 +104,14 @@ public class SupportFaq {
         this.active = active;
     }
 
+    public String getUserType() {
+        return userType;
+    }
+
+    public void setUserType(String userType) {
+        this.userType = userType;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -109,4 +120,3 @@ public class SupportFaq {
         return updatedAt;
     }
 }
-

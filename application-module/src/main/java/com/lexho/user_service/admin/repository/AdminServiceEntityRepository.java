@@ -36,6 +36,8 @@ public interface AdminServiceEntityRepository extends JpaRepository<AdminService
                                            Pageable pageable);
 
     Optional<AdminServiceEntity> findByIdAndDeletedFalse(Long id);
+    Optional<AdminServiceEntity> findFirstByDeletedFalseAndActiveTrueAndNameIgnoreCase(String name);
+    Optional<AdminServiceEntity> findFirstByDeletedFalseAndActiveTrueAndServiceTypeIgnoreCase(String serviceType);
     Page<AdminServiceEntity> findByDeletedFalseAndActiveTrue(Pageable pageable);
 
     @Query("""
@@ -51,11 +53,35 @@ public interface AdminServiceEntityRepository extends JpaRepository<AdminService
                 WHEN LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) THEN 3
                 ELSE 4
               END,
-              s.name ASC
+              s.name ASC,
+              s.id ASC
             """)
     Page<AdminServiceEntity> searchActiveCatalogForCustomer(@Param("search") String search, Pageable pageable);
 
+    @Query("""
+            SELECT s FROM AdminServiceEntity s
+            LEFT JOIN s.category c
+            WHERE s.deleted = false
+              AND s.active = true
+              AND (:categoryId IS NULL OR c.id = :categoryId)
+              AND (:search IS NULL OR :search = '' OR LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')))
+            ORDER BY
+              CASE
+                WHEN :search IS NULL OR :search = '' THEN 4
+                WHEN LOWER(s.name) = LOWER(:search) THEN 1
+                WHEN LOWER(s.name) LIKE LOWER(CONCAT(:search, '%')) THEN 2
+                WHEN LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) THEN 3
+                ELSE 4
+              END,
+              s.name ASC,
+              s.id ASC
+            """)
+    Page<AdminServiceEntity> searchActiveCatalogForPartner(@Param("categoryId") Long categoryId,
+                                                           @Param("search") String search,
+                                                           Pageable pageable);
+
     List<AdminServiceEntity> findByCategory_IdAndDeletedFalse(Long categoryId);
+    List<AdminServiceEntity> findByCategory_IdAndDeletedFalseAndActiveTrueOrderByNameAsc(Long categoryId);
     List<AdminServiceEntity> findByDeletedFalseAndActiveTrue();
     long countByDeletedFalse();
     long countByDeletedFalseAndActiveTrue();

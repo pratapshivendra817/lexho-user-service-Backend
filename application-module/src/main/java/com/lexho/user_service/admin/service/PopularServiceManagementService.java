@@ -11,6 +11,7 @@ import com.lexho.user_service.admin.repository.PopularServiceView;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.security.SecurityUtils;
+import com.lexho.user_service.util.LexhoConstants;
 import com.lexho.user_service.util.MediaUrlResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,7 +83,7 @@ public class PopularServiceManagementService {
             entity.setDeletedBy(null);
             entity.setDeleteReason(null);
             saved = popularServiceRepository.save(entity);
-            audit("POPULAR_SERVICE_CREATE", "popular_services", saved.getId(),
+            audit("POPULAR_SERVICE_CREATE", LexhoConstants.TABLE_POPULAR_SERVICES, saved.getId(),
                     "serviceId=" + service.getId() + ",categoryId=" + category.getId() + ",priority=" + request.getPriority());
             log.info("Popular service added: popularServiceId={}, serviceId={}, categoryId={}, priority={}",
                     saved.getId(), service.getId(), category.getId(), saved.getPriority());
@@ -117,7 +118,7 @@ public class PopularServiceManagementService {
         entity.setDeletedBy(actorId);
         entity.setDeleteReason(normalizeDeleteReason(deleteReason));
         popularServiceRepository.save(entity);
-        audit("POPULAR_SERVICE_DELETE", "popular_services", id,
+        audit("POPULAR_SERVICE_DELETE", LexhoConstants.TABLE_POPULAR_SERVICES, id,
                 "softDeactivate=true,deletedBy=" + actorId + ",deleteReason=" + normalizeDeleteReason(deleteReason));
         log.info("Popular service deactivated: popularServiceId={}, deletedBy={}", id, actorId);
         return new AdminMessageResponse("Popular service deleted successfully");
@@ -174,7 +175,7 @@ public class PopularServiceManagementService {
         existingPair.setDeletedBy(null);
         existingPair.setDeleteReason(null);
         PopularServiceEntity saved = popularServiceRepository.save(existingPair);
-        audit(auditAction, "popular_services", saved.getId(),
+        audit(auditAction, LexhoConstants.TABLE_POPULAR_SERVICES, saved.getId(),
                 "serviceId=" + saved.getService().getId() + ",categoryId=" + saved.getCategory().getId() + ",priority=" + saved.getPriority());
         return saved;
     }

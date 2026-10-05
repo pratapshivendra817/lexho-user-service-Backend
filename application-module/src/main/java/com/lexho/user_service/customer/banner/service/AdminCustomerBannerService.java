@@ -11,6 +11,7 @@ import com.lexho.user_service.customer.banner.repository.CustomerBannerRepositor
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.util.MediaUrlResolver;
+import com.lexho.user_service.util.StringSanitizers;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
@@ -147,10 +148,6 @@ public class AdminCustomerBannerService {
     }
 
     private String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return StringSanitizers.trimToNull(value);
     }
 }

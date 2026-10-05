@@ -4,18 +4,15 @@ import com.lexho.user_service.emergency.entity.EmergencyContact;
 import com.lexho.user_service.emergency.entity.EmergencyEvent;
 import com.lexho.user_service.emergency.entity.EmergencyLocation;
 import com.lexho.user_service.notification.config.NotificationChannelProperties;
+import com.lexho.user_service.notification.service.SmsGatewayRequestFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.lang.Nullable;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -68,18 +65,11 @@ public class EmergencyExternalContactNotifier {
             return false;
         }
 
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("to", contact.getPhoneNumber().trim());
-        payload.put("message", smsMessage(event, location));
-        payload.put("title", "Lexho SOS");
-        payload.put("senderId", properties.getSms().getSenderId());
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        if (properties.getSms().getAuthToken() != null && !properties.getSms().getAuthToken().isBlank()) {
-            headers.setBearerAuth(properties.getSms().getAuthToken().trim());
-        }
-        restTemplate.postForEntity(gatewayUrl.trim(), new HttpEntity<>(payload, headers), String.class);
+        restTemplate.postForEntity(
+                gatewayUrl.trim(),
+                SmsGatewayRequestFactory.create(contact.getPhoneNumber(), smsMessage(event, location), "Lexho SOS",
+                        properties.getSms()),
+                String.class);
         return true;
     }
 

@@ -14,6 +14,8 @@ public class AdminServiceResponse {
     private String serviceType;
     private BigDecimal basePrice;
     private Integer durationMinutes;
+    private BigDecimal commissionPercent;
+    private boolean reviewEnabled;
     private Double rating;
     private boolean active;
     private long totalBookings;
@@ -84,6 +86,22 @@ public class AdminServiceResponse {
 
     public void setDurationMinutes(Integer durationMinutes) {
         this.durationMinutes = durationMinutes;
+    }
+
+    public BigDecimal getCommissionPercent() {
+        return commissionPercent;
+    }
+
+    public void setCommissionPercent(BigDecimal commissionPercent) {
+        this.commissionPercent = commissionPercent;
+    }
+
+    public boolean isReviewEnabled() {
+        return reviewEnabled;
+    }
+
+    public void setReviewEnabled(boolean reviewEnabled) {
+        this.reviewEnabled = reviewEnabled;
     }
 
     public Double getRating() {

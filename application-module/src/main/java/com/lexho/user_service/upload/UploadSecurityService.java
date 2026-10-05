@@ -1,6 +1,7 @@
 package com.lexho.user_service.upload;
 
 import com.lexho.user_service.exception.FileUploadException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -13,7 +14,8 @@ import java.util.Set;
 @Service
 public class UploadSecurityService {
 
-    private static final long MAX_FILE_SIZE_BYTES = 5L * 1024L * 1024L;
+    private static final long DEFAULT_MAX_FILE_SIZE_BYTES = 25L * 1024L * 1024L;
+    private static final long BYTES_PER_MB = 1024L * 1024L;
     private static final Set<String> IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png");
     private static final Set<String> DOCUMENT_EXTENSIONS = Set.of("jpg", "jpeg", "png", "pdf");
     private static final Map<String, Set<String>> EXTENSION_MIME_TYPES = Map.of(
@@ -22,6 +24,9 @@ public class UploadSecurityService {
             "png", Set.of("image/png"),
             "pdf", Set.of("application/pdf")
     );
+
+    @Value("${app.upload.max-file-size-bytes:" + DEFAULT_MAX_FILE_SIZE_BYTES + "}")
+    private long maxFileSizeBytes = DEFAULT_MAX_FILE_SIZE_BYTES;
 
     public String validateImage(MultipartFile file) {
         return validate(file, IMAGE_EXTENSIONS);
@@ -35,8 +40,9 @@ public class UploadSecurityService {
         if (file == null || file.isEmpty()) {
             throw new FileUploadException("INVALID_FILE_TYPE", "File is required");
         }
-        if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            throw new FileUploadException("FILE_TOO_LARGE", "File size must be 5 MB or less");
+        if (file.getSize() > maxFileSizeBytes) {
+            throw new FileUploadException("FILE_TOO_LARGE",
+                    "File size must be " + maxFileSizeMegabytes() + " MB or less");
         }
         String originalName = file.getOriginalFilename();
         if (originalName == null || originalName.isBlank()) {
@@ -110,6 +116,10 @@ public class UploadSecurityService {
         return text.contains("EICAR-STANDARD-ANTIVIRUS-TEST-FILE");
     }
 
+    private long maxFileSizeMegabytes() {
+        return Math.max(1L, maxFileSizeBytes / BYTES_PER_MB);
+    }
+
     private record MultipartFileNameOnly(String name) implements MultipartFile {
         @Override public String getName() { return "file"; }
         @Override public String getOriginalFilename() { return name; }
@@ -118,6 +128,8 @@ public class UploadSecurityService {
         @Override public long getSize() { return 0; }
         @Override public byte[] getBytes() { return new byte[0]; }
         @Override public InputStream getInputStream() { return InputStream.nullInputStream(); }
-        @Override public void transferTo(java.io.File dest) { }
+        @Override public void transferTo(java.io.File dest) {
+            // This name-only placeholder has no bytes to transfer.
+        }
     }
 }

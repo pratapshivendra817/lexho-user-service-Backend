@@ -9,9 +9,12 @@ import com.lexho.user_service.notification.dto.NotificationPageResponse;
 import com.lexho.user_service.notification.dto.NotificationResponse;
 import com.lexho.user_service.notification.dto.NotificationSendResponse;
 import com.lexho.user_service.notification.dto.NotificationStatsResponse;
+import com.lexho.user_service.notification.dto.NotificationTemplateRequest;
+import com.lexho.user_service.notification.dto.NotificationTemplateResponse;
 import com.lexho.user_service.notification.exception.NotificationValidationException;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.notification.service.NotificationRealtimeService;
+import com.lexho.user_service.notification.service.NotificationTemplateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -30,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Locale;
+import java.util.Optional;
 
 @RestController
 @RequestMapping({"/api/admin/notifications", "/api/v1/admin/notifications"})
@@ -40,12 +44,24 @@ public class AdminNotificationController {
     private static final Logger log = LoggerFactory.getLogger(AdminNotificationController.class);
 
     private final NotificationManagementService notificationManagementService;
-
-    @Autowired(required = false)
-    private NotificationRealtimeService notificationRealtimeService;
+    private final NotificationTemplateService notificationTemplateService;
+    private final NotificationRealtimeService notificationRealtimeService;
 
     public AdminNotificationController(NotificationManagementService notificationManagementService) {
+        this(notificationManagementService, Optional.empty(), Optional.empty());
+    }
+
+    @Autowired
+    public AdminNotificationController(NotificationManagementService notificationManagementService,
+                                       Optional<NotificationTemplateService> notificationTemplateService,
+                                       Optional<NotificationRealtimeService> notificationRealtimeService) {
         this.notificationManagementService = notificationManagementService;
+        this.notificationTemplateService = optionalValue(notificationTemplateService);
+        this.notificationRealtimeService = optionalValue(notificationRealtimeService);
+    }
+
+    private static <T> T optionalValue(Optional<T> optional) {
+        return optional == null ? null : optional.orElse(null);
     }
 
     @PostMapping("/send")
@@ -101,6 +117,25 @@ public class AdminNotificationController {
     @Operation(summary = "Get notification dashboard stats")
     public ResponseEntity<NotificationStatsResponse> stats() {
         return ResponseEntity.ok(notificationManagementService.getStats());
+    }
+
+    @GetMapping("/templates")
+    @Operation(summary = "List notification templates")
+    public ResponseEntity<java.util.List<NotificationTemplateResponse>> templates() {
+        if (notificationTemplateService == null) {
+            return ResponseEntity.ok(java.util.List.of());
+        }
+        return ResponseEntity.ok(notificationTemplateService.list());
+    }
+
+    @PostMapping("/templates")
+    @Operation(summary = "Create or update notification template")
+    public ResponseEntity<NotificationTemplateResponse> upsertTemplate(
+            @Valid @RequestBody NotificationTemplateRequest request) {
+        if (notificationTemplateService == null) {
+            throw new NotificationValidationException("Notification template management is not available");
+        }
+        return ResponseEntity.ok(notificationTemplateService.upsert(request));
     }
 
     @GetMapping("/stream")

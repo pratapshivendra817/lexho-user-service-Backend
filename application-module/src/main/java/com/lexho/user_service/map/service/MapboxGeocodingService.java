@@ -37,38 +37,27 @@ public class MapboxGeocodingService {
             if (!(featureObj instanceof Map feature)) {
                 continue;
             }
-            MapboxGeocodeItem item = new MapboxGeocodeItem();
-            Object placeName = feature.get("place_name");
-            if (placeName instanceof String s) {
-                item.placeName = s;
-            }
-            Object centerObj = feature.get("center");
-            if (centerObj instanceof List<?> center && center.size() >= 2) {
-                item.longitude = toDouble(center.get(0));
-                item.latitude = toDouble(center.get(1));
-            }
-            Object contextObj = feature.get("context");
-            if (contextObj instanceof List<?> contexts) {
-                for (Object contextItem : contexts) {
-                    if (!(contextItem instanceof Map context)) {
-                        continue;
-                    }
-                    String id = context.get("id") instanceof String v ? v : "";
-                    String text = context.get("text") instanceof String v ? v : null;
-                    if (id.startsWith("place.")) {
-                        item.city = text;
-                    } else if (id.startsWith("region.")) {
-                        item.state = text;
-                    } else if (id.startsWith("country.")) {
-                        item.country = text;
-                    } else if (id.startsWith("postcode.")) {
-                        item.pincode = text;
-                    }
-                }
-            }
-            response.results.add(item);
+            response.results.add(toGeocodeItem(feature));
         }
         return response;
+    }
+
+    private MapboxGeocodeItem toGeocodeItem(Map feature) {
+        MapboxGeocodeItem item = new MapboxGeocodeItem();
+        Object placeName = feature.get("place_name");
+        if (placeName instanceof String s) {
+            item.placeName = s;
+        }
+        Object centerObj = feature.get("center");
+        if (centerObj instanceof List<?> center && center.size() >= 2) {
+            item.longitude = toDouble(center.get(0));
+            item.latitude = toDouble(center.get(1));
+        }
+        Object contextObj = feature.get("context");
+        if (contextObj instanceof List<?> contexts) {
+            applyContexts(item, contexts);
+        }
+        return item;
     }
 
     private Double toDouble(Object value) {
@@ -83,5 +72,27 @@ public class MapboxGeocodingService {
             }
         }
         return null;
+    }
+
+    private void applyContexts(MapboxGeocodeItem item, List<?> contexts) {
+        for (Object contextItem : contexts) {
+            if (contextItem instanceof Map context) {
+                applyContext(item, context);
+            }
+        }
+    }
+
+    private void applyContext(MapboxGeocodeItem item, Map context) {
+        String id = context.get("id") instanceof String value ? value : "";
+        String text = context.get("text") instanceof String value ? value : null;
+        if (id.startsWith("place.")) {
+            item.city = text;
+        } else if (id.startsWith("region.")) {
+            item.state = text;
+        } else if (id.startsWith("country.")) {
+            item.country = text;
+        } else if (id.startsWith("postcode.")) {
+            item.pincode = text;
+        }
     }
 }

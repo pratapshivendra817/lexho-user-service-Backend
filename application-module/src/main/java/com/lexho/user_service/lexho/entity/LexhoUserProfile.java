@@ -4,14 +4,20 @@ import com.lexho.common.enums.Role;
 import jakarta.persistence.*;
 
 @Entity
-@Table(name = "lexho_user_profiles")
+@Table(
+        name = "lexho_user_profiles",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uq_lexho_user_profiles_mobile_role",
+                columnNames = {"mobile", "role"}
+        )
+)
 public class LexhoUserProfile {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 15)
+    @Column(nullable = false, length = 15)
     private String mobile;
 
     @Column(length = 120)

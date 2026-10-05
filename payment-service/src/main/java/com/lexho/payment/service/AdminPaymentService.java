@@ -2,6 +2,7 @@ package com.lexho.payment.service;
 
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.booking.service.OrderLifecycleService;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
 import com.lexho.payment.dto.AdminPaymentDashboardResponse;
@@ -22,6 +23,7 @@ import com.lexho.payment.repository.PaymentTransactionRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,22 +35,31 @@ import java.util.List;
 @Service
 public class AdminPaymentService {
 
+    private static final String BOOKING_NOT_FOUND = "Booking not found";
+    private static final String PAYMENT_TRANSACTION_NOT_FOUND = "Payment transaction not found";
+
     private final OrderRepository orderRepository;
     private final PaymentTransactionRepository transactionRepository;
     private final PaymentRefundRepository refundRepository;
     private final RazorpayGateway gateway;
     private final ApplicationEventPublisher eventPublisher;
+    private final OrderLifecycleService orderLifecycleService;
+    private final AdminPaymentService self;
 
     public AdminPaymentService(OrderRepository orderRepository,
                                PaymentTransactionRepository transactionRepository,
                                PaymentRefundRepository refundRepository,
                                RazorpayGateway gateway,
-                               ApplicationEventPublisher eventPublisher) {
+                               ApplicationEventPublisher eventPublisher,
+                               OrderLifecycleService orderLifecycleService,
+                               @Lazy AdminPaymentService self) {
         this.orderRepository = orderRepository;
         this.transactionRepository = transactionRepository;
         this.refundRepository = refundRepository;
         this.gateway = gateway;
         this.eventPublisher = eventPublisher;
+        this.orderLifecycleService = orderLifecycleService;
+        this.self = self == null ? this : self;
     }
 
     @Transactional(readOnly = true)
@@ -117,9 +128,9 @@ public class AdminPaymentService {
                         bookingId,
                         List.of(PaymentTransactionStatus.PAID, PaymentTransactionStatus.REFUNDED)
                 )
-                .orElseThrow(() -> new PaymentException("Payment transaction not found"));
+                .orElseThrow(() -> new PaymentException(PAYMENT_TRANSACTION_NOT_FOUND));
         PaymentTransaction transaction = transactionRepository.findByIdForUpdate(latest.getId())
-                .orElseThrow(() -> new PaymentException("Payment transaction not found"));
+                .orElseThrow(() -> new PaymentException(PAYMENT_TRANSACTION_NOT_FOUND));
         if (transaction.getPaymentStatus() != PaymentTransactionStatus.PAID
                 && transaction.getPaymentStatus() != PaymentTransactionStatus.REFUNDED) {
             throw new PaymentException("Only captured payments can be refunded");
@@ -173,7 +184,7 @@ public class AdminPaymentService {
     @Transactional
     public AdminPaymentReconciliationResponse reconcileLatest(Long bookingId) {
         PaymentTransaction transaction = transactionRepository.findTopByBookingIdOrderByCreatedAtDesc(bookingId)
-                .orElseThrow(() -> new PaymentException("Payment transaction not found"));
+                .orElseThrow(() -> new PaymentException(PAYMENT_TRANSACTION_NOT_FOUND));
         requireText(transaction.getRazorpayPaymentId(), "Razorpay payment ID is missing");
         RazorpayGateway.RazorpayPayment payment = gateway.fetchPayment(transaction.getRazorpayPaymentId());
         if (!transaction.getRazorpayOrderId().equals(payment.orderId())) {
@@ -183,6 +194,7 @@ public class AdminPaymentService {
             throw new PaymentException("Razorpay payment amount does not match booking amount");
         }
         if (payment.isCaptured()) {
+            boolean newlyPaid = transaction.getPaymentStatus() != PaymentTransactionStatus.PAID;
             transaction.setPaymentStatus(PaymentTransactionStatus.PAID);
             transaction.setFailureReason(null);
             if (transaction.getPaidAt() == null) {
@@ -190,15 +202,20 @@ public class AdminPaymentService {
             }
             transactionRepository.save(transaction);
             Order booking = orderRepository.findByIdForUpdate(bookingId)
-                    .orElseThrow(() -> new PaymentException("Booking not found"));
+                    .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
             booking.setPaymentStatus(PaymentStatus.SUCCESS);
             if (booking.getStatus() == OrderStatus.CREATED) {
-                booking.setStatus(OrderStatus.CONFIRMED);
+                orderRepository.save(booking);
+                booking = orderLifecycleService.transitionIfCurrent(
+                        booking.getId(), OrderStatus.CREATED, OrderStatus.CONFIRMED);
+            } else {
+                orderRepository.save(booking);
             }
-            orderRepository.save(booking);
-            eventPublisher.publishEvent(new PaymentCapturedEvent(booking.getId()));
+            if (newlyPaid) {
+                eventPublisher.publishEvent(new PaymentCapturedEvent(booking.getId()));
+            }
         }
-        return reconciliation(bookingId);
+        return self.reconciliation(bookingId);
     }
 
     private void updateBookingAfterProcessedRefund(PaymentTransaction transaction) {
@@ -212,14 +229,14 @@ public class AdminPaymentService {
         transaction.setPaymentStatus(PaymentTransactionStatus.REFUNDED);
         transactionRepository.save(transaction);
         Order booking = orderRepository.findByIdForUpdate(transaction.getBookingId())
-                .orElseThrow(() -> new PaymentException("Booking not found"));
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
         booking.setPaymentStatus(PaymentStatus.REFUNDED);
         orderRepository.save(booking);
     }
 
     private Order findBooking(Long bookingId) {
         return orderRepository.findById(bookingId)
-                .orElseThrow(() -> new PaymentException("Booking not found"));
+                .orElseThrow(() -> new PaymentException(BOOKING_NOT_FOUND));
     }
 
     private AdminPaymentTransactionResponse toTransactionResponse(PaymentTransaction transaction) {

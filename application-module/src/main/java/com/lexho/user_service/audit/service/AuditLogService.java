@@ -3,6 +3,7 @@ package com.lexho.user_service.audit.service;
 import com.lexho.user_service.audit.entity.AuditLog;
 import com.lexho.user_service.audit.repository.AuditLogRepository;
 import com.lexho.user_service.security.SecurityUtils;
+import com.lexho.user_service.util.StringSanitizers;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -26,6 +27,19 @@ public class AuditLogService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void log(Long actorId, String actorRole, String action, String entityType, String entityId,
                     String oldValue, String newValue) {
+        saveLog(actorId, actorRole, action, entityType, entityId, oldValue, newValue);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void log(Long userId, Long partnerId, Long bookingId, String action, String oldValue, String newValue) {
+        Long actorId = userId != null ? userId : partnerId;
+        String actorRole = userId != null ? "CUSTOMER" : partnerId != null ? "PARTNER" : "SYSTEM";
+        saveLog(actorId, actorRole, action, "BOOKING", bookingId == null ? null : bookingId.toString(), oldValue,
+                newValue);
+    }
+
+    private void saveLog(Long actorId, String actorRole, String action, String entityType, String entityId,
+                         String oldValue, String newValue) {
         AuditLog log = new AuditLog();
         log.setActorId(actorId);
         log.setActorRole(actorRole);
@@ -40,13 +54,6 @@ public class AuditLogService {
         auditLogRepository.save(log);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void log(Long userId, Long partnerId, Long bookingId, String action, String oldValue, String newValue) {
-        Long actorId = userId != null ? userId : partnerId;
-        String actorRole = userId != null ? "CUSTOMER" : partnerId != null ? "PARTNER" : "SYSTEM";
-        log(actorId, actorRole, action, "BOOKING", bookingId == null ? null : bookingId.toString(), oldValue, newValue);
-    }
-
     private String resolveActorIdentifier(Long actorId) {
         String principal = securityUtils.getCurrentPrincipalName().orElse(null);
         if (principal != null && !principal.isBlank()) {
@@ -56,10 +63,6 @@ public class AuditLogService {
     }
 
     private String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.trim();
-        return normalized.isEmpty() ? null : normalized;
+        return StringSanitizers.trimToNull(value);
     }
 }

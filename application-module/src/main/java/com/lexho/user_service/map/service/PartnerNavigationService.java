@@ -17,6 +17,7 @@ import com.lexho.user_service.map.dto.NavigationRouteResponse;
 import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
 import com.lexho.user_service.security.SecurityUtils;
+import com.lexho.user_service.util.GeoDistanceCalculator;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
@@ -266,7 +267,8 @@ public class PartnerNavigationService {
                                                                  Double originLongitude,
                                                                  Double destinationLatitude,
                                                                  Double destinationLongitude) {
-        double distanceKm = haversineKm(originLatitude, originLongitude, destinationLatitude, destinationLongitude);
+        double distanceKm = GeoDistanceCalculator.haversineKm(originLatitude, originLongitude, destinationLatitude,
+                destinationLongitude);
         int durationMinutes = Math.max(1, (int) Math.ceil((distanceKm / 28d) * 60d));
         return new MapboxDirectionsClient.RouteResult(
                 round2(distanceKm),
@@ -303,7 +305,7 @@ public class PartnerNavigationService {
             return RouteDiagnostics.empty();
         }
 
-        double movementMeters = haversineMeters(
+        double movementMeters = GeoDistanceCalculator.haversineMeters(
                 cachedRoute.originLatitude(),
                 cachedRoute.originLongitude(),
                 context.originLatitude(),
@@ -317,13 +319,13 @@ public class PartnerNavigationService {
                 cachedRoute.destinationLatitude(),
                 cachedRoute.destinationLongitude()
         );
-        double cachedDistanceToDestination = haversineMeters(
+        double cachedDistanceToDestination = GeoDistanceCalculator.haversineMeters(
                 cachedRoute.originLatitude(),
                 cachedRoute.originLongitude(),
                 cachedRoute.destinationLatitude(),
                 cachedRoute.destinationLongitude()
         );
-        double currentDistanceToDestination = haversineMeters(
+        double currentDistanceToDestination = GeoDistanceCalculator.haversineMeters(
                 context.originLatitude(),
                 context.originLongitude(),
                 context.destinationLatitude(),
@@ -342,21 +344,6 @@ public class PartnerNavigationService {
 
     private long round(Double value) {
         return Math.round(value * 100000d);
-    }
-
-    private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
-        double earthRadiusKm = 6371.0;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadiusKm * c;
-    }
-
-    private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
-        return haversineKm(lat1, lon1, lat2, lon2) * 1000d;
     }
 
     private double distanceToSegmentMeters(double pointLat,

@@ -3,6 +3,7 @@ package com.lexho.user_service.upload;
 import com.lexho.user_service.exception.FileUploadException;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
 
@@ -53,7 +54,8 @@ class UploadSecurityServiceTest {
     }
 
     @Test
-    void validateDocumentShouldRejectFilesLargerThanFiveMb() {
+    void validateDocumentShouldRejectFilesLargerThanConfiguredLimit() {
+        ReflectionTestUtils.setField(service, "maxFileSizeBytes", 5L * 1024L * 1024L);
         MockMultipartFile file = new MockMultipartFile(
                 "file",
                 "large.jpg",

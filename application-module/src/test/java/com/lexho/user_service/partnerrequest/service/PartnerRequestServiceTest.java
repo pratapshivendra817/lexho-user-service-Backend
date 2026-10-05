@@ -3,9 +3,16 @@ package com.lexho.user_service.partnerrequest.service;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
+import com.lexho.common.enums.PaymentStatus;
 import com.lexho.user_service.booking.exception.InstantBookingUnavailableException;
 import com.lexho.user_service.booking.model.InstantUnavailableCode;
 import com.lexho.user_service.dispatch.service.DispatchOrchestrationService;
+import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
+import com.lexho.user_service.dispatch.repository.PartnerServiceSkillRepository;
+import com.lexho.user_service.dispatch.service.PartnerDispatchEligibilityService;
+import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.dto.PartnerRejectRequest;
@@ -15,6 +22,7 @@ import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRep
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.lexhopartner.repository.PartnerLeaveRepository;
 import com.lexho.user_service.subscription.service.SubscriptionAutoDispatchService;
+import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -51,6 +59,18 @@ class PartnerRequestServiceTest {
     private PartnerLeaveRepository partnerLeaveRepository;
     @Mock
     private SubscriptionAutoDispatchService subscriptionAutoDispatchService;
+    @Mock
+    private PartnerShiftRepository partnerShiftRepository;
+    @Mock
+    private PartnerDispatchEligibilityService partnerDispatchEligibilityService;
+    @Mock
+    private PartnerOperationalProfileRepository partnerProfileRepository;
+    @Mock
+    private PartnerDispatchRealtimeService partnerDispatchRealtimeService;
+    @Mock
+    private PartnerServiceSkillRepository partnerServiceSkillRepository;
+    @Mock
+    private AdminServiceEntityRepository adminServiceEntityRepository;
 
     @InjectMocks
     private PartnerRequestService partnerRequestService;
@@ -105,6 +125,51 @@ class PartnerRequestServiceTest {
     }
 
     @Test
+    void duplicateAcceptForAlreadyAssignedPartnerShouldReturnAcceptedIdempotently() {
+        PartnerServiceRequestEntity request = request(13L, 8L, PartnerServiceRequestStatus.ACCEPTED);
+        request.setCartId(2003L);
+        Order order = new Order();
+        order.setId(2003L);
+        order.setBookingType("INSTANT");
+        order.setStatus(OrderStatus.PARTNER_ASSIGNED);
+        order.setAssignedPartnerId(8L);
+
+        when(partnerServiceRequestRepository.findByIdAndPartnerIdForUpdate(13L, 8L)).thenReturn(Optional.of(request));
+        when(orderRepository.findByIdForUpdate(2003L)).thenReturn(Optional.of(order));
+
+        var response = partnerRequestService.accept(8L, 13L);
+
+        assertThat(response.getStatus()).isEqualTo(PartnerServiceRequestStatus.ACCEPTED);
+        assertThat(response.getOrderId()).isEqualTo(2003L);
+        verify(dispatchOrchestrationService, never()).markPartnerAccepted(any(), any(), any());
+        verify(partnerServiceRequestRepository, never()).save(any());
+    }
+
+    @Test
+    void staleAcceptAfterCustomerCancellationShouldNotAssignOrder() {
+        PartnerServiceRequestEntity request = request(14L, 8L, PartnerServiceRequestStatus.PENDING);
+        request.setCartId(2004L);
+        request.setEtaMinutes(10);
+        Order order = new Order();
+        order.setId(2004L);
+        order.setBookingType("INSTANT");
+        order.setStatus(OrderStatus.CANCELLED);
+
+        when(partnerServiceRequestRepository.findByIdAndPartnerIdForUpdate(14L, 8L)).thenReturn(Optional.of(request));
+        when(orderRepository.findByIdForUpdate(2004L)).thenReturn(Optional.of(order));
+        when(partnerServiceRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        BadRequestException ex = assertThrows(BadRequestException.class, () -> partnerRequestService.accept(8L, 14L));
+
+        assertThat(ex.getMessage()).isEqualTo("Order is not accepting partner assignment");
+        assertThat(request.getStatus()).isEqualTo(PartnerServiceRequestStatus.REJECTED);
+        assertThat(request.getRejectionReason()).isEqualTo("ORDER_NOT_ACCEPTING_ASSIGNMENT");
+        assertThat(order.getAssignedPartnerId()).isNull();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(dispatchOrchestrationService, never()).markPartnerAccepted(any(), any(), any());
+    }
+
+    @Test
     void updateOnlineStatusAndIncomingRequestsShouldCoverSuccessLeaveAndExpiredMapping() {
         com.lexho.provider.entity.Partner partner = new com.lexho.provider.entity.Partner();
         partner.setId(7L);
@@ -148,18 +213,56 @@ class PartnerRequestServiceTest {
         Order order = new Order();
         order.setId(300L);
         order.setBookingType("SCHEDULED");
+        order.setStatus(OrderStatus.SCHEDULED);
+        order.setPaymentStatus(PaymentStatus.SUCCESS);
         when(partnerServiceRequestRepository.findByIdAndPartnerIdForUpdate(30L, 7L)).thenReturn(Optional.of(accepted));
         when(orderRepository.findByIdForUpdate(300L)).thenReturn(Optional.of(order));
         when(dispatchOrchestrationService.estimateEtaMinutes(java.math.BigDecimal.ONE)).thenReturn(12);
         when(partnerServiceRequestRepository.findByCartIdAndStatus(300L, PartnerServiceRequestStatus.PENDING))
                 .thenReturn(List.of(accepted, peer));
         when(partnerServiceRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(partnerRepository.findById(7L)).thenReturn(Optional.of(partner(7L)));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(7L)).thenReturn(Optional.of(activeShift(7L)));
 
         var response = partnerRequestService.accept(7L, 30L);
 
         assertThat(response.getStatus()).isEqualTo(PartnerServiceRequestStatus.ACCEPTED);
         assertThat(peer.getStatus()).isEqualTo(PartnerServiceRequestStatus.REJECTED);
         verify(dispatchOrchestrationService).markPartnerAccepted(300L, 7L, 12);
+        verify(partnerDispatchRealtimeService).publishRequestEvent(accepted, "REQUEST_ACCEPTED");
+        verify(partnerDispatchRealtimeService).publishRequestEvent(peer, "REQUEST_REJECTED");
+    }
+
+    @Test
+    void acceptShouldRejectWhenPartnerSkillWasRemovedAfterRequestCreation() {
+        PartnerServiceRequestEntity request = request(32L, 7L, PartnerServiceRequestStatus.PENDING);
+        request.setCartId(302L);
+        request.setServiceId(44L);
+        request.setEtaMinutes(10);
+        Order order = new Order();
+        order.setId(302L);
+        order.setBookingType("INSTANT");
+        order.setStatus(OrderStatus.SEARCHING_PARTNER);
+        order.setPaymentStatus(PaymentStatus.SUCCESS);
+        com.lexho.provider.entity.Partner partner = partner(7L);
+        ReflectionTestUtils.setField(partnerRequestService, "partnerServiceSkillRepository", partnerServiceSkillRepository);
+        ReflectionTestUtils.setField(partnerRequestService, "adminServiceEntityRepository", adminServiceEntityRepository);
+
+        when(partnerServiceRequestRepository.findByIdAndPartnerIdForUpdate(32L, 7L)).thenReturn(Optional.of(request));
+        when(orderRepository.findByIdForUpdate(302L)).thenReturn(Optional.of(order));
+        when(partnerRepository.findById(7L)).thenReturn(Optional.of(partner));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(7L)).thenReturn(Optional.of(activeShift(7L)));
+        when(dispatchOrchestrationService.maxEtaMinutes()).thenReturn(30);
+        when(adminServiceEntityRepository.findByIdAndDeletedFalse(44L)).thenReturn(Optional.empty());
+        when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(7L, 44L)).thenReturn(false);
+        when(partnerServiceRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        BadRequestException ex = assertThrows(BadRequestException.class, () -> partnerRequestService.accept(7L, 32L));
+
+        assertThat(ex.getMessage()).isEqualTo("Partner skill no longer matches this request");
+        assertThat(request.getStatus()).isEqualTo(PartnerServiceRequestStatus.REJECTED);
+        assertThat(request.getRejectionReason()).isEqualTo("SKILL_MISMATCH");
+        verify(dispatchOrchestrationService, never()).markPartnerAccepted(any(), any(), any());
     }
 
     @Test
@@ -171,6 +274,8 @@ class PartnerRequestServiceTest {
         Order order = new Order();
         order.setId(400L);
         order.setBookingType("INSTANT");
+        order.setStatus(OrderStatus.SEARCHING_PARTNER);
+        order.setPaymentStatus(PaymentStatus.SUCCESS);
         when(partnerServiceRequestRepository.findByIdAndPartnerId(40L, 7L)).thenReturn(Optional.of(request));
         when(orderRepository.findByIdForUpdate(400L)).thenReturn(Optional.of(order));
         when(partnerServiceRequestRepository.countByCartIdAndStatus(400L, PartnerServiceRequestStatus.PENDING)).thenReturn(0L);
@@ -224,6 +329,8 @@ class PartnerRequestServiceTest {
         when(partnerServiceRequestRepository.findBySubscriptionVisitIdAndStatus(600L, PartnerServiceRequestStatus.PENDING))
                 .thenReturn(List.of(accepted, peer));
         when(partnerServiceRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(partnerProfileRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(profile(7L)));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(7L)).thenReturn(Optional.of(activeShift(7L)));
 
         var response = partnerRequestService.accept(7L, 80L);
 
@@ -277,5 +384,33 @@ class PartnerRequestServiceTest {
         request.setStatus(status);
         request.setExpiresAt(LocalDateTime.now().plusMinutes(5));
         return request;
+    }
+
+    private com.lexho.provider.entity.Partner partner(Long partnerId) {
+        com.lexho.provider.entity.Partner partner = new com.lexho.provider.entity.Partner();
+        partner.setId(partnerId);
+        partner.setVerificationStatus("APPROVED");
+        partner.setAvailable(true);
+        return partner;
+    }
+
+    private PartnerOperationalProfile profile(Long partnerId) {
+        PartnerOperationalProfile profile = new PartnerOperationalProfile();
+        profile.setId(partnerId);
+        profile.setVerified(true);
+        profile.setOnline(true);
+        profile.setDeleted(false);
+        return profile;
+    }
+
+    private PartnerShiftEntity activeShift(Long partnerId) {
+        PartnerShiftEntity shift = new PartnerShiftEntity();
+        shift.setPartnerId(partnerId);
+        shift.setOnline(true);
+        shift.setActiveJobsCount(0);
+        shift.setMaxActiveJobs(3);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
+        return shift;
     }
 }

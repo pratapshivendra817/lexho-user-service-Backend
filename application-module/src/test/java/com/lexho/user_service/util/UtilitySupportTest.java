@@ -72,12 +72,16 @@ class UtilitySupportTest {
                 .isEqualTo("https://cdn.lexho.com/banner.png");
         assertThat(resolver.toPublicUrl("media/banner.png"))
                 .isEqualTo("https://lexho.test/app/media/banner.png");
+        assertThat(resolver.toPublicUrl("C:\\lexho\\uploads\\services\\clean.png"))
+                .isEqualTo("https://lexho.test/app/uploads/services/clean.png");
         assertThat(resolver.toPublicUrl(" ")).isNull();
 
         RequestContextHolder.resetRequestAttributes();
 
         assertThat(resolver.toPublicUrl("media/banner.png")).isEqualTo("/media/banner.png");
+        assertThat(resolver.toPublicUrl("images/services/cook.png")).isEqualTo("/images/services/cook.png");
         assertThat(resolver.toStorablePath("/media/banner.png")).isEqualTo("/media/banner.png");
+        assertThat(resolver.toStorablePath("uploads/services/cook.png")).isEqualTo("/uploads/services/cook.png");
         assertThat(resolver.toStorablePath("https://cdn.lexho.com/media/banner.png?x=1"))
                 .isEqualTo("/media/banner.png");
         assertThat(resolver.toStorablePath("https://")).isEqualTo("https://");

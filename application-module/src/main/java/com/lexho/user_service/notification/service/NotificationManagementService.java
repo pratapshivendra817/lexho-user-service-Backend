@@ -30,12 +30,17 @@ import com.lexho.user_service.notification.exception.NotificationAccessDeniedExc
 import com.lexho.user_service.notification.exception.NotificationNotFoundException;
 import com.lexho.user_service.notification.exception.NotificationValidationException;
 import com.lexho.user_service.notification.mapper.NotificationMapper;
+import com.lexho.user_service.localization.service.PartnerLocalizationService;
 import com.lexho.user_service.security.SecurityUtils;
+import com.lexho.user_service.util.LexhoConstants;
+import com.lexho.user_service.util.StringSanitizers;
 import jakarta.transaction.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -71,6 +76,9 @@ public class NotificationManagementService {
     private static final String WARNING_DISPUTE_REJECTED_TITLE = "Warning Dispute Rejected";
     private static final String WARNING_DISPUTE_REJECTED_MESSAGE =
             "Your warning dispute has been rejected. Tap to view the latest update.";
+    private static final String WARNING_STATUS_UNDER_REVIEW = "UNDER_REVIEW";
+    private static final String WARNING_STATUS_APPROVED = "APPROVED";
+    private static final String WARNING_STATUS_REJECTED = "REJECTED";
 
     private final NotificationRepository notificationRepository;
     private final NotificationLogRepository notificationLogRepository;
@@ -81,6 +89,8 @@ public class NotificationManagementService {
     private final NotificationMapper notificationMapper;
     private final ApplicationEventPublisher eventPublisher;
     private final SecurityUtils securityUtils;
+    private final PartnerLocalizationService localizationService;
+    private final NotificationManagementService self;
 
     public NotificationManagementService(NotificationRepository notificationRepository,
                                          NotificationLogRepository notificationLogRepository,
@@ -91,6 +101,31 @@ public class NotificationManagementService {
                                          NotificationMapper notificationMapper,
                                          ApplicationEventPublisher eventPublisher,
                                          SecurityUtils securityUtils) {
+        this(notificationRepository,
+                notificationLogRepository,
+                notificationPreferenceRepository,
+                userRepository,
+                lexhoUserProfileRepository,
+                adminRepository,
+                notificationMapper,
+                eventPublisher,
+                securityUtils,
+                null,
+                null);
+    }
+
+    @Autowired
+    public NotificationManagementService(NotificationRepository notificationRepository,
+                                         NotificationLogRepository notificationLogRepository,
+                                         NotificationPreferenceRepository notificationPreferenceRepository,
+                                         UserRepository userRepository,
+                                         LexhoUserProfileRepository lexhoUserProfileRepository,
+                                         AdminRepository adminRepository,
+                                         NotificationMapper notificationMapper,
+                                         ApplicationEventPublisher eventPublisher,
+                                         SecurityUtils securityUtils,
+                                         PartnerLocalizationService localizationService,
+                                         @Lazy NotificationManagementService self) {
         this.notificationRepository = notificationRepository;
         this.notificationLogRepository = notificationLogRepository;
         this.notificationPreferenceRepository = notificationPreferenceRepository;
@@ -100,6 +135,8 @@ public class NotificationManagementService {
         this.notificationMapper = notificationMapper;
         this.eventPublisher = eventPublisher;
         this.securityUtils = securityUtils;
+        this.localizationService = localizationService;
+        this.self = self == null ? this : self;
     }
 
     @Transactional
@@ -120,40 +157,7 @@ public class NotificationManagementService {
                 return new NotificationSendResponse(0, 0, "No target users matched");
             }
 
-            int created = 0;
-            for (Long userId : targets) {
-                for (ChannelType channelType : request.getChannels()) {
-                    if (!isChannelAllowedByPreference(userId, request.getNotificationType(), channelType)) {
-                        continue;
-                    }
-                    if (isRateLimited(userId, request.getNotificationType())) {
-                        log.warn("Notification skipped due to per-minute rate-limit. userId={}, type={}", userId, request.getNotificationType());
-                        continue;
-                    }
-                    Notification notification = buildNotification(request, userId, channelType);
-                    if (isRecentDuplicate(notification)) {
-                        log.warn("Duplicate notification skipped. userId={}, channel={}, type={}, title={}",
-                                notification.getUserId(), notification.getChannelType(),
-                                notification.getNotificationType(), notification.getTitle());
-                        continue;
-                    }
-                    if (channelType == ChannelType.IN_APP) {
-                        // Keep in-app notifications real-time for app UX.
-                        notification.setScheduledTime(null);
-                        notification.setStatus(NotificationStatus.SENT);
-                        notification.setSentAt(LocalDateTime.now());
-                    }
-                    Notification saved = notificationRepository.save(notification);
-                    created++;
-                    log.info("admin_notification_created notificationId={} userId={} channel={} type={} status={}",
-                            saved.getId(), userId, channelType, saved.getNotificationType(), saved.getStatus());
-                    if (channelType == ChannelType.IN_APP
-                            || saved.getScheduledTime() == null
-                            || !saved.getScheduledTime().isAfter(LocalDateTime.now())) {
-                        publishDispatch(saved);
-                    }
-                }
-            }
+            int created = createNotifications(request, targets);
             log.info("admin_notification_send_completed targetCount={} createdCount={}", targets.size(), created);
             return new NotificationSendResponse(targets.size(), created, "Notifications queued successfully");
         } catch (NotificationValidationException ex) {
@@ -162,6 +166,66 @@ public class NotificationManagementService {
             log.error("Bulk notification send failed", ex);
             throw new IllegalArgumentException("Invalid notification request data");
         }
+    }
+
+    private int createNotifications(AdminBulkNotificationRequest request, Set<Long> targets) {
+        int created = 0;
+        for (Long userId : targets) {
+            created += createNotificationsForUser(request, userId);
+        }
+        return created;
+    }
+
+    private int createNotificationsForUser(AdminBulkNotificationRequest request, Long userId) {
+        int created = 0;
+        for (ChannelType channelType : request.getChannels()) {
+            if (createNotificationForChannel(request, userId, channelType)) {
+                created++;
+            }
+        }
+        return created;
+    }
+
+    private boolean createNotificationForChannel(AdminBulkNotificationRequest request,
+                                                 Long userId,
+                                                 ChannelType channelType) {
+        if (!isChannelAllowedByPreference(userId, request.getNotificationType(), channelType)) {
+            return false;
+        }
+        if (isRateLimited(userId, request.getNotificationType())) {
+            log.warn("Notification skipped due to per-minute rate-limit. userId={}, type={}", userId, request.getNotificationType());
+            return false;
+        }
+        Notification notification = buildNotification(request, userId, channelType);
+        if (isRecentDuplicate(notification)) {
+            log.warn("Duplicate notification skipped. userId={}, channel={}, type={}, title={}",
+                    notification.getUserId(), notification.getChannelType(),
+                    notification.getNotificationType(), notification.getTitle());
+            return false;
+        }
+        Notification saved = saveNotification(channelType, notification);
+        log.info("admin_notification_created notificationId={} userId={} channel={} type={} status={}",
+                saved.getId(), userId, channelType, saved.getNotificationType(), saved.getStatus());
+        if (shouldPublishDispatch(channelType, saved)) {
+            publishDispatch(saved);
+        }
+        return true;
+    }
+
+    private Notification saveNotification(ChannelType channelType, Notification notification) {
+        if (channelType == ChannelType.IN_APP) {
+            // Keep in-app notifications real-time for app UX.
+            notification.setScheduledTime(null);
+            notification.setStatus(NotificationStatus.SENT);
+            notification.setSentAt(LocalDateTime.now());
+        }
+        return notificationRepository.save(notification);
+    }
+
+    private boolean shouldPublishDispatch(ChannelType channelType, Notification saved) {
+        return channelType == ChannelType.IN_APP
+                || saved.getScheduledTime() == null
+                || !saved.getScheduledTime().isAfter(LocalDateTime.now());
     }
 
     @Transactional
@@ -199,7 +263,7 @@ public class NotificationManagementService {
     }
 
     public long unreadCountForCurrentUser() {
-        return unreadCountByUserId(currentUserId());
+        return self.unreadCountByUserId(currentUserId());
     }
 
     @Transactional
@@ -415,45 +479,50 @@ public class NotificationManagementService {
     }
 
     private void createWarningNotification(Long partnerId, Long warningId, ChannelType channelType) {
-        Notification notification = new Notification();
-        notification.setUserId(partnerId);
-        notification.setUserType(NotificationUserType.PARTNER);
-        notification.setTitle(WARNING_NOTIFICATION_TITLE);
-        notification.setMessage(WARNING_NOTIFICATION_MESSAGE);
-        notification.setNotificationType(NotificationType.SYSTEM);
-        notification.setChannelType(channelType);
-        notification.setPriority(NotificationPriority.HIGH);
-        notification.setReferenceId(warningId);
-        notification.setReferenceType("WARNING");
-        notification.setRedirectType("WARNING");
-        notification.setRedirectValue(String.valueOf(warningId));
-        notification.setRetryCount(0);
-        notification.setDeleted(false);
-        if (channelType == ChannelType.IN_APP) {
-            notification.setScheduledTime(null);
-            notification.setStatus(NotificationStatus.SENT);
-            notification.setSentAt(LocalDateTime.now());
-        } else {
-            notification.setStatus(NotificationStatus.QUEUED);
-        }
+        Notification notification = buildWarningNotification(
+                partnerId,
+                warningId,
+                channelType,
+                partnerText(partnerId, "notification.warning.title", WARNING_NOTIFICATION_TITLE),
+                partnerText(partnerId, "notification.warning.message", WARNING_NOTIFICATION_MESSAGE)
+        );
         if (isRecentDuplicate(notification)) {
             log.warn("Duplicate warning notification skipped. partnerId={}, warningId={}, channel={}",
                     partnerId, warningId, channelType);
             return;
         }
-        Notification saved = notificationRepository.save(notification);
-        publishDispatch(saved);
+        saveAndPublish(notification);
     }
 
     private void createWarningDisputeStatusNotification(Long partnerId,
                                                         Long warningId,
                                                         String disputeStatus,
                                                         ChannelType channelType) {
+        Notification notification = buildWarningNotification(
+                partnerId,
+                warningId,
+                channelType,
+                partnerText(partnerId, warningDisputeTitleKey(disputeStatus), warningDisputeTitle(disputeStatus)),
+                partnerText(partnerId, warningDisputeMessageKey(disputeStatus), warningDisputeMessage(disputeStatus))
+        );
+        if (isRecentDuplicate(notification)) {
+            log.warn("Duplicate warning dispute notification skipped. partnerId={}, warningId={}, status={}, channel={}",
+                    partnerId, warningId, disputeStatus, channelType);
+            return;
+        }
+        saveAndPublish(notification);
+    }
+
+    private Notification buildWarningNotification(Long partnerId,
+                                                  Long warningId,
+                                                  ChannelType channelType,
+                                                  String title,
+                                                  String message) {
         Notification notification = new Notification();
         notification.setUserId(partnerId);
         notification.setUserType(NotificationUserType.PARTNER);
-        notification.setTitle(warningDisputeTitle(disputeStatus));
-        notification.setMessage(warningDisputeMessage(disputeStatus));
+        notification.setTitle(title);
+        notification.setMessage(message);
         notification.setNotificationType(NotificationType.SYSTEM);
         notification.setChannelType(channelType);
         notification.setPriority(NotificationPriority.HIGH);
@@ -470,35 +539,61 @@ public class NotificationManagementService {
         } else {
             notification.setStatus(NotificationStatus.QUEUED);
         }
-        if (isRecentDuplicate(notification)) {
-            log.warn("Duplicate warning dispute notification skipped. partnerId={}, warningId={}, status={}, channel={}",
-                    partnerId, warningId, disputeStatus, channelType);
-            return;
-        }
+        return notification;
+    }
+
+    private void saveAndPublish(Notification notification) {
         Notification saved = notificationRepository.save(notification);
         publishDispatch(saved);
     }
 
     private String warningDisputeTitle(String disputeStatus) {
         return switch (disputeStatus) {
-            case "UNDER_REVIEW" -> WARNING_DISPUTE_UNDER_REVIEW_TITLE;
-            case "APPROVED" -> WARNING_DISPUTE_APPROVED_TITLE;
-            case "REJECTED" -> WARNING_DISPUTE_REJECTED_TITLE;
+            case WARNING_STATUS_UNDER_REVIEW -> WARNING_DISPUTE_UNDER_REVIEW_TITLE;
+            case WARNING_STATUS_APPROVED -> WARNING_DISPUTE_APPROVED_TITLE;
+            case WARNING_STATUS_REJECTED -> WARNING_DISPUTE_REJECTED_TITLE;
             default -> "Warning Dispute Updated";
         };
     }
 
     private String warningDisputeMessage(String disputeStatus) {
         return switch (disputeStatus) {
-            case "UNDER_REVIEW" -> WARNING_DISPUTE_UNDER_REVIEW_MESSAGE;
-            case "APPROVED" -> WARNING_DISPUTE_APPROVED_MESSAGE;
-            case "REJECTED" -> WARNING_DISPUTE_REJECTED_MESSAGE;
+            case WARNING_STATUS_UNDER_REVIEW -> WARNING_DISPUTE_UNDER_REVIEW_MESSAGE;
+            case WARNING_STATUS_APPROVED -> WARNING_DISPUTE_APPROVED_MESSAGE;
+            case WARNING_STATUS_REJECTED -> WARNING_DISPUTE_REJECTED_MESSAGE;
             default -> "Your warning dispute has been updated. Tap to view the latest update.";
         };
     }
 
+    private String warningDisputeTitleKey(String disputeStatus) {
+        return switch (disputeStatus) {
+            case WARNING_STATUS_UNDER_REVIEW -> "notification.warning.dispute.under_review.title";
+            case WARNING_STATUS_APPROVED -> "notification.warning.dispute.approved.title";
+            case WARNING_STATUS_REJECTED -> "notification.warning.dispute.rejected.title";
+            default -> "notification.warning.dispute.updated.title";
+        };
+    }
+
+    private String warningDisputeMessageKey(String disputeStatus) {
+        return switch (disputeStatus) {
+            case WARNING_STATUS_UNDER_REVIEW -> "notification.warning.dispute.under_review.message";
+            case WARNING_STATUS_APPROVED -> "notification.warning.dispute.approved.message";
+            case WARNING_STATUS_REJECTED -> "notification.warning.dispute.rejected.message";
+            default -> "notification.warning.dispute.updated.message";
+        };
+    }
+
+    private String partnerText(Long partnerId, String key, String fallback) {
+        if (localizationService == null) {
+            return fallback;
+        }
+        String translated = localizationService.translateForPartner(partnerId, key, fallback);
+        return translated == null || translated.isBlank() ? fallback : translated;
+    }
+
     private NotificationPageResponse<NotificationResponse> byUser(int page, int size, Long userId) {
-        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), Sort.by(Sort.Direction.DESC, "createdAt"));
+        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100),
+                Sort.by(Sort.Direction.DESC, LexhoConstants.FIELD_CREATED_AT));
         List<Notification> all = notificationRepository.findByUserIdAndChannelTypeAndDeletedFalseOrderByCreatedAtDesc(userId, ChannelType.IN_APP)
                 .stream()
                 .filter(this::notExpired)
@@ -531,18 +626,15 @@ public class NotificationManagementService {
     private Pageable buildPageable(int page, int size, String sortBy, String sortDir) {
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
         String allowed = switch (sortBy == null ? "" : sortBy) {
-            case "createdAt", "updatedAt", "status", "notificationType", "userId" -> sortBy;
-            default -> "createdAt";
+            case LexhoConstants.FIELD_CREATED_AT, LexhoConstants.FIELD_UPDATED_AT,
+                    "status", "notificationType", "userId" -> sortBy;
+            default -> LexhoConstants.FIELD_CREATED_AT;
         };
         return PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), Sort.by(direction, allowed));
     }
 
     private String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return StringSanitizers.trimToNull(value);
     }
 
     private void publishDispatch(Notification notification) {

@@ -6,7 +6,10 @@ import com.lexho.user_service.review.controller.CustomerReviewController;
 import com.lexho.user_service.review.controller.ProviderReviewController;
 import com.lexho.user_service.review.dto.CustomerReviewResponse;
 import com.lexho.user_service.review.dto.CustomerReviewSubmitResponse;
+import com.lexho.user_service.review.dto.ModerationActionRequest;
+import com.lexho.user_service.review.dto.ReviewDetailResponse;
 import com.lexho.user_service.review.dto.ReviewPageResponse;
+import com.lexho.user_service.review.dto.ReviewReportResponse;
 import com.lexho.user_service.review.dto.ReviewResponse;
 import com.lexho.user_service.review.dto.ReviewStatsResponse;
 import com.lexho.user_service.review.dto.SubmitReviewRequest;
@@ -78,33 +81,42 @@ class ReviewWebLayerTest {
     @Test
     void adminEndpointsDelegateToService() {
         ReviewResponse reviewResponse = reviewResponse(7L);
+        ReviewDetailResponse detailResponse = new ReviewDetailResponse(reviewResponse, Map.of(), Map.of(), Map.of(),
+                Map.of(), List.of(), List.of());
         ReviewPageResponse<ReviewResponse> pageResponse = new ReviewPageResponse<>(List.of(reviewResponse), 1, 1, 0);
+        ReviewPageResponse<ReviewReportResponse> reportPage = new ReviewPageResponse<>(List.of(), 0, 0, 0);
         ReviewStatsResponse statsResponse = new ReviewStatsResponse(3, 4.5, 1, 1, List.of(), List.of());
+        ModerationActionRequest actionRequest = new ModerationActionRequest();
+        actionRequest.reason = "policy";
 
-        when(reviewManagementService.getAllReviewsForAdmin(1, 5, "rating", "asc", 4, ReviewStatus.APPROVED, 11L, 22L, " query "))
+        when(reviewManagementService.getAllReviewsForAdmin(1, 5, "rating", "asc", 4, ReviewStatus.APPROVED, 11L, 22L, " query ",
+                null, null, null))
                 .thenReturn(pageResponse);
-        when(reviewManagementService.getReviewByIdForAdmin(7L)).thenReturn(reviewResponse);
-        when(reviewManagementService.approveReview(7L)).thenReturn(reviewResponse);
-        when(reviewManagementService.rejectReview(7L)).thenReturn(reviewResponse);
-        when(reviewManagementService.hideReview(7L)).thenReturn(reviewResponse);
-        when(reviewManagementService.getReportedReviewsForAdmin(2, 8)).thenReturn(pageResponse);
-        when(reviewManagementService.getReviewStats()).thenReturn(statsResponse);
+        when(reviewManagementService.getReviewDetailForAdmin(7L)).thenReturn(detailResponse);
+        when(reviewManagementService.approveReview(7L, "policy")).thenReturn(reviewResponse);
+        when(reviewManagementService.rejectReview(7L, "policy")).thenReturn(reviewResponse);
+        when(reviewManagementService.hideReview(7L, "policy")).thenReturn(reviewResponse);
+        when(reviewManagementService.unhideReview(7L, "policy")).thenReturn(reviewResponse);
+        when(reviewManagementService.getReviewReportsForAdmin(2, 8, null)).thenReturn(reportPage);
+        when(reviewManagementService.getReviewStats(null, null, null, null)).thenReturn(statsResponse);
 
-        assertThat(adminReviewController.all(1, 5, "rating", "asc", 4, ReviewStatus.APPROVED, 11L, 22L, " query ").getBody())
+        assertThat(adminReviewController.all(1, 5, "rating", "asc", 4, ReviewStatus.APPROVED, 11L, 22L, " query ",
+                null, null, null).getBody())
                 .isSameAs(pageResponse);
-        assertThat(adminReviewController.byId(7L).getBody()).isSameAs(reviewResponse);
-        assertThat(adminReviewController.approve(7L).getBody()).isSameAs(reviewResponse);
-        assertThat(adminReviewController.approvePost(7L).getBody()).isSameAs(reviewResponse);
-        assertThat(adminReviewController.reject(7L).getBody()).isSameAs(reviewResponse);
-        assertThat(adminReviewController.rejectPost(7L).getBody()).isSameAs(reviewResponse);
-        assertThat(adminReviewController.hide(7L).getBody()).isSameAs(reviewResponse);
-        assertThat(adminReviewController.unhide(7L).getBody()).isSameAs(reviewResponse);
-        assertThat(adminReviewController.reported(2, 8).getBody()).isSameAs(pageResponse);
-        assertThat(adminReviewController.stats().getBody()).isSameAs(statsResponse);
+        assertThat(adminReviewController.byId(7L).getBody()).isSameAs(detailResponse);
+        assertThat(adminReviewController.approve(7L, actionRequest).getBody()).isSameAs(reviewResponse);
+        assertThat(adminReviewController.approvePost(7L, actionRequest).getBody()).isSameAs(reviewResponse);
+        assertThat(adminReviewController.reject(7L, actionRequest).getBody()).isSameAs(reviewResponse);
+        assertThat(adminReviewController.rejectPost(7L, actionRequest).getBody()).isSameAs(reviewResponse);
+        assertThat(adminReviewController.hide(7L, actionRequest).getBody()).isSameAs(reviewResponse);
+        assertThat(adminReviewController.unhide(7L, actionRequest).getBody()).isSameAs(reviewResponse);
+        assertThat(adminReviewController.reported(2, 8, null).getBody()).isSameAs(reportPage);
+        assertThat(adminReviewController.stats(null, null, null, null).getBody()).isSameAs(statsResponse);
 
-        verify(reviewManagementService, times(3)).approveReview(7L);
-        verify(reviewManagementService, times(2)).rejectReview(7L);
-        verify(reviewManagementService).hideReview(7L);
+        verify(reviewManagementService, times(2)).approveReview(7L, "policy");
+        verify(reviewManagementService, times(2)).rejectReview(7L, "policy");
+        verify(reviewManagementService).hideReview(7L, "policy");
+        verify(reviewManagementService).unhideReview(7L, "policy");
     }
 
     @Test
@@ -117,22 +129,22 @@ class ReviewWebLayerTest {
 
         assertThat(approveResult).containsEntry("success", true);
         assertThat(approveResult).containsEntry("processed", 2L);
-        verify(reviewManagementService).approveReview(1L);
-        verify(reviewManagementService).approveReview(2L);
+        verify(reviewManagementService).approveReview(1L, null);
+        verify(reviewManagementService).approveReview(2L, null);
 
         request.action = "reject";
         adminReviewController.bulkStatus(request);
-        verify(reviewManagementService).rejectReview(1L);
-        verify(reviewManagementService).rejectReview(2L);
+        verify(reviewManagementService).rejectReview(1L, null);
+        verify(reviewManagementService).rejectReview(2L, null);
 
         request.action = "hide";
         adminReviewController.bulkStatus(request);
-        verify(reviewManagementService).hideReview(1L);
-        verify(reviewManagementService).hideReview(2L);
+        verify(reviewManagementService).hideReview(1L, null);
+        verify(reviewManagementService).hideReview(2L, null);
 
         request.action = "unhide";
         adminReviewController.bulkStatus(request);
-        verify(reviewManagementService, times(4)).approveReview(any(Long.class));
+        verify(reviewManagementService, times(2)).unhideReview(any(Long.class), any());
     }
 
     @Test
@@ -154,7 +166,8 @@ class ReviewWebLayerTest {
         submitReviewRequest.setRating(5);
         submitReviewRequest.setReviewComment("Great");
 
-        CustomerReviewSubmitResponse submitResponse = new CustomerReviewSubmitResponse(9L, 101L, 5, true);
+        CustomerReviewSubmitResponse submitResponse = new CustomerReviewSubmitResponse(
+                9L, 101L, 5, "Great", LocalDateTime.now(), true);
         CustomerReviewResponse customerReviewResponse = new CustomerReviewResponse(9L, 5, "Great", LocalDateTime.now());
         ReviewPageResponse<ReviewResponse> providerPage = new ReviewPageResponse<>(List.of(reviewResponse(3L)), 1, 1, 0);
 
@@ -173,6 +186,7 @@ class ReviewWebLayerTest {
                         .contentType("application/json")
                         .content(new ObjectMapper().writeValueAsString(Map.of("rating", 6))))
                 .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_RATING"))
                 .andExpect(jsonPath("$.message").exists());
     }
 
@@ -193,7 +207,8 @@ class ReviewWebLayerTest {
         MethodArgumentNotValidException exception = new MethodArgumentNotValidException(parameter, bindingResult);
 
         assertThat(reviewExceptionHandler.handleRequestValidation(exception).getBody())
-                .containsEntry("message", "rating is required");
+                .containsEntry("message", "rating is required")
+                .containsEntry("code", "INVALID_RATING");
     }
 
     private ReviewResponse reviewResponse(Long id) {

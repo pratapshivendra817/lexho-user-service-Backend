@@ -73,9 +73,10 @@ class OrderStatusTest {
         assertEquals(EnumSet.of(OrderStatus.PARTNER_SEARCH, OrderStatus.PARTNER_ASSIGNED,
                         OrderStatus.PARTNER_ACCEPTED, OrderStatus.CANCELLED),
                 EnumSet.copyOf(OrderStatus.SCHEDULED.getAllowedTransitions()));
-        assertEquals(EnumSet.of(OrderStatus.PARTNER_SEARCH, OrderStatus.CANCELLED),
+        assertEquals(EnumSet.of(OrderStatus.SEARCHING_PARTNER, OrderStatus.PARTNER_SEARCH,
+                        OrderStatus.PARTNER_ACCEPTED, OrderStatus.CANCELLED),
                 EnumSet.copyOf(OrderStatus.BOOKING_CREATED.getAllowedTransitions()));
-        assertEquals(EnumSet.of(OrderStatus.PARTNER_ASSIGNED, OrderStatus.CANCELLED),
+        assertEquals(EnumSet.of(OrderStatus.PARTNER_ASSIGNED, OrderStatus.PARTNER_ACCEPTED, OrderStatus.CANCELLED),
                 EnumSet.copyOf(OrderStatus.PARTNER_SEARCH.getAllowedTransitions()));
         assertEquals(EnumSet.of(OrderStatus.PARTNER_ACCEPTED, OrderStatus.CANCELLED),
                 EnumSet.copyOf(OrderStatus.PARTNER_ASSIGNED.getAllowedTransitions()));
@@ -92,9 +93,13 @@ class OrderStatusTest {
         assertEquals(EnumSet.of(OrderStatus.PAYMENT_COMPLETED),
                 EnumSet.copyOf(OrderStatus.SERVICE_COMPLETED.getAllowedTransitions()));
         assertTrue(OrderStatus.PAYMENT_COMPLETED.getAllowedTransitions().isEmpty());
-        assertEquals(EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
+        assertEquals(EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.SCHEDULED, OrderStatus.SEARCHING_PARTNER,
+                        OrderStatus.PARTNER_SEARCH, OrderStatus.PARTNER_ACCEPTED, OrderStatus.INSTANT_FAILED,
+                        OrderStatus.CANCELLED),
                 EnumSet.copyOf(OrderStatus.CREATED.getAllowedTransitions()));
-        assertEquals(EnumSet.of(OrderStatus.PREPARING, OrderStatus.CANCELLED),
+        assertEquals(EnumSet.of(OrderStatus.SCHEDULED, OrderStatus.SEARCHING_PARTNER,
+                        OrderStatus.PARTNER_SEARCH, OrderStatus.PARTNER_ACCEPTED, OrderStatus.INSTANT_FAILED,
+                        OrderStatus.PREPARING, OrderStatus.CANCELLED),
                 EnumSet.copyOf(OrderStatus.CONFIRMED.getAllowedTransitions()));
         assertEquals(EnumSet.of(OrderStatus.OUT_FOR_DELIVERY),
                 EnumSet.copyOf(OrderStatus.PREPARING.getAllowedTransitions()));

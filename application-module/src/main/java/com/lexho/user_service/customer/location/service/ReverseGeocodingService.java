@@ -129,24 +129,7 @@ public class ReverseGeocodingService implements ReverseGeocodeService {
                 }
                 Object contextObj = firstFeature.get("context");
                 if (contextObj instanceof List<?> contexts) {
-                    for (Object contextItem : contexts) {
-                        if (!(contextItem instanceof Map context)) {
-                            continue;
-                        }
-                        String id = context.get("id") instanceof String v ? v : "";
-                        String value = context.get("text") instanceof String v ? v : null;
-                        if (id.startsWith("place.")) {
-                            response.city = normalizeLocality(value);
-                        } else if (id.startsWith("region.")) {
-                            response.state = normalizeAddressText(value);
-                        } else if (id.startsWith("country.")) {
-                            response.country = normalizeAddressText(value);
-                        } else if (id.startsWith("postcode.")) {
-                            response.pincode = normalizePincode(value);
-                        } else if (id.startsWith("locality.") || id.startsWith("neighborhood.")) {
-                            response.area = normalizeLocality(value);
-                        }
-                    }
+                    applyMapboxContexts(response, contexts);
                 }
             }
             if (response.country == null) {
@@ -180,28 +163,7 @@ public class ReverseGeocodingService implements ReverseGeocodeService {
             }
             Object addressObj = body.get("address");
             if (addressObj instanceof Map address) {
-                response.city = normalizeLocality(firstString(address, "city", "town", "village", "hamlet"));
-                response.state = normalizeAddressText(firstString(address, "state"));
-                response.country = normalizeAddressText(firstString(address, "country"));
-                response.pincode = normalizePincode(firstString(address, "postcode"));
-                response.area = normalizeLocality(firstString(
-                        address,
-                        "suburb",
-                        "neighbourhood",
-                        "quarter",
-                        "residential",
-                        "city_district",
-                        "state_district",
-                        "county"
-                ));
-                response.landmark = normalizeAddressText(firstString(
-                        address,
-                        "road",
-                        "amenity",
-                        "building",
-                        "house_name",
-                        "house_number"
-                ));
+                applyNominatimAddress(response, address);
             }
             return response;
         } catch (Exception ignored) {
@@ -235,6 +197,55 @@ public class ReverseGeocodingService implements ReverseGeocodeService {
                 && response.city == null
                 && response.state == null
                 && response.pincode == null);
+    }
+
+    private void applyMapboxContexts(ReverseGeocodeResponse response, List<?> contexts) {
+        for (Object contextItem : contexts) {
+            if (contextItem instanceof Map context) {
+                applyMapboxContext(response, context);
+            }
+        }
+    }
+
+    private void applyMapboxContext(ReverseGeocodeResponse response, Map context) {
+        String id = context.get("id") instanceof String value ? value : "";
+        String text = context.get("text") instanceof String value ? value : null;
+        if (id.startsWith("place.")) {
+            response.city = normalizeLocality(text);
+        } else if (id.startsWith("region.")) {
+            response.state = normalizeAddressText(text);
+        } else if (id.startsWith("country.")) {
+            response.country = normalizeAddressText(text);
+        } else if (id.startsWith("postcode.")) {
+            response.pincode = normalizePincode(text);
+        } else if (id.startsWith("locality.") || id.startsWith("neighborhood.")) {
+            response.area = normalizeLocality(text);
+        }
+    }
+
+    private void applyNominatimAddress(ReverseGeocodeResponse response, Map address) {
+        response.city = normalizeLocality(firstString(address, "city", "town", "village", "hamlet"));
+        response.state = normalizeAddressText(firstString(address, "state"));
+        response.country = normalizeAddressText(firstString(address, "country"));
+        response.pincode = normalizePincode(firstString(address, "postcode"));
+        response.area = normalizeLocality(firstString(
+                address,
+                "suburb",
+                "neighbourhood",
+                "quarter",
+                "residential",
+                "city_district",
+                "state_district",
+                "county"
+        ));
+        response.landmark = normalizeAddressText(firstString(
+                address,
+                "road",
+                "amenity",
+                "building",
+                "house_name",
+                "house_number"
+        ));
     }
 
     private String firstString(Map map, String... keys) {

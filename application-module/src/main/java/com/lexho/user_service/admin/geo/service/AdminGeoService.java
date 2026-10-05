@@ -12,6 +12,7 @@ import java.util.List;
 
 @Service
 public class AdminGeoService {
+    private static final String CITY_NOT_FOUND = "City not found";
 
     private final CityRepository cityRepository;
     private final ZoneRepository zoneRepository;
@@ -37,7 +38,7 @@ public class AdminGeoService {
     public CityResponse updateCity(Long id, CityUpsertRequest request) {
         CityEntity city = cityRepository.findById(id)
                 .filter(existing -> !existing.isDeleted())
-                .orElseThrow(() -> new IllegalArgumentException("City not found"));
+                .orElseThrow(() -> new IllegalArgumentException(CITY_NOT_FOUND));
         applyCity(city, request);
         return toCityResponse(cityRepository.save(city));
     }
@@ -46,7 +47,7 @@ public class AdminGeoService {
     public void deleteCity(Long id) {
         CityEntity city = cityRepository.findById(id)
                 .filter(existing -> !existing.isDeleted())
-                .orElseThrow(() -> new IllegalArgumentException("City not found"));
+                .orElseThrow(() -> new IllegalArgumentException(CITY_NOT_FOUND));
         city.setDeleted(true);
         cityRepository.save(city);
     }
@@ -96,7 +97,7 @@ public class AdminGeoService {
     private void applyZone(ZoneEntity zone, ZoneUpsertRequest request) {
         CityEntity city = cityRepository.findById(request.cityId)
                 .filter(existing -> !existing.isDeleted())
-                .orElseThrow(() -> new IllegalArgumentException("City not found"));
+                .orElseThrow(() -> new IllegalArgumentException(CITY_NOT_FOUND));
         zone.setCity(city);
         zone.setName(clean(request.name));
         zone.setPolygonJson(clean(request.polygonJson));
@@ -127,10 +128,6 @@ public class AdminGeoService {
     }
 
     private String clean(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return AdminGeoText.clean(value);
     }
 }

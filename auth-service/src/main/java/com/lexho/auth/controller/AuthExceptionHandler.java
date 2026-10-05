@@ -11,9 +11,11 @@ import java.util.Map;
 @RestControllerAdvice(basePackageClasses = AuthTokenController.class)
 public class AuthExceptionHandler {
 
+    private static final String MESSAGE_KEY = "message";
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException exception) {
-        return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, exception.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -22,6 +24,6 @@ public class AuthExceptionHandler {
                 .findFirst()
                 .map(error -> error.getField() + " " + error.getDefaultMessage())
                 .orElse("Validation failed");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", message));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(MESSAGE_KEY, message));
     }
 }

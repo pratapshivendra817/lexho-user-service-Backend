@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface CityRepository extends JpaRepository<CityEntity, Long> {
     List<CityEntity> findByDeletedFalseOrderByNameAsc();
+    List<CityEntity> findByActiveTrueAndDeletedFalseOrderByNameAsc();
 }

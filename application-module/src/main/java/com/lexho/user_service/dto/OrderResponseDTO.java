@@ -7,10 +7,15 @@ public class OrderResponseDTO {
 
     private Long id;
     private Double totalAmount;
+    private Double originalAmount;
+    private Double discountAmount;
+    private String couponCode;
     private String status;
     private String paymentStatus;
     private String address;
     private String bookingType;
+    private LocalDateTime completedAt;
+    private boolean reviewEligible;
     private LocalDateTime promisedStartTime;
     private Integer slaMinutes;
     private String unavailableReason;
@@ -30,6 +35,30 @@ public class OrderResponseDTO {
 
     public void setTotalAmount(Double totalAmount) {
         this.totalAmount = totalAmount;
+    }
+
+    public Double getOriginalAmount() {
+        return originalAmount;
+    }
+
+    public void setOriginalAmount(Double originalAmount) {
+        this.originalAmount = originalAmount;
+    }
+
+    public Double getDiscountAmount() {
+        return discountAmount;
+    }
+
+    public void setDiscountAmount(Double discountAmount) {
+        this.discountAmount = discountAmount;
+    }
+
+    public String getCouponCode() {
+        return couponCode;
+    }
+
+    public void setCouponCode(String couponCode) {
+        this.couponCode = couponCode;
     }
 
     public String getStatus() {
@@ -62,6 +91,22 @@ public class OrderResponseDTO {
 
     public void setBookingType(String bookingType) {
         this.bookingType = bookingType;
+    }
+
+    public LocalDateTime getCompletedAt() {
+        return completedAt;
+    }
+
+    public void setCompletedAt(LocalDateTime completedAt) {
+        this.completedAt = completedAt;
+    }
+
+    public boolean isReviewEligible() {
+        return reviewEligible;
+    }
+
+    public void setReviewEligible(boolean reviewEligible) {
+        this.reviewEligible = reviewEligible;
     }
 
     public LocalDateTime getPromisedStartTime() {

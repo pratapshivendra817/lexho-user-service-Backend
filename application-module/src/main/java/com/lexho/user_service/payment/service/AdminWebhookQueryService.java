@@ -10,6 +10,7 @@ import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.payment.dto.AdminWebhookEventListResponse;
 import com.lexho.user_service.payment.dto.AdminWebhookEventResponse;
 import com.lexho.user_service.payment.dto.AdminWebhookHistoryResponse;
+import com.lexho.user_service.util.StringSanitizers;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -56,30 +57,7 @@ public class AdminWebhookQueryService {
     }
 
     private AdminWebhookEventResponse toListResponse(PaymentWebhookEvent event) {
-        return new AdminWebhookEventResponse(
-                String.valueOf(event.getId()),
-                event.getEventId(),
-                String.valueOf(event.getId()),
-                event.getEventType(),
-                event.getEventType(),
-                event.getRazorpayPaymentId(),
-                event.getRazorpayPaymentId(),
-                event.getStatus().name(),
-                event.getStatus().name(),
-                firstNonNull(event.getProcessedAt(), event.getUpdatedAt(), event.getReceivedAt()),
-                event.getUpdatedAt(),
-                event.getRetryCount(),
-                event.getRetryCount(),
-                event.getRequestId(),
-                event.getCorrelationId(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null
-        );
+        return toResponse(event, null, null, null, null, null);
     }
 
     private AdminWebhookEventResponse toDetailResponse(PaymentWebhookEvent event) {
@@ -92,6 +70,15 @@ public class AdminWebhookQueryService {
                 firstNonNull(event.getProcessedAt(), event.getUpdatedAt(), event.getReceivedAt()),
                 event.getReceivedAt()
         ));
+        return toResponse(event, payload, event.getFailureReason(), retryStatus(event), history, history);
+    }
+
+    private AdminWebhookEventResponse toResponse(PaymentWebhookEvent event,
+                                                 Map<String, Object> payload,
+                                                 String errorMessage,
+                                                 String retryStatus,
+                                                 List<AdminWebhookHistoryResponse> history,
+                                                 List<AdminWebhookHistoryResponse> processingHistory) {
         return new AdminWebhookEventResponse(
                 String.valueOf(event.getId()),
                 event.getEventId(),
@@ -110,11 +97,11 @@ public class AdminWebhookQueryService {
                 event.getCorrelationId(),
                 payload,
                 payload,
-                event.getFailureReason(),
-                event.getFailureReason(),
-                retryStatus(event),
+                errorMessage,
+                errorMessage,
+                retryStatus,
                 history,
-                history
+                processingHistory
         );
     }
 
@@ -170,10 +157,6 @@ public class AdminWebhookQueryService {
     }
 
     private String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.trim();
-        return normalized.isEmpty() ? null : normalized;
+        return StringSanitizers.trimToNull(value);
     }
 }

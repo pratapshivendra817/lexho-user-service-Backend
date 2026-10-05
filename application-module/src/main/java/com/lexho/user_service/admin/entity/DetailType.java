@@ -4,5 +4,6 @@ public enum DetailType {
     INCLUDED,
     EXCLUDED,
     FAQ,
-    INSTRUCTION
+    INSTRUCTION,
+    REQUIREMENT
 }

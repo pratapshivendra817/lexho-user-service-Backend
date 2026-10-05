@@ -8,6 +8,7 @@ import com.lexho.user_service.addon.service.AddonManagementService;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogPageResponse;
 import com.lexho.user_service.customer.dto.CustomerServiceCatalogResponse;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import com.lexho.user_service.util.MediaUrlResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -20,6 +21,7 @@ public class CustomerServiceCatalogService {
     private final AdminServiceEntityRepository adminServiceEntityRepository;
     private final ServiceDetailRepository serviceDetailRepository;
     private final AddonManagementService addonManagementService;
+    private final MediaUrlResolver mediaUrlResolver;
 
     public CustomerServiceCatalogPageResponse listServices(int page, int size, String search) {
         int safePage = Math.max(0, page);
@@ -53,7 +55,8 @@ public class CustomerServiceCatalogService {
         response.setName(service.getName());
         response.setServiceName(service.getName());
         response.setDescription(service.getDescription());
-        response.setImageUrl(toAbsoluteImageUrl(service.getImageUrl()));
+        String imageUrl = mediaUrlResolver.toPublicUrl(service.getImageUrl());
+        response.setImageUrl(imageUrl == null ? "" : imageUrl);
         response.setPrice(effectivePrice(service));
         response.setServiceType(service.getServiceType());
         response.setAddons(addonManagementService.availableAddonsForService(service));
@@ -83,14 +86,4 @@ public class CustomerServiceCatalogService {
         return service.getBasePrice();
     }
 
-    private String toAbsoluteImageUrl(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return "https://cdn.lexho.com/defaults/service.png";
-        }
-        if (raw.startsWith("http://") || raw.startsWith("https://")) {
-            return raw.replace("http://", "https://");
-        }
-        String normalized = raw.startsWith("/") ? raw.substring(1) : raw;
-        return "https://cdn.lexho.com/" + normalized;
-    }
 }

@@ -30,6 +30,7 @@ public class FcmConfig {
     private static final Pattern PROJECT_ID_PATTERN = Pattern.compile("\"project_id\"\\s*:\\s*\"([^\"]+)\"");
     private static final String SERVICE_ACCOUNT_BASE64_ENV = "APP_PUSH_FCM_SERVICE_ACCOUNT_BASE64";
     private static final String SERVICE_ACCOUNT_PATH_ENV = "APP_PUSH_FCM_SERVICE_ACCOUNT_PATH";
+    private static final String FIREBASE_APP_NAME = "lexho-fcm";
 
     @Bean
     public FirebaseMessaging firebaseMessaging(FcmProperties properties) {
@@ -50,12 +51,12 @@ public class FcmConfig {
             FirebaseApp app;
             synchronized (FcmConfig.class) {
                 if (FirebaseApp.getApps().isEmpty()) {
-                    app = FirebaseApp.initializeApp(options, "lexho-fcm");
+                    app = FirebaseApp.initializeApp(options, FIREBASE_APP_NAME);
                 } else {
                     app = FirebaseApp.getApps().stream()
-                            .filter(existing -> "lexho-fcm".equals(existing.getName()))
+                            .filter(existing -> FIREBASE_APP_NAME.equals(existing.getName()))
                             .findFirst()
-                            .orElseGet(() -> FirebaseApp.initializeApp(options, "lexho-fcm"));
+                            .orElseGet(() -> FirebaseApp.initializeApp(options, FIREBASE_APP_NAME));
                 }
             }
             log.info("FCM initialized successfully. projectId={}", credentialSource.projectId());

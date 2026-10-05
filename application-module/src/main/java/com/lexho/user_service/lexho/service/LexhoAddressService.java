@@ -12,6 +12,7 @@ import java.util.List;
 
 @Service
 public class LexhoAddressService {
+    private static final String CUSTOMER_ACTOR_PREFIX = "CUSTOMER:";
 
     private final LexhoAddressRepository addressRepository;
     private final AddressCoreService addressCoreService;
@@ -50,9 +51,9 @@ public class LexhoAddressService {
         if (address.getId() == null) {
             address.setDefault(true);
         }
-        address.setUpdatedBy("CUSTOMER:" + userId);
+        address.setUpdatedBy(CUSTOMER_ACTOR_PREFIX + userId);
         if (address.getId() == null) {
-            address.setCreatedBy("CUSTOMER:" + userId);
+            address.setCreatedBy(CUSTOMER_ACTOR_PREFIX + userId);
         }
 
         return toResponse(addressRepository.save(address));
@@ -76,7 +77,7 @@ public class LexhoAddressService {
         if (isValidCoordinate(latitude, longitude) && !hasValidCoordinates(address)) {
             address.setLatitude(BigDecimal.valueOf(latitude));
             address.setLongitude(BigDecimal.valueOf(longitude));
-            address.setUpdatedBy("CUSTOMER:" + userId);
+            address.setUpdatedBy(CUSTOMER_ACTOR_PREFIX + userId);
             return addressRepository.save(address);
         }
         return address;

@@ -6,7 +6,7 @@ import com.lexho.user_service.admin.serviceablearea.entity.ServiceableAreaEntity
 import com.lexho.user_service.admin.serviceablearea.entity.ServiceabilityRuleEntity;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceabilityRuleRepository;
-import com.lexho.testconfig.LexhoH2DataJpaTest;
+import com.lexho.testconfig.LexhoMySqlDataJpaTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -23,7 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@LexhoH2DataJpaTest
+@LexhoMySqlDataJpaTest
 @ContextConfiguration(classes = ServiceableAreaServiceTest.JpaConfig.class)
 class ServiceableAreaServiceTest {
 

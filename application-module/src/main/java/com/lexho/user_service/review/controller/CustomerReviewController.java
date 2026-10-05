@@ -29,7 +29,7 @@ public class CustomerReviewController {
     @PostMapping
     @Operation(summary = "Submit customer review for a completed booking")
     public ApiResponse<CustomerReviewSubmitResponse> submit(@Valid @RequestBody SubmitReviewRequest request) {
-        return ApiResponse.success("Review submitted", reviewManagementService.submitCustomerReview(request));
+        return ApiResponse.success("Review submitted successfully", reviewManagementService.submitCustomerReview(request));
     }
 
     @GetMapping("/{bookingId}")

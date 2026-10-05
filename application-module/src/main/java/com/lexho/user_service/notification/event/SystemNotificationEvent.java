@@ -18,6 +18,7 @@ public class SystemNotificationEvent {
     private final String referenceType;
     private final String redirectType;
     private final String redirectValue;
+    private final String idempotencyKeyPrefix;
 
     public SystemNotificationEvent(Long userId,
                                    NotificationUserType userType,
@@ -28,7 +29,7 @@ public class SystemNotificationEvent {
                                    Long referenceId,
                                    String referenceType) {
         this(userId, userType, notificationType, priority, title, message, referenceId, referenceType,
-                referenceType, referenceId == null ? null : String.valueOf(referenceId));
+                referenceType, referenceId == null ? null : String.valueOf(referenceId), null);
     }
 
     public SystemNotificationEvent(Long userId,
@@ -41,6 +42,21 @@ public class SystemNotificationEvent {
                                    String referenceType,
                                    String redirectType,
                                    String redirectValue) {
+        this(userId, userType, notificationType, priority, title, message, referenceId, referenceType,
+                redirectType, redirectValue, null);
+    }
+
+    public SystemNotificationEvent(Long userId,
+                                   NotificationUserType userType,
+                                   NotificationType notificationType,
+                                   NotificationPriority priority,
+                                   String title,
+                                   String message,
+                                   Long referenceId,
+                                   String referenceType,
+                                   String redirectType,
+                                   String redirectValue,
+                                   String idempotencyKeyPrefix) {
         this.userId = userId;
         this.userType = userType;
         this.notificationType = notificationType;
@@ -51,5 +67,6 @@ public class SystemNotificationEvent {
         this.referenceType = referenceType;
         this.redirectType = redirectType;
         this.redirectValue = redirectValue;
+        this.idempotencyKeyPrefix = idempotencyKeyPrefix;
     }
 }

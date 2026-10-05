@@ -17,14 +17,17 @@ import java.util.Map;
 @RestControllerAdvice(basePackages = "com.lexho.user_service.banner")
 public class BannerExceptionHandler {
 
+    private static final String MESSAGE_KEY = "message";
+    private static final String INVALID_REQUEST_MESSAGE = "Invalid request";
+
     @ExceptionHandler(BannerNotFoundException.class)
     public ResponseEntity<Map<String, String>> handleNotFound(BannerNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler(BannerValidationException.class)
     public ResponseEntity<Map<String, String>> handleValidation(BannerValidationException ex) {
-        return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -32,17 +35,17 @@ public class BannerExceptionHandler {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .findFirst()
                 .map(FieldError::getDefaultMessage)
-                .orElse("Invalid request");
-        return ResponseEntity.badRequest().body(Map.of("message", message));
+                .orElse(INVALID_REQUEST_MESSAGE);
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, message));
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Map<String, String>> handleConstraintViolation(ConstraintViolationException ex) {
-        return ResponseEntity.badRequest().body(Map.of("message", "Invalid request"));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, INVALID_REQUEST_MESSAGE));
     }
 
     @ExceptionHandler({HttpMessageNotReadableException.class, IllegalArgumentException.class})
     public ResponseEntity<Map<String, String>> handleMalformedInput(Exception ex) {
-        return ResponseEntity.badRequest().body(Map.of("message", "Invalid request"));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, INVALID_REQUEST_MESSAGE));
     }
 }

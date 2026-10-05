@@ -13,6 +13,10 @@ public class MediaUrlResolver {
         if (normalized == null) {
             return null;
         }
+        String uploadPath = extractUploadPath(normalized);
+        if (uploadPath != null) {
+            normalized = uploadPath;
+        }
         if (isAbsoluteUrl(normalized)) {
             return normalized;
         }
@@ -32,6 +36,10 @@ public class MediaUrlResolver {
             return null;
         }
         if (!isAbsoluteUrl(normalized)) {
+            String uploadPath = extractUploadPath(normalized);
+            if (uploadPath != null) {
+                return uploadPath;
+            }
             return normalized.startsWith("/") ? normalized : "/" + normalized;
         }
         try {
@@ -40,6 +48,10 @@ public class MediaUrlResolver {
             if (path == null || path.isBlank()) {
                 return normalized;
             }
+            String uploadPath = extractUploadPath(path);
+            if (uploadPath != null) {
+                return uploadPath;
+            }
             return path.startsWith("/") ? path : "/" + path;
         } catch (IllegalArgumentException ex) {
             return normalized;
@@ -47,15 +59,30 @@ public class MediaUrlResolver {
     }
 
     private String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return StringSanitizers.trimToNull(value);
     }
 
     private boolean isAbsoluteUrl(String value) {
         String lower = value.toLowerCase();
         return lower.startsWith("http://") || lower.startsWith("https://");
+    }
+
+    private String extractUploadPath(String value) {
+        String normalizedSeparators = value.replace('\\', '/');
+        String lower = normalizedSeparators.toLowerCase();
+        int uploadsIndex = lower.lastIndexOf("/uploads/");
+        if (uploadsIndex >= 0) {
+            return normalizedSeparators.substring(uploadsIndex);
+        }
+        if (lower.startsWith("uploads/")) {
+            return "/" + normalizedSeparators;
+        }
+        if (lower.startsWith("/images/") || lower.startsWith("/uploads/")) {
+            return normalizedSeparators;
+        }
+        if (lower.startsWith("images/")) {
+            return "/" + normalizedSeparators;
+        }
+        return null;
     }
 }

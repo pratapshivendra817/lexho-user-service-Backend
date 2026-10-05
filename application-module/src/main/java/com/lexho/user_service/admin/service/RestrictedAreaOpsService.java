@@ -1,6 +1,7 @@
 package com.lexho.user_service.admin.service;
 
 import com.lexho.user_service.dispatch.service.GeoHashUtil;
+import com.lexho.user_service.util.LexhoConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -15,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class RestrictedAreaOpsService {
     private static final Logger log = LoggerFactory.getLogger(RestrictedAreaOpsService.class);
     private static final String RESTRICTED_GEOHASH_SET = "location:serviceability:restricted:geohash";
+    private static final String STORAGE_IN_MEMORY_FALLBACK = "in-memory-fallback";
+    private static final String STORAGE_REDIS = "redis";
 
     private final StringRedisTemplate redisTemplate;
     private final Set<String> localRestrictedAreas = ConcurrentHashMap.newKeySet();
@@ -25,36 +28,36 @@ public class RestrictedAreaOpsService {
 
     public Map<String, Object> add(double lat, double lng, int precision) {
         String geohash = GeoHashUtil.encode(lat, lng, precision);
-        String storage = "redis";
+        String storage = STORAGE_REDIS;
         try {
             redisTemplate.opsForSet().add(RESTRICTED_GEOHASH_SET, geohash);
         } catch (RuntimeException ex) {
             log.warn("Redis unavailable while adding restricted area. Falling back to in-memory store");
             localRestrictedAreas.add(geohash);
-            storage = "in-memory-fallback";
+            storage = STORAGE_IN_MEMORY_FALLBACK;
         }
         Map<String, Object> payload = new HashMap<>();
         payload.put("geohash", geohash);
         payload.put("restricted", true);
-        payload.put("storage", storage);
+        payload.put(LexhoConstants.FIELD_STORAGE, storage);
         return payload;
     }
 
     public Map<String, Object> remove(String geohash) {
         long removed;
-        String storage = "redis";
+        String storage = STORAGE_REDIS;
         try {
             Long redisRemoved = redisTemplate.opsForSet().remove(RESTRICTED_GEOHASH_SET, geohash);
             removed = redisRemoved == null ? 0L : redisRemoved;
         } catch (RuntimeException ex) {
             log.warn("Redis unavailable while removing restricted area. Falling back to in-memory store");
             removed = localRestrictedAreas.remove(geohash) ? 1L : 0L;
-            storage = "in-memory-fallback";
+            storage = STORAGE_IN_MEMORY_FALLBACK;
         }
         Map<String, Object> payload = new HashMap<>();
         payload.put("geohash", geohash);
         payload.put("removed", removed);
-        payload.put("storage", storage);
+        payload.put(LexhoConstants.FIELD_STORAGE, storage);
         return payload;
     }
 

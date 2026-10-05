@@ -67,4 +67,54 @@ class LexhoAuthControllerTest {
                         .content("{\"mobile\":\"123\",\"otp\":\"1\",\"role\":\"ADMIN\"}"))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void partnerOtpVerifyExposesPartnerIdAliases() throws Exception {
+        LexhoDtos.AuthVerifyResponse verifyResponse = new LexhoDtos.AuthVerifyResponse(
+                "partner-access",
+                "partner-refresh",
+                new LexhoDtos.AuthUserDetails(42L, "Aman", "9876543210", null, null, "PARTNER"));
+        when(service.verifyOtp("9876543210", "123456", "PARTNER")).thenReturn(verifyResponse);
+
+        mockMvc.perform(post("/otp/verify").contentType("application/json")
+                        .content("{\"mobile\":\"9876543210\",\"otp\":\"123456\",\"role\":\"PARTNER\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").value("partner-access"))
+                .andExpect(jsonPath("$.accessToken").value("partner-access"))
+                .andExpect(jsonPath("$.userId").value(42))
+                .andExpect(jsonPath("$.partnerId").value(42))
+                .andExpect(jsonPath("$.providerId").value(42))
+                .andExpect(jsonPath("$.role").value("PARTNER"))
+                .andExpect(jsonPath("$.data.token").value("partner-access"))
+                .andExpect(jsonPath("$.data.accessToken").value("partner-access"))
+                .andExpect(jsonPath("$.data.userId").value(42))
+                .andExpect(jsonPath("$.data.partnerId").value(42))
+                .andExpect(jsonPath("$.data.providerId").value(42))
+                .andExpect(jsonPath("$.data.role").value("PARTNER"))
+                .andExpect(jsonPath("$.data.user.id").value(42))
+                .andExpect(jsonPath("$.data.user.userId").value(42))
+                .andExpect(jsonPath("$.data.user.partnerId").value(42))
+                .andExpect(jsonPath("$.data.user.providerId").value(42));
+    }
+
+    @Test
+    void partnerOtpEndpointsForcePartnerRole() throws Exception {
+        LexhoDtos.AuthVerifyResponse verifyResponse = new LexhoDtos.AuthVerifyResponse(
+                "partner-access",
+                "partner-refresh",
+                new LexhoDtos.AuthUserDetails(42L, "Aman", "9876543210", null, null, "PARTNER"));
+        when(service.getResendAfterSeconds()).thenReturn(30L);
+        when(service.verifyOtp("9876543210", "123456", "PARTNER")).thenReturn(verifyResponse);
+
+        mockMvc.perform(post("/api/partner/otp/send").contentType("application/json")
+                        .content("{\"mobile\":\"9876543210\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.role").value("PARTNER"));
+
+        mockMvc.perform(post("/api/partner/otp/verify").contentType("application/json")
+                        .content("{\"mobile\":\"9876543210\",\"otp\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("PARTNER"))
+                .andExpect(jsonPath("$.partnerId").value(42));
+    }
 }

@@ -1,21 +1,23 @@
 package com.lexho.user_service.customer.location.repository;
 
+import com.lexho.testconfig.LexhoInfrastructureTest;
 import com.lexho.user_service.customer.location.entity.ServiceablePincode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest(classes = ServiceablePincodeRepositoryIT.JpaConfig.class)
-@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.ANY)
+@LexhoInfrastructureTest
+@ActiveProfiles("it")
 @TestPropertySource(properties = {
         "spring.flyway.enabled=false",
         "spring.jpa.hibernate.ddl-auto=create-drop",

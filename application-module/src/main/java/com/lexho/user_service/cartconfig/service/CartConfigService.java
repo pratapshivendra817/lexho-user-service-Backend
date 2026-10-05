@@ -21,12 +21,16 @@ public class CartConfigService {
 
     @Transactional(readOnly = true)
     public CartConfigEntity currentEntity() {
+        return currentEntityValue();
+    }
+
+    private CartConfigEntity currentEntityValue() {
         return cartConfigRepository.findById(CONFIG_ID).orElseGet(CartConfigEntity::new);
     }
 
     @Transactional(readOnly = true)
     public CartConfigResponse current() {
-        return toResponse(currentEntity());
+        return toResponse(currentEntityValue());
     }
 
     @Transactional

@@ -6,6 +6,8 @@ import com.lexho.user_service.admin.service.AdminActivityFeedService;
 import com.lexho.user_service.admin.service.AdminFileUploadService;
 import com.lexho.user_service.admin.service.AdminManagementService;
 import com.lexho.user_service.admin.service.AdminSupportFaqService;
+import com.lexho.user_service.lexhopartner.dto.OrderResponseDto;
+import com.lexho.user_service.lexhopartner.service.PartnerOrderService;
 import com.lexho.user_service.customer.banner.dto.AdminCustomerBannerResponse;
 import com.lexho.user_service.customer.banner.dto.AdminCustomerBannerUpsertRequest;
 import com.lexho.user_service.customer.banner.service.AdminCustomerBannerService;
@@ -22,6 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 
 @RestController
 @RequestMapping({"/api/admin", "/api/v1/admin"})
@@ -34,9 +37,8 @@ public class AdminManagementController {
     private final AdminCustomerBannerService adminCustomerBannerService;
     private final AdminSupportFaqService adminSupportFaqService;
     private final ApiRateLimiterService apiRateLimiterService;
-
-    @Autowired(required = false)
-    private AdminActivityFeedService adminActivityFeedService;
+    private final AdminActivityFeedService adminActivityFeedService;
+    private final PartnerOrderService partnerOrderService;
 
     public AdminManagementController(AdminManagementService adminManagementService,
                                      AdminCatalogService adminCatalogService,
@@ -44,12 +46,27 @@ public class AdminManagementController {
                                      AdminCustomerBannerService adminCustomerBannerService,
                                      AdminSupportFaqService adminSupportFaqService,
                                      ApiRateLimiterService apiRateLimiterService) {
+        this(adminManagementService, adminCatalogService, adminFileUploadService, adminCustomerBannerService,
+                adminSupportFaqService, apiRateLimiterService, Optional.empty(), Optional.empty());
+    }
+
+    @Autowired
+    public AdminManagementController(AdminManagementService adminManagementService,
+                                     AdminCatalogService adminCatalogService,
+                                     AdminFileUploadService adminFileUploadService,
+                                     AdminCustomerBannerService adminCustomerBannerService,
+                                     AdminSupportFaqService adminSupportFaqService,
+                                     ApiRateLimiterService apiRateLimiterService,
+                                     Optional<AdminActivityFeedService> adminActivityFeedService,
+                                     Optional<PartnerOrderService> partnerOrderService) {
         this.adminManagementService = adminManagementService;
         this.adminCatalogService = adminCatalogService;
         this.adminFileUploadService = adminFileUploadService;
         this.adminCustomerBannerService = adminCustomerBannerService;
         this.adminSupportFaqService = adminSupportFaqService;
         this.apiRateLimiterService = apiRateLimiterService;
+        this.adminActivityFeedService = adminActivityFeedService.orElse(null);
+        this.partnerOrderService = partnerOrderService.orElse(null);
     }
 
     @PostMapping("/categories")
@@ -195,7 +212,7 @@ public class AdminManagementController {
 
     @PostMapping(value = "/banners/upload/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Map<String, Object> uploadBannerImageForCustomerBanners(@RequestParam("file") MultipartFile file) {
-        String relativeUrl = adminFileUploadService.uploadServiceImage(file);
+        String relativeUrl = adminFileUploadService.uploadBannerImage(file);
         String absoluteUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path(relativeUrl)
                 .toUriString();
@@ -210,6 +227,16 @@ public class AdminManagementController {
         apiRateLimiterService.check("admin_payouts", "global", 60, Duration.ofMinutes(1),
                 "Too many payout queries. Please retry shortly");
         return adminManagementService.payouts(page, limit, search, status);
+    }
+
+    @PostMapping("/orders/{id}/complete")
+    public DataResponse<OrderResponseDto> adminCompleteOrder(@RequestAttribute("userId") Long adminId,
+                                                             @PathVariable Long id,
+                                                             @Valid @RequestBody AdminOrderCompleteRequest request) {
+        if (partnerOrderService == null) {
+            throw new IllegalStateException("Partner order workflow is not available");
+        }
+        return new DataResponse<>(partnerOrderService.adminCompleteOrder(adminId, id, request.getReason()));
     }
 
     @GetMapping("/activity-logs")

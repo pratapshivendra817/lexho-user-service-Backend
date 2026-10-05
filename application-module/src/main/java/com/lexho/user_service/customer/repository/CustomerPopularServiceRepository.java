@@ -24,7 +24,7 @@ public interface CustomerPopularServiceRepository extends JpaRepository<PopularS
               AND c.id = :categoryId
               AND s.active = true
               AND s.deleted = false
-            ORDER BY ps.priority ASC
+            ORDER BY ps.priority ASC, ps.id ASC, s.id ASC
             """)
     List<CustomerPopularServiceView> findActivePopularServicesByCategory(@Param("categoryId") Long categoryId,
                                                                           Pageable pageable);

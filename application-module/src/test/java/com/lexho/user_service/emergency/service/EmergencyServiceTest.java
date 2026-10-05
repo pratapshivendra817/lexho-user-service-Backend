@@ -10,8 +10,8 @@ import com.lexho.user_service.emergency.repository.EmergencyContactRepository;
 import com.lexho.user_service.emergency.repository.EmergencyEventRepository;
 import com.lexho.user_service.emergency.repository.EmergencyLocationRepository;
 import com.lexho.user_service.exception.BadRequestException;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -32,7 +32,7 @@ class EmergencyServiceTest {
     private final EmergencyEventRepository eventRepository = mock(EmergencyEventRepository.class);
     private final EmergencyContactRepository contactRepository = mock(EmergencyContactRepository.class);
     private final EmergencyLocationRepository locationRepository = mock(EmergencyLocationRepository.class);
-    private final PartnerProfileRepository partnerProfileRepository = mock(PartnerProfileRepository.class);
+    private final PartnerOperationalProfileRepository partnerProfileRepository = mock(PartnerOperationalProfileRepository.class);
     private final EmergencyAdminNotifier adminNotifier = mock(EmergencyAdminNotifier.class);
     private final EmergencyExternalContactNotifier externalContactNotifier = mock(EmergencyExternalContactNotifier.class);
     private final AuditLogService auditLogService = mock(AuditLogService.class);
@@ -52,7 +52,7 @@ class EmergencyServiceTest {
     void triggerSosPersistsIncidentLocationNotificationsAndAudit() {
         MDC.put("requestId", "req-101");
         MDC.put("correlationId", "corr-101");
-        PartnerProfile partner = new PartnerProfile();
+        PartnerOperationalProfile partner = new PartnerOperationalProfile();
         partner.setName("Ravi");
         partner.setMobileNumber("9999999999");
         when(partnerProfileRepository.findById(5L)).thenReturn(Optional.of(partner));

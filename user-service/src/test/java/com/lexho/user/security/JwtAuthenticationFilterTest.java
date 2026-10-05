@@ -3,6 +3,7 @@ package com.lexho.user.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.common.enums.Role;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -58,6 +60,24 @@ class JwtAuthenticationFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(response.getContentAsString()).contains("Authorization token is required");
+    }
+
+    @Test
+    void cookieOnlyCallRequestIsNotTreatedAsAuthenticated() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/calls/end");
+        request.setServletPath("/calls/end");
+        request.setCookies(
+                new Cookie("Authorization", "Bearer good-token"),
+                new Cookie("access_token", "good-token"),
+                new Cookie("JSESSIONID", "session-id")
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("Authorization token is required");
+        verifyNoInteractions(jwtService, filterChain);
     }
 
     @Test

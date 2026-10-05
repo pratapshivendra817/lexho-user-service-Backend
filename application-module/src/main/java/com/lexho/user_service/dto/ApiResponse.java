@@ -1,5 +1,9 @@
 package com.lexho.user_service.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.lexho.user_service.lexho.dto.LexhoDtos;
+
 public class ApiResponse<T> {
 
     private boolean success;
@@ -92,6 +96,40 @@ public class ApiResponse<T> {
         return token;
     }
 
+    @JsonProperty("accessToken")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getAccessToken() {
+        return token;
+    }
+
+    @JsonProperty("userId")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Long getUserId() {
+        LexhoDtos.AuthVerifyResponse authData = authData();
+        return authData == null ? null : authData.userId();
+    }
+
+    @JsonProperty("partnerId")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Long getPartnerId() {
+        LexhoDtos.AuthVerifyResponse authData = authData();
+        return authData == null ? null : authData.partnerId();
+    }
+
+    @JsonProperty("providerId")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Long getProviderId() {
+        LexhoDtos.AuthVerifyResponse authData = authData();
+        return authData == null ? null : authData.providerId();
+    }
+
+    @JsonProperty("role")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getRole() {
+        LexhoDtos.AuthVerifyResponse authData = authData();
+        return authData == null ? null : authData.role();
+    }
+
     public void setToken(String token) {
         this.token = token;
     }
@@ -102,5 +140,12 @@ public class ApiResponse<T> {
 
     public void setTimestamp(String timestamp) {
         this.timestamp = timestamp;
+    }
+
+    private LexhoDtos.AuthVerifyResponse authData() {
+        if (data instanceof LexhoDtos.AuthVerifyResponse authVerifyResponse) {
+            return authVerifyResponse;
+        }
+        return null;
     }
 }

@@ -80,6 +80,7 @@ class BannerPromotionMapperTest {
 
         assertThat(response.getId()).isEqualTo(8L);
         assertThat(response.getTitle()).isEqualTo("Summer");
+        assertThat(response.getImageUrl()).isEqualTo("/summer.png");
         assertThat(response.getClickCount()).isEqualTo(10L);
         assertThat(response.getImpressionCount()).isEqualTo(20L);
         assertThat(response.getRedemptionCount()).isEqualTo(3L);

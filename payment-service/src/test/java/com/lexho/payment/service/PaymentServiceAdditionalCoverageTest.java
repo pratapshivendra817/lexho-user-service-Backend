@@ -3,6 +3,7 @@ package com.lexho.payment.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.booking.service.OrderLifecycleService;
 import com.lexho.common.enums.PaymentStatus;
 import com.lexho.payment.config.RazorpayProperties;
 import com.lexho.payment.dto.VerifyPaymentRequest;
@@ -68,7 +69,7 @@ class PaymentServiceAdditionalCoverageTest {
         properties.setWebhookSecret("webhook-secret");
         service = new PaymentService(orderRepository, transactionRepository, refundRepository,
                 webhookEventRepository, gateway, properties, signatureVerifier, new ObjectMapper(),
-                eventPublisher, metricsService);
+                eventPublisher, metricsService, new OrderLifecycleService(orderRepository));
         lenient().when(gateway.toPaise(any(BigDecimal.class)))
                 .thenAnswer(invocation -> invocation.<BigDecimal>getArgument(0).movePointRight(2).longValueExact());
     }
@@ -94,7 +95,7 @@ class PaymentServiceAdditionalCoverageTest {
         PaymentTransaction transaction = transaction(10L, 7L, PaymentTransactionStatus.CREATED);
         Order booking = booking(10L, 7L, 100.0, PaymentStatus.PENDING);
         booking.setBookingType("SUBSCRIPTION");
-        when(transactionRepository.findByRazorpayOrderId("order_1")).thenReturn(Optional.of(transaction));
+        when(transactionRepository.findByRazorpayOrderIdForUpdate("order_1")).thenReturn(Optional.of(transaction));
         when(signatureVerifier.verifyPayment("order_1", "pay_1", "sig", "key-secret")).thenReturn(true);
         when(gateway.fetchPayment("pay_1"))
                 .thenReturn(new RazorpayGateway.RazorpayPayment("pay_1", "order_1", 10000L, "authorized"));

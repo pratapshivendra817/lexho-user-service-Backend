@@ -133,11 +133,11 @@ public class Admin {
     }
 
     public String getPasswordHash() {
-        return password;
+        return getPassword();
     }
 
     public void setPasswordHash(String passwordHash) {
-        this.password = passwordHash;
+        setPassword(passwordHash);
     }
 
     public Role getRole() {

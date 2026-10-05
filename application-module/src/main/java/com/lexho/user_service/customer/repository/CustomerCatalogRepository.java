@@ -6,5 +6,5 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CustomerCatalogRepository extends JpaRepository<AdminServiceEntity, Long> {
-    Page<AdminServiceEntity> findByCategory_IdAndActiveTrueAndDeletedFalse(Long categoryId, Pageable pageable);
+    Page<AdminServiceEntity> findByCategory_IdAndActiveTrueAndDeletedFalseOrderByNameAscIdAsc(Long categoryId, Pageable pageable);
 }

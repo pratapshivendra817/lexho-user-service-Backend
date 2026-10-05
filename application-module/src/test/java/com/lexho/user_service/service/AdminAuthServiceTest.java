@@ -92,7 +92,7 @@ class AdminAuthServiceTest {
         UnauthorizedException ex = assertThrows(UnauthorizedException.class,
                 () -> adminAuthService.login(loginRequest("admin@lexho.com", "Password@123")));
 
-        assertEquals("Admin account is inactive", ex.getMessage());
+        assertEquals(AdminAuthService.ADMIN_PORTAL_ACCESS_DENIED_MESSAGE, ex.getMessage());
     }
 
     @Test
@@ -209,7 +209,7 @@ class AdminAuthServiceTest {
 
         UnauthorizedException inactiveEx = assertThrows(UnauthorizedException.class,
                 () -> adminAuthService.verifyOtp(verifyOtpRequest("admin@lexho.com", "123456")));
-        assertEquals("Admin account is inactive", inactiveEx.getMessage());
+        assertEquals(AdminAuthService.ADMIN_PORTAL_ACCESS_DENIED_MESSAGE, inactiveEx.getMessage());
 
         Admin locked = activeAdmin("admin@lexho.com");
         locked.setAccountLocked(true);

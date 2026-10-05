@@ -1,5 +1,6 @@
 package com.lexho.user_service.banner.repository;
 
+import com.lexho.testconfig.LexhoInfrastructureTest;
 import com.lexho.user_service.banner.entity.BannerPromotion;
 import com.lexho.user_service.banner.enums.BannerPlatformType;
 import com.lexho.user_service.banner.enums.BannerPlacement;
@@ -9,12 +10,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.TestPropertySource;
 
@@ -23,10 +26,12 @@ import java.time.LocalDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
+@LexhoInfrastructureTest
+@ActiveProfiles("it")
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ContextConfiguration(classes = BannerPromotionRepositoryIntegrationTest.JpaTestConfig.class)
 @TestPropertySource(properties = {
         "spring.flyway.enabled=false",
-        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
         "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 class BannerPromotionRepositoryIntegrationTest {

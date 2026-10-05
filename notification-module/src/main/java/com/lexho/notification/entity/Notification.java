@@ -81,6 +81,9 @@ public class Notification {
     @Column(name = "redirect_value", length = 500)
     private String redirectValue;
 
+    @Column(name = "idempotency_key", length = 160, unique = true)
+    private String idempotencyKey;
+
     @Column(name = "scheduled_time")
     private LocalDateTime scheduledTime;
 

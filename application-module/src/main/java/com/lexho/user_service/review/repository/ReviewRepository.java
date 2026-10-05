@@ -14,6 +14,8 @@ import java.util.Optional;
 
 public interface ReviewRepository extends JpaRepository<ReviewEntity, Long>, JpaSpecificationExecutor<ReviewEntity> {
 
+    String RATING_PARAM = "rating";
+
     Optional<ReviewEntity> findByIdAndDeletedFalse(Long id);
 
     Optional<ReviewEntity> findByBookingIdAndCustomerIdAndDeletedFalse(Long bookingId, Long customerId);
@@ -70,7 +72,9 @@ public interface ReviewRepository extends JpaRepository<ReviewEntity, Long>, Jpa
     @Query("""
             SELECT r FROM MarketplaceReview r
             WHERE r.deleted = false
-              AND (:search IS NULL OR LOWER(r.reviewComment) LIKE LOWER(CONCAT('%', :search, '%')))
+              AND (:search IS NULL OR LOWER(r.reviewComment) LIKE LOWER(CONCAT('%', :search, '%'))
+                   OR str(r.id) = :search
+                   OR str(r.bookingId) = :search)
               AND (:status IS NULL OR r.status = :status)
               AND (:rating IS NULL OR r.rating = :rating)
               AND (:providerId IS NULL OR r.providerId = :providerId)
@@ -78,8 +82,92 @@ public interface ReviewRepository extends JpaRepository<ReviewEntity, Long>, Jpa
             """)
     Page<ReviewEntity> searchAdminReviews(@Param("search") String search,
                                           @Param("status") ReviewStatus status,
-                                          @Param("rating") Integer rating,
+                                          @Param(RATING_PARAM) Integer rating,
                                           @Param("providerId") Long providerId,
                                           @Param("serviceId") Long serviceId,
                                           Pageable pageable);
+
+    @Query("""
+            SELECT r
+            FROM MarketplaceReview r
+            WHERE r.deleted = false
+              AND (:search IS NULL OR LOWER(r.reviewComment) LIKE LOWER(CONCAT('%', :search, '%'))
+                   OR str(r.id) = :search
+                   OR str(r.bookingId) = :search)
+              AND (:status IS NULL OR r.status = :status)
+              AND (:rating IS NULL OR r.rating = :rating)
+              AND (:providerId IS NULL OR r.providerId = :providerId)
+              AND (:serviceId IS NULL OR r.serviceId = :serviceId)
+              AND (:startAt IS NULL OR r.createdAt >= :startAt)
+              AND (:endAt IS NULL OR r.createdAt <= :endAt)
+              AND (:reported IS NULL OR (:reported = true AND r.reportCount > 0) OR (:reported = false AND r.reportCount = 0))
+            """)
+    Page<ReviewEntity> searchAdminReviewsAdvanced(@Param("search") String search,
+                                                  @Param("status") ReviewStatus status,
+                                                  @Param(RATING_PARAM) Integer rating,
+                                                  @Param("providerId") Long providerId,
+                                                  @Param("serviceId") Long serviceId,
+                                                  @Param("startAt") java.time.LocalDateTime startAt,
+                                                  @Param("endAt") java.time.LocalDateTime endAt,
+                                                  @Param("reported") Boolean reported,
+                                                  Pageable pageable);
+
+    @Query("""
+            SELECT r.rating, COUNT(r)
+            FROM MarketplaceReview r
+            WHERE r.deleted = false
+              AND (:serviceId IS NULL OR r.serviceId = :serviceId)
+              AND (:providerId IS NULL OR r.providerId = :providerId)
+              AND (:startAt IS NULL OR r.createdAt >= :startAt)
+              AND (:endAt IS NULL OR r.createdAt <= :endAt)
+            GROUP BY r.rating
+            """)
+    List<Object[]> ratingDistribution(@Param("serviceId") Long serviceId,
+                                      @Param("providerId") Long providerId,
+                                      @Param("startAt") java.time.LocalDateTime startAt,
+                                      @Param("endAt") java.time.LocalDateTime endAt);
+
+    @Query("""
+            SELECT COUNT(r)
+            FROM MarketplaceReview r
+            WHERE r.deleted = false
+              AND r.status = :status
+              AND (:serviceId IS NULL OR r.serviceId = :serviceId)
+              AND (:providerId IS NULL OR r.providerId = :providerId)
+              AND (:startAt IS NULL OR r.createdAt >= :startAt)
+              AND (:endAt IS NULL OR r.createdAt <= :endAt)
+            """)
+    long countByStatusForStats(@Param("status") ReviewStatus status,
+                               @Param("serviceId") Long serviceId,
+                               @Param("providerId") Long providerId,
+                               @Param("startAt") java.time.LocalDateTime startAt,
+                               @Param("endAt") java.time.LocalDateTime endAt);
+
+    @Query("""
+            SELECT COUNT(r)
+            FROM MarketplaceReview r
+            WHERE r.deleted = false
+              AND (:serviceId IS NULL OR r.serviceId = :serviceId)
+              AND (:providerId IS NULL OR r.providerId = :providerId)
+              AND (:startAt IS NULL OR r.createdAt >= :startAt)
+              AND (:endAt IS NULL OR r.createdAt <= :endAt)
+            """)
+    long countForStats(@Param("serviceId") Long serviceId,
+                       @Param("providerId") Long providerId,
+                       @Param("startAt") java.time.LocalDateTime startAt,
+                       @Param("endAt") java.time.LocalDateTime endAt);
+
+    @Query("""
+            SELECT COALESCE(AVG(r.rating), 0)
+            FROM MarketplaceReview r
+            WHERE r.deleted = false
+              AND (:serviceId IS NULL OR r.serviceId = :serviceId)
+              AND (:providerId IS NULL OR r.providerId = :providerId)
+              AND (:startAt IS NULL OR r.createdAt >= :startAt)
+              AND (:endAt IS NULL OR r.createdAt <= :endAt)
+            """)
+    Double averageRatingForStats(@Param("serviceId") Long serviceId,
+                                 @Param("providerId") Long providerId,
+                                 @Param("startAt") java.time.LocalDateTime startAt,
+                                 @Param("endAt") java.time.LocalDateTime endAt);
 }

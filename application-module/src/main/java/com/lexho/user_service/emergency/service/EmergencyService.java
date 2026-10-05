@@ -17,8 +17,9 @@ import com.lexho.user_service.emergency.repository.EmergencyEventRepository;
 import com.lexho.user_service.emergency.repository.EmergencyLocationRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
+import com.lexho.user_service.util.StringSanitizers;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,7 +38,7 @@ public class EmergencyService {
     private final EmergencyEventRepository emergencyEventRepository;
     private final EmergencyContactRepository emergencyContactRepository;
     private final EmergencyLocationRepository emergencyLocationRepository;
-    private final PartnerProfileRepository partnerProfileRepository;
+    private final PartnerOperationalProfileRepository partnerProfileRepository;
     private final EmergencyAdminNotifier emergencyAdminNotifier;
     private final EmergencyExternalContactNotifier emergencyExternalContactNotifier;
     private final AuditLogService auditLogService;
@@ -46,7 +47,7 @@ public class EmergencyService {
     public EmergencyService(EmergencyEventRepository emergencyEventRepository,
                             EmergencyContactRepository emergencyContactRepository,
                             EmergencyLocationRepository emergencyLocationRepository,
-                            PartnerProfileRepository partnerProfileRepository,
+                            PartnerOperationalProfileRepository partnerProfileRepository,
                             EmergencyAdminNotifier emergencyAdminNotifier,
                             EmergencyExternalContactNotifier emergencyExternalContactNotifier,
                             AuditLogService auditLogService,
@@ -63,7 +64,7 @@ public class EmergencyService {
 
     @Transactional
     public EmergencyEventResponse triggerSos(Long partnerId, EmergencySosRequest request) {
-        PartnerProfile partner = partnerProfileRepository.findById(partnerId)
+        PartnerOperationalProfile partner = partnerProfileRepository.findById(partnerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
 
         EmergencyEvent event = new EmergencyEvent();
@@ -224,10 +225,6 @@ public class EmergencyService {
     }
 
     private String trimToNull(String value) {
-        if (value == null) {
-            return null;
-        }
-        String normalized = value.trim();
-        return normalized.isEmpty() ? null : normalized;
+        return StringSanitizers.trimToNull(value);
     }
 }

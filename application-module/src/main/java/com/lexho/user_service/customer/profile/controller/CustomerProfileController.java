@@ -31,6 +31,7 @@ import java.util.Map;
 @RequestMapping({"/api/customer", "/api/v1/customer"})
 public class CustomerProfileController {
     private static final Logger log = LoggerFactory.getLogger(CustomerProfileController.class);
+    private static final String ATTR_USER_ID = "userId";
 
     private final CustomerProfileService customerProfileService;
 
@@ -39,30 +40,30 @@ public class CustomerProfileController {
     }
 
     @GetMapping("/profile")
-    public ApiResponse<CustomerProfileResponse> getProfile(@RequestAttribute("userId") Long userId) {
+    public ApiResponse<CustomerProfileResponse> getProfile(@RequestAttribute(ATTR_USER_ID) Long userId) {
         return ApiResponse.success("Profile fetched successfully", customerProfileService.getProfile(userId));
     }
 
     @PutMapping("/profile")
-    public ApiResponse<CustomerProfileResponse> updateProfile(@RequestAttribute("userId") Long userId,
+    public ApiResponse<CustomerProfileResponse> updateProfile(@RequestAttribute(ATTR_USER_ID) Long userId,
                                                               @Valid @RequestBody UpdateProfileRequest request) {
         return ApiResponse.success("Profile updated successfully", customerProfileService.updateProfile(userId, request));
     }
 
     @PutMapping("/profile/details")
-    public ApiResponse<CustomerProfileResponse> updateProfileDetails(@RequestAttribute("userId") Long userId,
+    public ApiResponse<CustomerProfileResponse> updateProfileDetails(@RequestAttribute(ATTR_USER_ID) Long userId,
                                                                      @Valid @RequestBody CustomerProfileUpdateRequest request) {
         return ApiResponse.success("Profile details updated successfully", customerProfileService.updateProfileDetails(userId, request));
     }
 
     @PutMapping("/profile/email")
-    public ApiResponse<CustomerProfileResponse> updateEmail(@RequestAttribute("userId") Long userId,
+    public ApiResponse<CustomerProfileResponse> updateEmail(@RequestAttribute(ATTR_USER_ID) Long userId,
                                                             @Valid @RequestBody CustomerEmailUpdateRequest request) {
         return ApiResponse.success("Email updated successfully", customerProfileService.updateEmail(userId, request));
     }
 
     @PostMapping(value = "/profile/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<ApiResponse<CustomerProfileResponse>> uploadProfileImage(@RequestAttribute("userId") Long userId,
+    public ResponseEntity<ApiResponse<CustomerProfileResponse>> uploadProfileImage(@RequestAttribute(ATTR_USER_ID) Long userId,
                                                                                     @RequestParam(value = "image", required = false) MultipartFile image,
                                                                                     @RequestParam(value = "file", required = false) MultipartFile file) {
         MultipartFile uploadFile = image != null ? image : file;
@@ -74,23 +75,23 @@ public class CustomerProfileController {
     }
 
     @DeleteMapping("/profile/image")
-    public ApiResponse<CustomerProfileResponse> deleteProfileImage(@RequestAttribute("userId") Long userId) {
+    public ApiResponse<CustomerProfileResponse> deleteProfileImage(@RequestAttribute(ATTR_USER_ID) Long userId) {
         return ApiResponse.success("Profile image removed successfully", customerProfileService.deleteProfileImage(userId));
     }
 
     @GetMapping("/addresses")
-    public ApiResponse<List<CustomerProfileAddressResponse>> getAddresses(@RequestAttribute("userId") Long userId) {
+    public ApiResponse<List<CustomerProfileAddressResponse>> getAddresses(@RequestAttribute(ATTR_USER_ID) Long userId) {
         return ApiResponse.success("ok", customerProfileService.getAddresses(userId));
     }
 
     @PostMapping("/account-delete-request")
-    public ApiResponse<Map<String, Object>> requestAccountDelete(@RequestAttribute("userId") Long userId) {
+    public ApiResponse<Map<String, Object>> requestAccountDelete(@RequestAttribute(ATTR_USER_ID) Long userId) {
         customerProfileService.requestAccountDelete(userId);
         return ApiResponse.success("ok", Map.of("requested", true));
     }
 
     @GetMapping("/account-delete-request/status")
-    public ApiResponse<Map<String, Object>> accountDeleteStatus(@RequestAttribute("userId") Long userId) {
+    public ApiResponse<Map<String, Object>> accountDeleteStatus(@RequestAttribute(ATTR_USER_ID) Long userId) {
         return ApiResponse.success("ok", customerProfileService.getAccountDeleteStatus(userId));
     }
 

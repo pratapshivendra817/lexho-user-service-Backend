@@ -25,6 +25,8 @@ import java.util.Locale;
 public class AdminAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminAuthService.class);
+    public static final String ADMIN_PORTAL_ACCESS_DENIED_MESSAGE =
+            "This account is not authorized to access the Admin portal. Use an active ADMIN account";
 
     private final AdminRepository adminRepository;
     private final PasswordEncoder passwordEncoder;
@@ -66,7 +68,7 @@ public class AdminAuthService {
 
         if (!admin.isActive()) {
             log.warn("Admin login failed: inactive admin for email={}, adminId={}", email, admin.getId());
-            throw new UnauthorizedException("Admin account is inactive");
+            throw new UnauthorizedException(ADMIN_PORTAL_ACCESS_DENIED_MESSAGE);
         }
 
         if (admin.unlockIfCooldownExpired(LocalDateTime.now())) {
@@ -116,7 +118,7 @@ public class AdminAuthService {
                 .orElseThrow(() -> new UnauthorizedException("Admin not found"));
 
         if (!admin.isActive()) {
-            throw new UnauthorizedException("Admin account is inactive");
+            throw new UnauthorizedException(ADMIN_PORTAL_ACCESS_DENIED_MESSAGE);
         }
 
         if (admin.unlockIfCooldownExpired(LocalDateTime.now())) {

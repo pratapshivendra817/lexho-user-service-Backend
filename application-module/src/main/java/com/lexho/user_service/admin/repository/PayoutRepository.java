@@ -26,6 +26,8 @@ public interface PayoutRepository extends JpaRepository<Payout, Long> {
 
     List<Payout> findByProviderId(Long providerId);
 
+    long countByProviderIdAndStatusIn(Long providerId, List<String> statuses);
+
     @Query("""
             SELECT p FROM Payout p
             WHERE (:search IS NULL OR str(p.providerId) LIKE CONCAT('%', :search, '%'))

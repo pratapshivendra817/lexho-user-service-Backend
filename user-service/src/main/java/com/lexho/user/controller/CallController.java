@@ -2,7 +2,9 @@ package com.lexho.user.controller;
 
 import com.lexho.user.dto.ApiResponse;
 import com.lexho.user.dto.CallActionRequest;
+import com.lexho.user.dto.CallHistoryResponse;
 import com.lexho.user.dto.CallSessionResponse;
+import com.lexho.user.dto.PagedResponse;
 import com.lexho.user.security.AuthenticatedUser;
 import com.lexho.user.security.CurrentUserService;
 import com.lexho.user.service.CallService;
@@ -14,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/calls")
@@ -28,8 +32,8 @@ public class CallController {
     }
 
     @GetMapping("/history")
-    public ApiResponse<?> history(@RequestParam(defaultValue = "0") int page,
-                                  @RequestParam(defaultValue = "20") int size) {
+    public ApiResponse<PagedResponse<CallHistoryResponse>> history(@RequestParam(defaultValue = "0") int page,
+                                                                   @RequestParam(defaultValue = "20") int size) {
         AuthenticatedUser user = currentUserService.requireCurrentUser();
         return ApiResponse.success(callService.getHistory(user, page, size));
     }
@@ -47,7 +51,7 @@ public class CallController {
     }
 
     @GetMapping("/missed")
-    public ApiResponse<?> missedCalls() {
+    public ApiResponse<List<CallHistoryResponse>> missedCalls() {
         AuthenticatedUser user = currentUserService.requireCurrentUser();
         return ApiResponse.success(callService.getMissedCalls(user));
     }

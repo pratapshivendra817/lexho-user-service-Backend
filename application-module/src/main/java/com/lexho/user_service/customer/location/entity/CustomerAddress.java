@@ -25,8 +25,8 @@ public class CustomerAddress extends BaseEntity {
 
     @Id
     @UuidGenerator
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(nullable = false, length = 36, columnDefinition = "char(36)")
+    @JdbcTypeCode(SqlTypes.BINARY)
+    @Column(nullable = false, length = 16, columnDefinition = "binary(16)")
     private UUID id;
 
     @Column(name = "customer_id", nullable = false)

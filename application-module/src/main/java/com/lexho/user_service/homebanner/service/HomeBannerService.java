@@ -11,6 +11,7 @@ import com.lexho.user_service.homebanner.entity.HomeBanner;
 import com.lexho.user_service.homebanner.entity.HomeBannerRedirectType;
 import com.lexho.user_service.homebanner.repository.HomeBannerRepository;
 import com.lexho.user_service.util.MediaUrlResolver;
+import com.lexho.user_service.util.StringSanitizers;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -45,6 +46,10 @@ public class HomeBannerService {
 
     @Transactional(readOnly = true)
     public List<HomeBannerResponse> getAdminBanners(HomeBannerAudience audience) {
+        return adminBanners(audience);
+    }
+
+    private List<HomeBannerResponse> adminBanners(HomeBannerAudience audience) {
         List<HomeBanner> banners = audience == null
                 ? homeBannerRepository.findAllByOrderByPriorityAscIdAsc()
                 : homeBannerRepository.findByAudienceOrderByPriorityAscIdAsc(audience);
@@ -90,7 +95,7 @@ public class HomeBannerService {
             HomeBanner banner = findById(item.getId());
             banner.setPriority(item.getPriority());
         }
-        return getAdminBanners(null);
+        return adminBanners(null);
     }
 
     private HomeBanner findById(Long id) {
@@ -137,10 +142,6 @@ public class HomeBannerService {
     }
 
     private String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return StringSanitizers.trimToNull(value);
     }
 }

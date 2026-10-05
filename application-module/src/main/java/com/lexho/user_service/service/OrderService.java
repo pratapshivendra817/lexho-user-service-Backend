@@ -21,6 +21,7 @@ import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.customer.entity.CustomerCartItemEntity;
 import com.lexho.user_service.customer.repository.CustomerCartItemRepository;
 import com.lexho.user_service.customer.repository.CustomerCatalogRepository;
+import com.lexho.user_service.coupon.service.CouponService;
 import com.lexho.user_service.dto.OrderItemDTO;
 import com.lexho.user_service.dto.OrderResponseDTO;
 import com.lexho.user_service.dto.PlaceOrderRequest;
@@ -30,18 +31,23 @@ import com.lexho.user_service.exception.UnauthorizedException;
 import com.lexho.user_service.notification.dto.AdminBulkNotificationRequest;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.observability.BusinessMetricsService;
-import lombok.RequiredArgsConstructor;
+import com.lexho.user_service.lexhopartner.service.CompletionSettingsService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
 public class OrderService {
+    private static final String ORDER_NOT_FOUND_WITH_ID = "Order not found with id: ";
+    private static final String INVALID_CART = "INVALID_CART";
+    private static final String CART_PRICE_MISSING = "Cart price missing for cart item.";
 
     private final OrderRepository orderRepository;
     private final CartRepository cartRepository;
@@ -52,11 +58,57 @@ public class OrderService {
     private final CartItemAddonRepository cartItemAddonRepository;
     private final OrderAddonRepository orderAddonRepository;
     private final BusinessMetricsService businessMetricsService;
+    private final CouponService couponService;
+    private final CompletionSettingsService completionSettingsService;
+
+    public OrderService(OrderRepository orderRepository,
+                        CartRepository cartRepository,
+                        CustomerCartItemRepository customerCartItemRepository,
+                        CustomerCatalogRepository customerCatalogRepository,
+                        NotificationManagementService notificationManagementService,
+                        AddonManagementService addonManagementService,
+                        CartItemAddonRepository cartItemAddonRepository,
+                        OrderAddonRepository orderAddonRepository,
+                        BusinessMetricsService businessMetricsService,
+                        CouponService couponService) {
+        this(orderRepository, cartRepository, customerCartItemRepository, customerCatalogRepository,
+                notificationManagementService, addonManagementService, cartItemAddonRepository,
+                orderAddonRepository, businessMetricsService, couponService, Optional.empty());
+    }
+
+    @Autowired
+    public OrderService(OrderRepository orderRepository,
+                        CartRepository cartRepository,
+                        CustomerCartItemRepository customerCartItemRepository,
+                        CustomerCatalogRepository customerCatalogRepository,
+                        NotificationManagementService notificationManagementService,
+                        AddonManagementService addonManagementService,
+                        CartItemAddonRepository cartItemAddonRepository,
+                        OrderAddonRepository orderAddonRepository,
+                        BusinessMetricsService businessMetricsService,
+                        CouponService couponService,
+                        Optional<CompletionSettingsService> completionSettingsService) {
+        this.orderRepository = orderRepository;
+        this.cartRepository = cartRepository;
+        this.customerCartItemRepository = customerCartItemRepository;
+        this.customerCatalogRepository = customerCatalogRepository;
+        this.notificationManagementService = notificationManagementService;
+        this.addonManagementService = addonManagementService;
+        this.cartItemAddonRepository = cartItemAddonRepository;
+        this.orderAddonRepository = orderAddonRepository;
+        this.businessMetricsService = businessMetricsService;
+        this.couponService = couponService;
+        this.completionSettingsService = optionalValue(completionSettingsService);
+    }
+
+    private static <T> T optionalValue(Optional<T> optional) {
+        return optional == null ? null : optional.orElse(null);
+    }
 
     @Transactional(readOnly = true)
     public OrderResponseDTO getOrder(Long id, Long userId) {
         Order order = orderRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_WITH_ID + id));
         validateOrderAccess(order, userId);
         return mapToDTO(order);
     }
@@ -91,88 +143,34 @@ public class OrderService {
         order.setAddress(request.getAddress());
         order.setScheduledAt(request.getScheduledAt());
         order.setBookingType(request.getBookingType());
+        order.setDispatchAddressId(request.getDispatchAddressId());
+        order.setDispatchServiceId(request.getDispatchServiceId());
+        order.setDispatchQuantity(request.getDispatchQuantity());
 
-        List<OrderItem> orderItems = new ArrayList<>();
-        List<OrderAddon> orderAddons = new ArrayList<>();
-        double total = 0;
+        OrderContents contents;
 
         if (!cartItems.isEmpty()) {
-            for (Cart cart : cartItems) {
-                if (cart.getPrice() == null) {
-                    throw new BookingValidationException("INVALID_CART", "Cart price missing for cart item.");
-                }
-                if (cart.getQuantity() == null || cart.getQuantity() <= 0) {
-                    throw new BookingValidationException("INVALID_CART", "Invalid quantity in cart.");
-                }
-
-                OrderItem item = new OrderItem();
-                item.setPartnerId(cart.getPartnerId());
-                item.setPartnerName(cart.getPartnerName());
-                item.setPrice(cart.getPrice());
-                item.setQuantity(cart.getQuantity());
-                item.setOrder(order);
-                orderItems.add(item);
-
-                total += cart.getPrice() * cart.getQuantity();
-            }
+            contents = fromLegacyCart(order, cartItems);
         } else {
-            Map<Long, List<CartItemAddonEntity>> cartAddonsByCartItemId = cartItemAddonRepository.findByCartItemIdIn(
-                    customerCartItems.stream().map(CustomerCartItemEntity::getId).toList()
-            ).stream().collect(Collectors.groupingBy(CartItemAddonEntity::getCartItemId));
-            for (CustomerCartItemEntity cart : customerCartItems) {
-                if (cart.getQuantity() == null || cart.getQuantity() <= 0) {
-                    throw new BookingValidationException("INVALID_CART", "Invalid quantity in cart.");
-                }
-                AdminServiceEntity service = customerCatalogRepository.findById(cart.getServiceId()).orElse(null);
-                if (service == null || !service.isActive() || service.isDeleted()) {
-                    throw new BookingValidationException("SERVICE_UNAVAILABLE", "Service is unavailable");
-                }
-                double unitPrice = resolveUnitPrice(service);
-                if (unitPrice <= 0) {
-                    throw new BookingValidationException("INVALID_CART", "Cart price missing for cart item.");
-                }
-
-                OrderItem item = new OrderItem();
-                item.setPartnerId(cart.getServiceId());
-                item.setPartnerName(service == null || service.getName() == null ? "Service" : service.getName());
-                item.setPrice(unitPrice);
-                item.setQuantity(cart.getQuantity());
-                item.setOrder(order);
-                orderItems.add(item);
-
-                total += unitPrice * cart.getQuantity();
-
-                AddonManagementService.ValidatedAddonSelection addonSelection =
-                        addonManagementService.validateSelections(service, toAddonSelections(cartAddonsByCartItemId.get(cart.getId())));
-                for (AddonManagementService.ValidatedAddon selected : addonSelection.getAddons()) {
-                    OrderAddon addon = new OrderAddon();
-                    addon.setServiceId(cart.getServiceId());
-                    addon.setAddonId(selected.getAddon().getId());
-                    addon.setAddonNameSnapshot(selected.getAddon().getAddonName());
-                    addon.setAddonPriceSnapshot(selected.getAddon().getPrice());
-                    addon.setQuantity(selected.getQuantity());
-                    addon.setTotalPrice(selected.totalPrice());
-                    orderAddons.add(addon);
-                    total += selected.totalPrice().doubleValue();
-                }
-            }
+            contents = fromCustomerCart(order, customerCartItems);
         }
 
         if (request.getExpectedTotal() != null
-                && Math.abs(request.getExpectedTotal().doubleValue() - total) > 0.01d) {
+                && Math.abs(request.getExpectedTotal().doubleValue() - contents.total()) > 0.01d) {
             throw new BookingValidationException("PRICE_CHANGED",
                     "Price has changed. Please refresh cart and try again.");
         }
 
-        order.setItems(orderItems);
-        order.setTotalAmount(total);
+        order.setItems(contents.items());
+        order.setTotalAmount(contents.total());
+        couponService.applyToOrder(order, request.getCouponCode(), firstServiceId(contents.items()), request.getBookingType());
 
         Order savedOrder = orderRepository.save(order);
-        for (OrderAddon addon : orderAddons) {
+        for (OrderAddon addon : contents.addons()) {
             addon.setOrderId(savedOrder.getId());
         }
-        if (!orderAddons.isEmpty()) {
-            orderAddonRepository.saveAll(orderAddons);
+        if (!contents.addons().isEmpty()) {
+            orderAddonRepository.saveAll(contents.addons());
         }
 
         try {
@@ -197,6 +195,96 @@ public class OrderService {
         return mapToDTO(savedOrder);
     }
 
+    private OrderContents fromLegacyCart(Order order, List<Cart> cartItems) {
+        List<OrderItem> orderItems = new ArrayList<>();
+        double total = 0d;
+        for (Cart cart : cartItems) {
+            if (cart.getPrice() == null) {
+                throw new BookingValidationException(INVALID_CART, CART_PRICE_MISSING);
+            }
+            validateQuantity(cart.getQuantity());
+
+            OrderItem item = new OrderItem();
+            item.setPartnerId(cart.getPartnerId());
+            item.setPartnerName(cart.getPartnerName());
+            item.setPrice(cart.getPrice());
+            item.setQuantity(cart.getQuantity());
+            item.setOrder(order);
+            orderItems.add(item);
+            total += cart.getPrice() * cart.getQuantity();
+        }
+        return new OrderContents(orderItems, List.of(), total);
+    }
+
+    private OrderContents fromCustomerCart(Order order, List<CustomerCartItemEntity> customerCartItems) {
+        List<OrderItem> orderItems = new ArrayList<>();
+        List<OrderAddon> orderAddons = new ArrayList<>();
+        double total = 0d;
+        Map<Long, List<CartItemAddonEntity>> cartAddonsByCartItemId = cartItemAddonRepository.findByCartItemIdIn(
+                customerCartItems.stream().map(CustomerCartItemEntity::getId).toList()
+        ).stream().collect(Collectors.groupingBy(CartItemAddonEntity::getCartItemId));
+        for (CustomerCartItemEntity cart : customerCartItems) {
+            AdminServiceEntity service = validatedService(cart);
+            double unitPrice = resolveUnitPrice(service);
+            if (unitPrice <= 0) {
+                throw new BookingValidationException(INVALID_CART, CART_PRICE_MISSING);
+            }
+            orderItems.add(orderItem(order, cart, service, unitPrice));
+            total += unitPrice * cart.getQuantity();
+            total += addOrderAddons(orderAddons, cart, service, cartAddonsByCartItemId.get(cart.getId()));
+        }
+        return new OrderContents(orderItems, orderAddons, total);
+    }
+
+    private AdminServiceEntity validatedService(CustomerCartItemEntity cart) {
+        validateQuantity(cart.getQuantity());
+        AdminServiceEntity service = customerCatalogRepository.findById(cart.getServiceId()).orElse(null);
+        if (service == null || !service.isActive() || service.isDeleted()) {
+            throw new BookingValidationException("SERVICE_UNAVAILABLE", "Service is unavailable");
+        }
+        return service;
+    }
+
+    private void validateQuantity(Integer quantity) {
+        if (quantity == null || quantity <= 0) {
+            throw new BookingValidationException(INVALID_CART, "Invalid quantity in cart.");
+        }
+    }
+
+    private OrderItem orderItem(Order order, CustomerCartItemEntity cart, AdminServiceEntity service, double unitPrice) {
+        OrderItem item = new OrderItem();
+        item.setPartnerId(cart.getServiceId());
+        item.setPartnerName(service.getName() == null ? "Service" : service.getName());
+        item.setPrice(unitPrice);
+        item.setQuantity(cart.getQuantity());
+        item.setOrder(order);
+        return item;
+    }
+
+    private double addOrderAddons(List<OrderAddon> orderAddons,
+                                  CustomerCartItemEntity cart,
+                                  AdminServiceEntity service,
+                                  List<CartItemAddonEntity> cartAddonRows) {
+        AddonManagementService.ValidatedAddonSelection addonSelection =
+                addonManagementService.validateSelections(service, toAddonSelections(cartAddonRows));
+        double total = 0d;
+        for (AddonManagementService.ValidatedAddon selected : addonSelection.getAddons()) {
+            OrderAddon addon = new OrderAddon();
+            addon.setServiceId(cart.getServiceId());
+            addon.setAddonId(selected.getAddon().getId());
+            addon.setAddonNameSnapshot(selected.getAddon().getAddonName());
+            addon.setAddonPriceSnapshot(selected.getAddon().getPrice());
+            addon.setQuantity(selected.getQuantity());
+            addon.setTotalPrice(selected.totalPrice());
+            orderAddons.add(addon);
+            total += selected.totalPrice().doubleValue();
+        }
+        return total;
+    }
+
+    private record OrderContents(List<OrderItem> items, List<OrderAddon> addons, double total) {
+    }
+
     private List<AddonSelectionRequest> toAddonSelections(List<CartItemAddonEntity> rows) {
         if (rows == null || rows.isEmpty()) {
             return List.of();
@@ -219,12 +307,24 @@ public class OrderService {
         return service.getBasePrice() == null ? 0d : service.getBasePrice().doubleValue();
     }
 
-    public OrderResponseDTO updateStatus(Long orderId, OrderStatus newStatus) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+    private Long firstServiceId(List<OrderItem> orderItems) {
+        if (orderItems == null || orderItems.isEmpty()) {
+            return null;
+        }
+        OrderItem firstItem = orderItems.get(0);
+        return firstItem == null ? null : firstItem.getPartnerId();
+    }
 
-        if (!order.getStatus().canTransitionTo(newStatus)) {
-            throw new IllegalStateException("Invalid status transition: " + order.getStatus() + " to " + newStatus);
+    public OrderResponseDTO updateStatus(Long orderId, OrderStatus newStatus) {
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_WITH_ID + orderId));
+
+        OrderStatus current = order.getStatus();
+        if (current == newStatus) {
+            return mapToDTO(order);
+        }
+        if (current == null || !current.canTransitionTo(newStatus)) {
+            throw new IllegalStateException("Invalid status transition: " + current + " to " + newStatus);
         }
 
         order.setStatus(newStatus);
@@ -244,11 +344,23 @@ public class OrderService {
     }
 
     public OrderResponseDTO cancelOrder(Long orderId, Long userId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_WITH_ID + orderId));
         validateOrderAccess(order, userId);
+        return cancelLockedOrder(order);
+    }
 
-        if (!order.getStatus().canCancel()) {
+    public OrderResponseDTO cancelOrder(Long orderId) {
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_WITH_ID + orderId));
+        return cancelLockedOrder(order);
+    }
+
+    private OrderResponseDTO cancelLockedOrder(Order order) {
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            return mapToDTO(order);
+        }
+        if (order.getStatus() == null || !order.getStatus().canCancel()) {
             throw new IllegalStateException("Order cannot be cancelled at this stage");
         }
 
@@ -269,10 +381,15 @@ public class OrderService {
         OrderResponseDTO dto = new OrderResponseDTO();
         dto.setId(order.getId());
         dto.setTotalAmount(order.getTotalAmount());
+        dto.setOriginalAmount(order.getOriginalAmount());
+        dto.setDiscountAmount(order.getDiscountAmount());
+        dto.setCouponCode(order.getCouponCode());
         dto.setStatus(order.getStatus().name());
         dto.setPaymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : "PENDING");
         dto.setAddress(order.getAddress());
         dto.setBookingType(order.getBookingType());
+        dto.setCompletedAt(order.getCompletedAt());
+        dto.setReviewEligible(isReviewEligible(order));
         dto.setPromisedStartTime(order.getPromisedStartTime());
         dto.setSlaMinutes(order.getSlaMinutes());
         dto.setUnavailableReason(order.getUnavailableReason());
@@ -294,9 +411,17 @@ public class OrderService {
     }
 
     private void validateOrderAccess(Order order, Long userId) {
-        if (!order.getUserId().equals(userId)) {
+        if (!Objects.equals(order.getUserId(), userId)) {
             throw new UnauthorizedException("You are not allowed to access this order");
         }
+    }
+
+    private boolean isReviewEligible(Order order) {
+        OrderStatus status = order.getStatus();
+        boolean completed = status == OrderStatus.SERVICE_COMPLETED
+                || status == OrderStatus.PAYMENT_COMPLETED
+                || status == OrderStatus.DELIVERED;
+        return completed && (completionSettingsService == null || completionSettingsService.reviewEligibleFor(order));
     }
 
     private void sendOrderNotification(Long userId, String title, String message, Long orderId) {

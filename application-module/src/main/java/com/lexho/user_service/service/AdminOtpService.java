@@ -13,13 +13,13 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class AdminOtpService {
@@ -27,6 +27,11 @@ public class AdminOtpService {
     private static final Logger log = LoggerFactory.getLogger(AdminOtpService.class);
     private static final String OTP_HASH_FIELD = "otpHash";
     private static final String ATTEMPTS_FIELD = "attempts";
+    private static final String INVALID_OTP = "Invalid OTP";
+    private static final String MAXIMUM_OTP_ATTEMPTS_EXCEEDED = "Maximum OTP attempts exceeded";
+    private static final String OTP_NOT_FOUND_OR_EXPIRED = "OTP not found or expired";
+    private static final String OTP_SERVICE_TEMPORARILY_UNAVAILABLE = "OTP service is temporarily unavailable";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final StringRedisTemplate stringRedisTemplate;
     private final PasswordEncoder passwordEncoder;
@@ -48,7 +53,7 @@ public class AdminOtpService {
     }
 
     public String generateOtp() {
-        return String.valueOf(ThreadLocalRandom.current().nextInt(100000, 1000000));
+        return String.valueOf(SECURE_RANDOM.nextInt(900000) + 100000);
     }
 
     public void storeOtp(String email, Long adminId, String otp) {
@@ -90,14 +95,14 @@ public class AdminOtpService {
             Object attemptsValue = hashOperations.get(key, ATTEMPTS_FIELD);
 
             if (otpHashValue == null) {
-                throw new BadRequestException("OTP not found or expired");
+                throw new BadRequestException(OTP_NOT_FOUND_OR_EXPIRED);
             }
 
             int attempts = parseAttempts(attemptsValue);
             int maxAttempts = adminAuthProperties.getOtp().getMaxAttempts();
             if (attempts >= maxAttempts) {
                 stringRedisTemplate.delete(key);
-                throw new BadRequestException("Maximum OTP attempts exceeded");
+                throw new BadRequestException(MAXIMUM_OTP_ATTEMPTS_EXCEEDED);
             }
 
             String otpHash = String.valueOf(otpHashValue);
@@ -106,9 +111,9 @@ public class AdminOtpService {
                 hashOperations.put(key, ATTEMPTS_FIELD, String.valueOf(attempts));
                 if (attempts >= maxAttempts) {
                     stringRedisTemplate.delete(key);
-                    throw new BadRequestException("Maximum OTP attempts exceeded");
+                    throw new BadRequestException(MAXIMUM_OTP_ATTEMPTS_EXCEEDED);
                 }
-                throw new BadRequestException("Invalid OTP");
+                throw new BadRequestException(INVALID_OTP);
             }
         } catch (RuntimeException ex) {
             if (ex instanceof BadRequestException) {
@@ -127,22 +132,22 @@ public class AdminOtpService {
         LocalOtpRecord otpRecord = localOtpStore.get(key);
         if (otpRecord == null || otpRecord.expiresAtEpochMs < System.currentTimeMillis()) {
             localOtpStore.remove(key);
-            throw new BadRequestException("OTP not found or expired");
+            throw new BadRequestException(OTP_NOT_FOUND_OR_EXPIRED);
         }
 
         int maxAttempts = adminAuthProperties.getOtp().getMaxAttempts();
         if (otpRecord.attempts >= maxAttempts) {
             localOtpStore.remove(key);
-            throw new BadRequestException("Maximum OTP attempts exceeded");
+            throw new BadRequestException(MAXIMUM_OTP_ATTEMPTS_EXCEEDED);
         }
 
         if (!passwordEncoder.matches(normalizedOtp, otpRecord.otpHash)) {
             otpRecord.attempts += 1;
             if (otpRecord.attempts >= maxAttempts) {
                 localOtpStore.remove(key);
-                throw new BadRequestException("Maximum OTP attempts exceeded");
+                throw new BadRequestException(MAXIMUM_OTP_ATTEMPTS_EXCEEDED);
             }
-            throw new BadRequestException("Invalid OTP");
+            throw new BadRequestException(INVALID_OTP);
         }
     }
 
@@ -162,10 +167,10 @@ public class AdminOtpService {
 
     private void storeOtpInDbFallback(Long adminId, String otpHash, int expirySeconds) {
         if (adminId == null) {
-            throw new InfrastructureException("OTP service is temporarily unavailable");
+            throw new InfrastructureException(OTP_SERVICE_TEMPORARILY_UNAVAILABLE);
         }
         com.lexho.admin.entity.Admin adminRef = adminRepository.findById(adminId)
-                .orElseThrow(() -> new InfrastructureException("OTP service is temporarily unavailable"));
+                .orElseThrow(() -> new InfrastructureException(OTP_SERVICE_TEMPORARILY_UNAVAILABLE));
         AdminOtp adminOtp = new AdminOtp();
         adminOtp.setAdmin(adminRef);
         adminOtp.setOtpCode(otpHash);
@@ -177,24 +182,24 @@ public class AdminOtpService {
 
     private void validateOtpFromDbFallback(Long adminId, String otp) {
         if (adminId == null) {
-            throw new InfrastructureException("OTP service is temporarily unavailable");
+            throw new InfrastructureException(OTP_SERVICE_TEMPORARILY_UNAVAILABLE);
         }
         AdminOtp adminOtp = adminOtpRepository.findTopByAdmin_IdOrderByCreatedAtDesc(adminId)
-                .orElseThrow(() -> new BadRequestException("OTP not found or expired"));
+                .orElseThrow(() -> new BadRequestException(OTP_NOT_FOUND_OR_EXPIRED));
         if (adminOtp.getConsumedAt() != null || LocalDateTime.now().isAfter(adminOtp.getExpiresAt())) {
-            throw new BadRequestException("OTP not found or expired");
+            throw new BadRequestException(OTP_NOT_FOUND_OR_EXPIRED);
         }
         int maxAttempts = adminAuthProperties.getOtp().getMaxAttempts();
         if (adminOtp.getAttempts() >= maxAttempts) {
-            throw new BadRequestException("Maximum OTP attempts exceeded");
+            throw new BadRequestException(MAXIMUM_OTP_ATTEMPTS_EXCEEDED);
         }
         if (!passwordEncoder.matches(otp, adminOtp.getOtpCode())) {
             adminOtp.setAttempts(adminOtp.getAttempts() + 1);
             adminOtpRepository.save(adminOtp);
             if (adminOtp.getAttempts() >= maxAttempts) {
-                throw new BadRequestException("Maximum OTP attempts exceeded");
+                throw new BadRequestException(MAXIMUM_OTP_ATTEMPTS_EXCEEDED);
             }
-            throw new BadRequestException("Invalid OTP");
+            throw new BadRequestException(INVALID_OTP);
         }
         adminOtp.setConsumedAt(LocalDateTime.now());
         adminOtpRepository.save(adminOtp);

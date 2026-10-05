@@ -21,13 +21,16 @@ public class JwtTokenService {
     private final String jwtSecret;
     private final long expirationMs;
     private final String issuer;
+    private final String audience;
 
     public JwtTokenService(@Value("${security.jwt.secret:change-this-to-a-long-random-secret-key-min-32-bytes}") String jwtSecret,
                            @Value("${security.jwt.expiration-ms:900000}") long expirationMs,
-                           @Value("${security.jwt.issuer:lexho-auth-service}") String issuer) {
+                           @Value("${security.jwt.issuer:lexho-user-service}") String issuer,
+                           @Value("${security.jwt.audience:lexho-clients}") String audience) {
         this.jwtSecret = jwtSecret;
         this.expirationMs = expirationMs;
         this.issuer = issuer;
+        this.audience = audience;
     }
 
     public String generateAccessToken(Long userId, Role role) {
@@ -41,6 +44,7 @@ public class JwtTokenService {
                 .setClaims(claims)
                 .setSubject(String.valueOf(userId))
                 .setIssuer(issuer)
+                .claim("aud", audience)
                 .setIssuedAt(Date.from(now))
                 .setExpiration(Date.from(expiry))
                 .signWith(signingKey(), SignatureAlgorithm.HS256)
@@ -55,6 +59,9 @@ public class JwtTokenService {
                 .getBody();
         if (!issuer.equals(claims.getIssuer())) {
             throw new IllegalArgumentException("Invalid issuer");
+        }
+        if (!audience.equals(claims.get("aud", String.class))) {
+            throw new IllegalArgumentException("Invalid audience");
         }
         return claims;
     }

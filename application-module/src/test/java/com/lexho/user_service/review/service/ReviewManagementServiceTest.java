@@ -2,6 +2,7 @@ package com.lexho.user_service.review.service;
 
 import com.lexho.booking.entity.Booking;
 import com.lexho.booking.entity.Order;
+import com.lexho.booking.entity.OrderItem;
 import com.lexho.booking.enums.BookingStatus;
 import com.lexho.booking.repository.BookingRepository;
 import com.lexho.booking.repository.OrderRepository;
@@ -11,21 +12,30 @@ import com.lexho.provider.entity.Partner;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user.entity.User;
 import com.lexho.user.repository.UserRepository;
+import com.lexho.user_service.admin.entity.AdminCategoryEntity;
+import com.lexho.user_service.admin.entity.AdminServiceEntity;
+import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
+import com.lexho.user_service.admin.settings.service.AdminSettingsService;
 import com.lexho.user_service.audit.service.AuditLogService;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.review.dto.ReviewResponse;
 import com.lexho.user_service.review.dto.CustomerReviewSubmitResponse;
 import com.lexho.user_service.review.dto.ReportReviewRequest;
+import com.lexho.user_service.review.dto.ReviewReportResponse;
+import com.lexho.user_service.review.dto.ReviewSettingsUpdateRequest;
 import com.lexho.user_service.review.dto.SubmitReviewRequest;
 import com.lexho.user_service.review.dto.UpdateReviewRequest;
 import com.lexho.user_service.review.entity.ReviewEntity;
+import com.lexho.user_service.review.entity.ReviewModerationHistory;
 import com.lexho.user_service.review.entity.ReviewReport;
+import com.lexho.user_service.review.enums.ReviewReportStatus;
 import com.lexho.user_service.review.enums.ReviewStatus;
 import com.lexho.user_service.review.exception.ReviewAccessDeniedException;
 import com.lexho.user_service.review.exception.ReviewNotFoundException;
 import com.lexho.user_service.review.exception.ReviewValidationException;
 import com.lexho.user_service.review.mapper.ReviewMapper;
+import com.lexho.user_service.review.repository.ReviewModerationHistoryRepository;
 import com.lexho.user_service.review.repository.ReviewReportRepository;
 import com.lexho.user_service.review.repository.ReviewRepository;
 import com.lexho.user_service.review.repository.ServiceCategoryLookupRepository;
@@ -41,6 +51,7 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -72,7 +83,13 @@ class ReviewManagementServiceTest {
     @Mock
     private PartnerRepository partnerRepository;
     @Mock
-    private PartnerProfileRepository partnerProfileRepository;
+    private PartnerOperationalProfileRepository partnerProfileRepository;
+    @Mock
+    private AdminServiceEntityRepository adminServiceEntityRepository;
+    @Mock
+    private AdminSettingsService adminSettingsService;
+    @Mock
+    private ReviewModerationHistoryRepository reviewModerationHistoryRepository;
     @Mock
     private ServiceCategoryLookupRepository serviceCategoryLookupRepository;
     @Mock
@@ -127,6 +144,12 @@ class ReviewManagementServiceTest {
         order.setUserId(11L);
         order.setAssignedPartnerId(22L);
         order.setStatus(OrderStatus.SERVICE_COMPLETED);
+        java.util.List<OrderItem> items = new java.util.ArrayList<>();
+        items.add(null);
+        OrderItem item = new OrderItem();
+        item.setPartnerId(33L);
+        items.add(item);
+        order.setItems(items);
 
         ReviewEntity saved = new ReviewEntity();
         saved.setId(1001L);
@@ -145,9 +168,45 @@ class ReviewManagementServiceTest {
         assertEquals(1001L, response.reviewId());
         assertEquals(20481L, response.bookingId());
         assertEquals(5, response.rating());
+        assertEquals("Excellent service", response.reviewText());
         assertEquals(true, response.reviewSubmitted());
         verify(auditLogService).log(11L, "CUSTOMER", "REVIEW_CREATED", "REVIEW", "1001", null,
                 "bookingId=20481,rating=5");
+        ArgumentCaptor<ReviewEntity> captor = ArgumentCaptor.forClass(ReviewEntity.class);
+        verify(reviewRepository).save(captor.capture());
+        assertThat(captor.getValue().getServiceId()).isEqualTo(33L);
+    }
+
+    @Test
+    void submitCustomerReviewAcceptsDisplayBookingIdAndReturnsClearErrorCodes() {
+        SubmitReviewRequest request = new SubmitReviewRequest();
+        request.setBookingId("B20481");
+        request.setRating(5);
+
+        Order order = new Order();
+        order.setId(20481L);
+        order.setUserId(11L);
+        order.setStatus(OrderStatus.CONFIRMED);
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(11L));
+        when(orderRepository.findById(20481L)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> reviewManagementService.submitCustomerReview(request))
+                .isInstanceOf(ReviewValidationException.class)
+                .extracting("code")
+                .isEqualTo("BOOKING_NOT_COMPLETED");
+
+        order.setStatus(OrderStatus.SERVICE_COMPLETED);
+        when(reviewRepository.existsByBookingIdAndDeletedFalse(20481L)).thenReturn(true);
+        assertThatThrownBy(() -> reviewManagementService.submitCustomerReview(request))
+                .isInstanceOf(ReviewValidationException.class)
+                .extracting("code")
+                .isEqualTo("REVIEW_ALREADY_SUBMITTED");
+
+        request.setBookingId("BAD");
+        assertThatThrownBy(() -> reviewManagementService.submitCustomerReview(request))
+                .isInstanceOf(ReviewNotFoundException.class)
+                .extracting("code")
+                .isEqualTo("BOOKING_NOT_FOUND");
     }
 
     @Test
@@ -271,7 +330,7 @@ class ReviewManagementServiceTest {
         review.setProviderId(44L);
         ReviewResponse mapped = new ReviewResponse();
         Partner partner = mock(Partner.class);
-        PartnerProfile profile = mock(PartnerProfile.class);
+        PartnerOperationalProfile profile = mock(PartnerOperationalProfile.class);
         when(reviewRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(review));
         when(reviewRepository.save(review)).thenReturn(review);
         when(reviewMapper.toResponse(review)).thenReturn(mapped);
@@ -290,7 +349,7 @@ class ReviewManagementServiceTest {
         verify(partner).setTotalReviews(9L);
         verify(partnerProfileRepository).save(profile);
         verify(auditLogService).log(0L, "ADMIN", "REVIEW_APPROVED", "REVIEW",
-                "5", null, "APPROVED");
+                "5", "PENDING", "APPROVED");
 
         reviewManagementService.rejectReview(5L);
         assertThat(review.getStatus()).isEqualTo(ReviewStatus.REJECTED);
@@ -394,6 +453,258 @@ class ReviewManagementServiceTest {
         assertThatThrownBy(() -> reviewManagementService.submitReview(request))
                 .isInstanceOf(ReviewValidationException.class)
                 .hasMessageContaining("one review");
+    }
+
+    @Test
+    void completedLegacyPartnerOrderStatusIsReviewEligibleThroughConverterMapping() {
+        SubmitReviewRequest request = new SubmitReviewRequest();
+        request.setBookingId(303L);
+        request.setRating(5);
+        Order order = new Order();
+        order.setId(303L);
+        order.setUserId(11L);
+        order.setAssignedPartnerId(22L);
+        order.setStatus(OrderStatus.SERVICE_COMPLETED);
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(11L));
+        when(orderRepository.findById(303L)).thenReturn(Optional.of(order));
+        when(reviewRepository.existsByBookingIdAndDeletedFalse(303L)).thenReturn(false);
+        when(reviewRepository.save(any(ReviewEntity.class))).thenAnswer(invocation -> {
+            ReviewEntity saved = invocation.getArgument(0);
+            saved.setId(909L);
+            return saved;
+        });
+
+        reviewManagementService.submitReview(request);
+
+        verify(reviewRepository).save(any(ReviewEntity.class));
+    }
+
+    @Test
+    void submitReviewCreatesLegacyBookingReviewWhenOrderIsMissing() {
+        SubmitReviewRequest request = new SubmitReviewRequest();
+        request.setBookingId(101L);
+        request.setRating(4);
+        request.setReviewComment("  Good work  ");
+        Booking booking = mockBooking(101L, 11L, BookingStatus.COMPLETED);
+        ReviewResponse mapped = new ReviewResponse();
+        mapped.setId(77L);
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(11L));
+        when(orderRepository.findById(101L)).thenReturn(Optional.empty());
+        when(bookingRepository.findByIdAndDeletedFalse(101L)).thenReturn(Optional.of(booking));
+        when(reviewRepository.existsByBookingIdAndDeletedFalse(101L)).thenReturn(false);
+        when(reviewRepository.save(any(ReviewEntity.class))).thenAnswer(invocation -> {
+            ReviewEntity saved = invocation.getArgument(0);
+            saved.setId(77L);
+            return saved;
+        });
+        when(reviewMapper.toResponse(any(ReviewEntity.class))).thenReturn(mapped);
+
+        ReviewResponse response = reviewManagementService.submitReview(request);
+
+        assertThat(response.getId()).isEqualTo(77L);
+        ArgumentCaptor<ReviewEntity> reviewCaptor = ArgumentCaptor.forClass(ReviewEntity.class);
+        verify(reviewRepository).save(reviewCaptor.capture());
+        assertThat(reviewCaptor.getValue().getBookingId()).isEqualTo(101L);
+        assertThat(reviewCaptor.getValue().getCustomerId()).isEqualTo(11L);
+        assertThat(reviewCaptor.getValue().getReviewComment()).isEqualTo("Good work");
+        assertThat(reviewCaptor.getValue().getStatus()).isEqualTo(ReviewStatus.PENDING);
+    }
+
+    @Test
+    void advancedAdminSearchParsesDateFiltersAndRejectsInvalidDates() {
+        ReviewEntity review = review(5L, 101L, 11L, ReviewStatus.APPROVED);
+        ReviewResponse mapped = new ReviewResponse();
+        mapped.setId(5L);
+        when(reviewMapper.toResponse(review)).thenReturn(mapped);
+        when(reviewRepository.searchAdminReviewsAdvanced(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(review)));
+
+        var response = reviewManagementService.getAllReviewsForAdmin(
+                1, 20, "rating", "desc", 5, ReviewStatus.APPROVED, 44L, 3L, "  clean  ",
+                "2026-08-01T10:15:00", "2026-08-02T10:15:00", true);
+
+        assertThat(response.getContent()).extracting(ReviewResponse::getId).containsExactly(5L);
+        verify(reviewRepository).searchAdminReviewsAdvanced(
+                eq("clean"), eq(ReviewStatus.APPROVED), eq(5), eq(44L), eq(3L),
+                eq(LocalDateTime.parse("2026-08-01T10:15:00")),
+                eq(LocalDateTime.parse("2026-08-02T10:15:00")),
+                eq(true), any(Pageable.class));
+
+        assertThatThrownBy(() -> reviewManagementService.getAllReviewsForAdmin(
+                0, 10, "createdAt", "desc", null, null, null, null, null, "bad-date", null, null))
+                .isInstanceOf(ReviewValidationException.class)
+                .extracting("code")
+                .isEqualTo("INVALID_DATE_RANGE");
+    }
+
+    @Test
+    void reviewDetailMapsBookingUsersServiceReportsAndHistory() {
+        ReviewEntity review = review(5L, 101L, 11L, ReviewStatus.APPROVED);
+        review.setProviderId(44L);
+        review.setServiceId(3L);
+        review.setReviewComment("Great");
+        ReviewResponse mapped = new ReviewResponse();
+        mapped.setId(5L);
+        Order order = new Order();
+        order.setId(101L);
+        order.setUserId(11L);
+        order.setAssignedPartnerId(44L);
+        order.setStatus(OrderStatus.DELIVERED);
+        User customer = mock(User.class);
+        when(customer.getFullName()).thenReturn("Customer");
+        when(customer.getEmail()).thenReturn("customer@example.test");
+        User reporter = mock(User.class);
+        when(reporter.getFullName()).thenReturn("Reporter");
+        AdminServiceEntity service = new AdminServiceEntity();
+        service.setName("Cleaning");
+        service.setReviewEnabled(false);
+        ReviewReport report = new ReviewReport();
+        report.setId(9L);
+        report.setReviewId(5L);
+        report.setReportedByUserId(66L);
+        report.setReason("spam");
+        report.setStatus(ReviewReportStatus.OPEN);
+        ReviewModerationHistory history = new ReviewModerationHistory();
+        history.setId(8L);
+        history.setReviewId(5L);
+        history.setPreviousStatus(ReviewStatus.PENDING);
+        history.setNewStatus(ReviewStatus.APPROVED);
+        history.setAction("APPROVE");
+        history.setAdminId(1L);
+        when(reviewRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(review));
+        when(reviewMapper.toResponse(review)).thenReturn(mapped);
+        when(orderRepository.findById(101L)).thenReturn(Optional.of(order));
+        when(userRepository.findById(11L)).thenReturn(Optional.of(customer));
+        when(userRepository.findById(44L)).thenReturn(Optional.empty());
+        when(userRepository.findById(66L)).thenReturn(Optional.of(reporter));
+        when(adminServiceEntityRepository.findByIdAndDeletedFalse(3L)).thenReturn(Optional.of(service));
+        when(reviewReportRepository.findByReviewIdOrderByCreatedAtDesc(5L)).thenReturn(List.of(report));
+        when(reviewRepository.findById(5L)).thenReturn(Optional.of(review));
+        when(reviewModerationHistoryRepository.findByReviewIdOrderByCreatedAtAsc(5L)).thenReturn(List.of(history));
+
+        var detail = reviewManagementService.getReviewDetailForAdmin(5L);
+
+        assertThat(detail.review().getId()).isEqualTo(5L);
+        assertThat(detail.booking()).containsEntry("status", OrderStatus.DELIVERED);
+        assertThat(detail.customer()).containsEntry("name", "Customer");
+        assertThat(detail.partner()).containsEntry("id", 44L);
+        assertThat(detail.service()).containsEntry("name", "Cleaning");
+        assertThat(detail.reports().get(0).reporterName()).isEqualTo("Reporter");
+        assertThat(detail.moderationHistory().get(0).action()).isEqualTo("APPROVE");
+    }
+
+    @Test
+    void reportPagesAndResolutionActionsMapReportsAndUpdateReviews() {
+        ReviewEntity review = review(5L, 101L, 11L, ReviewStatus.APPROVED);
+        ReviewReport report = new ReviewReport();
+        report.setId(9L);
+        report.setReviewId(5L);
+        report.setReportedByUserId(66L);
+        report.setReason("spam");
+        report.setStatus(ReviewReportStatus.OPEN);
+        when(reviewReportRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(report)));
+        when(reviewReportRepository.findByStatus(eq(ReviewReportStatus.OPEN), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(report)));
+        when(reviewRepository.findById(5L)).thenReturn(Optional.of(review));
+        when(userRepository.findById(66L)).thenReturn(Optional.empty());
+
+        assertThat(reviewManagementService.getReviewReportsForAdmin(-1, 0, null).getContent()).hasSize(1);
+        assertThat(reviewManagementService.getReviewReportsForAdmin(0, 10, ReviewReportStatus.OPEN).getContent()).hasSize(1);
+
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(1L));
+        when(reviewReportRepository.findById(9L)).thenReturn(Optional.of(report));
+        when(reviewReportRepository.save(report)).thenReturn(report);
+        ReviewReportResponse dismissed = reviewManagementService.dismissReport(9L, "  duplicate  ");
+        assertThat(dismissed.status()).isEqualTo(ReviewReportStatus.DISMISSED);
+        assertThat(dismissed.resolutionNote()).isEqualTo("duplicate");
+
+        ReviewResponse mapped = new ReviewResponse();
+        mapped.setId(5L);
+        when(reviewRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(review));
+        when(reviewRepository.save(review)).thenReturn(review);
+        when(reviewMapper.toResponse(review)).thenReturn(mapped);
+        assertThat(reviewManagementService.hideReportedReview(9L, "policy").getId()).isEqualTo(5L);
+        assertThat(review.getStatus()).isEqualTo(ReviewStatus.HIDDEN);
+        review.setStatus(ReviewStatus.APPROVED);
+        assertThat(reviewManagementService.rejectReportedReview(9L, "policy").getId()).isEqualTo(5L);
+        assertThat(review.getStatus()).isEqualTo(ReviewStatus.REJECTED);
+    }
+
+    @Test
+    void filteredStatsBuildsDistributionAndSkipsGroupedSummariesWhenFiltered() {
+        LocalDateTime start = LocalDateTime.parse("2026-08-01T00:00:00");
+        LocalDateTime end = LocalDateTime.parse("2026-08-31T23:59:00");
+        when(reviewRepository.countForStats(3L, 44L, start, end)).thenReturn(12L);
+        when(reviewRepository.countByStatusForStats(ReviewStatus.PENDING, 3L, 44L, start, end)).thenReturn(1L);
+        when(reviewRepository.countByStatusForStats(ReviewStatus.APPROVED, 3L, 44L, start, end)).thenReturn(8L);
+        when(reviewRepository.countByStatusForStats(ReviewStatus.REJECTED, 3L, 44L, start, end)).thenReturn(2L);
+        when(reviewRepository.countByStatusForStats(ReviewStatus.HIDDEN, 3L, 44L, start, end)).thenReturn(1L);
+        when(reviewRepository.averageRatingForStats(3L, 44L, start, end)).thenReturn(4.234);
+        when(reviewRepository.countByDeletedFalseAndReportCountGreaterThan(0L)).thenReturn(3L);
+        when(reviewRepository.ratingDistribution(3L, 44L, start, end))
+                .thenReturn(List.of(new Object[]{5, 6L}, new Object[]{1, 2L}));
+
+        var stats = reviewManagementService.getReviewStats(
+                "2026-08-01T00:00:00", "2026-08-31T23:59:00", 3L, 44L);
+
+        assertThat(stats.getTotalReviews()).isEqualTo(12L);
+        assertThat(stats.getAverageRating()).isEqualTo(4.23);
+        assertThat(stats.getRatingDistribution()).extracting("rating").containsExactly(5, 4, 3, 2, 1);
+        assertThat(stats.getRatingDistribution()).extracting("count").containsExactly(6L, 0L, 0L, 0L, 2L);
+        assertThat(stats.getProviderWiseRatings()).isEmpty();
+        assertThat(stats.getServiceWiseRatings()).isEmpty();
+    }
+
+    @Test
+    void reviewSettingsReadAndUpdateGlobalAndServiceSettings() {
+        AdminCategoryEntity category = mock(AdminCategoryEntity.class);
+        when(category.getId()).thenReturn(2L);
+        when(category.getName()).thenReturn("Home");
+        AdminServiceEntity service = new AdminServiceEntity();
+        service.setName("Cleaning");
+        service.setCategory(category);
+        service.setReviewEnabled(true);
+        when(adminSettingsService.get("review.reviews.enabled")).thenReturn(Map.of("value", "false"));
+        when(adminSettingsService.get("review.rating.enabled")).thenThrow(new RuntimeException("missing"));
+        when(adminSettingsService.get("review.written.enabled")).thenReturn(Map.of("value", "true"));
+        when(adminSettingsService.get("review.auto_approve.enabled")).thenReturn(Map.of("value", "true"));
+        when(adminServiceEntityRepository.findByDeletedFalseAndActiveTrue()).thenReturn(List.of(service));
+
+        var settings = reviewManagementService.getReviewSettings();
+
+        assertThat(settings.reviewsEnabled()).isFalse();
+        assertThat(settings.ratingEnabled()).isTrue();
+        assertThat(settings.autoApproveReviews()).isTrue();
+        assertThat(settings.services().get(0).categoryName()).isEqualTo("Home");
+
+        ReviewSettingsUpdateRequest request = new ReviewSettingsUpdateRequest();
+        request.reviewsEnabled = true;
+        request.ratingEnabled = false;
+        request.writtenReviewsEnabled = true;
+        request.autoApproveReviews = false;
+        ReviewSettingsUpdateRequest.ServiceReviewSettingUpdate ignored = new ReviewSettingsUpdateRequest.ServiceReviewSettingUpdate();
+        ReviewSettingsUpdateRequest.ServiceReviewSettingUpdate item = new ReviewSettingsUpdateRequest.ServiceReviewSettingUpdate();
+        item.serviceId = 3L;
+        item.reviewEnabled = false;
+        request.services = List.of(ignored, item);
+        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(1L));
+        when(adminServiceEntityRepository.findByIdAndDeletedFalse(3L)).thenReturn(Optional.of(service));
+        when(adminServiceEntityRepository.save(service)).thenReturn(service);
+
+        var updated = reviewManagementService.updateReviewSettings(request);
+
+        assertThat(updated.services()).hasSize(1);
+        assertThat(service.isReviewEnabled()).isFalse();
+        verify(adminSettingsService).upsert("review.reviews.enabled", "true", "Global reviews enabled", "ADMIN:1");
+        verify(adminSettingsService).upsert("review.auto_approve.enabled", "false", "Auto approve reviews", "ADMIN:1");
+        verify(auditLogService).log(1L, "ADMIN", "REVIEW_SETTINGS_UPDATED", "REVIEW_SETTINGS", "global", null, "updated");
+
+        item.serviceId = 99L;
+        when(adminServiceEntityRepository.findByIdAndDeletedFalse(99L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> reviewManagementService.updateReviewSettings(request))
+                .isInstanceOf(ReviewNotFoundException.class)
+                .extracting("code")
+                .isEqualTo("SERVICE_NOT_FOUND");
     }
 
     private ReviewEntity review(Long id, Long bookingId, Long customerId, ReviewStatus status) {

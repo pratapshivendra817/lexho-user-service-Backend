@@ -33,6 +33,7 @@ import com.lexho.user_service.exception.CodedValidationException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.subscription.enums.FamilySize;
 import com.lexho.user_service.subscription.service.SubscriptionPricingService;
+import com.lexho.user_service.util.CartImageUrlResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -52,6 +53,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class CustomerCartService {
+    private static final String QUANTITY_EXCEEDED_CODE = "QUANTITY_EXCEEDED";
+    private static final String QUANTITY_MUST_NOT_EXCEED_MESSAGE = "quantity must not exceed ";
 
     private final CustomerCartItemRepository customerCartItemRepository;
     private final CustomerCatalogRepository customerCatalogRepository;
@@ -82,17 +85,16 @@ public class CustomerCartService {
             throw new BadRequestException("Invalid user context");
         }
         if (request.getQuantity() == null || request.getQuantity() < 1) {
-            throw new CodedValidationException("QUANTITY_EXCEEDED", "quantity must be at least 1");
+            throw new CodedValidationException(QUANTITY_EXCEEDED_CODE, "quantity must be at least 1");
         }
         CartConfigEntity config = cartConfigService.currentEntity();
         int maxQuantity = config.getMaxServiceQuantity();
         if (request.getQuantity() < config.getMinServiceQuantity()) {
-            throw new CodedValidationException("QUANTITY_EXCEEDED",
+            throw new CodedValidationException(QUANTITY_EXCEEDED_CODE,
                     "quantity must be at least " + config.getMinServiceQuantity());
         }
         if (request.getQuantity() > maxQuantity) {
-            throw new CodedValidationException("QUANTITY_EXCEEDED",
-                    "quantity must not exceed " + maxQuantity);
+            throw new CodedValidationException(QUANTITY_EXCEEDED_CODE, QUANTITY_MUST_NOT_EXCEED_MESSAGE + maxQuantity);
         }
 
         AdminServiceEntity service = customerCatalogRepository
@@ -122,8 +124,8 @@ public class CustomerCartService {
             int current = item.getQuantity() == null ? 0 : item.getQuantity();
             int mergedQuantity = current + request.getQuantity();
             if (mergedQuantity > maxQuantity) {
-                throw new CodedValidationException("QUANTITY_EXCEEDED",
-                        "quantity must not exceed " + maxQuantity);
+                throw new CodedValidationException(QUANTITY_EXCEEDED_CODE,
+                        QUANTITY_MUST_NOT_EXCEED_MESSAGE + maxQuantity);
             }
             item.setQuantity(mergedQuantity);
         }
@@ -156,28 +158,14 @@ public class CustomerCartService {
 
     @Transactional(readOnly = true)
     public CustomerCartResponse getCart(Long userId) {
+        return buildCart(userId);
+    }
+
+    private CustomerCartResponse buildCart(Long userId) {
         List<CustomerCartItemEntity> cartItems = customerCartItemRepository.findByUserId(userId);
-        List<CustomerCartItemResponse> items = cartItems.stream().map(item -> {
-            AdminServiceEntity service = customerCatalogRepository.findById(item.getServiceId()).orElse(null);
-            double price = resolveUnitPrice(service, item);
-            int quantity = item.getQuantity() == null ? 0 : item.getQuantity();
-            List<CartAddonResponse> addons = buildCartAddonResponses(item.getId());
-            double addonTotal = addons.stream().mapToDouble(CartAddonResponse::getTotalPrice).sum();
-            return CustomerCartItemResponse.builder()
-                    .itemId(item.getId())
-                    .serviceId(item.getServiceId())
-                    .name(service == null || service.getName() == null ? "" : service.getName())
-                    .imageUrl(toAbsoluteImageUrl(service == null ? null : service.getImageUrl()))
-                    .serviceType(toServiceType(service == null ? null : service.getCategoryName()))
-                    .familySizeId(item.getFamilySizeId())
-                    .familySize(item.getFamilySize())
-                    .familySizeLabel(item.getFamilySizeLabel())
-                    .price(price)
-                    .quantity(quantity)
-                    .addons(addons)
-                    .totalPrice(round2((price * quantity) + addonTotal))
-                    .build();
-        }).toList();
+        List<CustomerCartItemResponse> items = cartItems.stream()
+                .map(this::toCartItemResponse)
+                .toList();
 
         double itemTotal = round2(items.stream().mapToDouble(CustomerCartItemResponse::getTotalPrice).sum());
         double gstAmount = round2(itemTotal * 0.03d);
@@ -229,6 +217,32 @@ public class CustomerCartService {
                 .build();
     }
 
+    private CustomerCartItemResponse toCartItemResponse(CustomerCartItemEntity item) {
+        AdminServiceEntity service = customerCatalogRepository.findById(item.getServiceId()).orElse(null);
+        double price = resolveUnitPrice(service, item);
+        int quantity = item.getQuantity() == null ? 0 : item.getQuantity();
+        List<CartAddonResponse> addons = buildCartAddonResponses(item.getId());
+        double addonTotal = addons.stream().mapToDouble(CartAddonResponse::getTotalPrice).sum();
+        return CustomerCartItemResponse.builder()
+                .itemId(item.getId())
+                .serviceId(item.getServiceId())
+                .name(serviceName(service))
+                .imageUrl(toAbsoluteImageUrl(service == null ? null : service.getImageUrl()))
+                .serviceType(toServiceType(service == null ? null : service.getCategoryName()))
+                .familySizeId(item.getFamilySizeId())
+                .familySize(item.getFamilySize())
+                .familySizeLabel(item.getFamilySizeLabel())
+                .price(price)
+                .quantity(quantity)
+                .addons(addons)
+                .totalPrice(round2((price * quantity) + addonTotal))
+                .build();
+    }
+
+    private String serviceName(AdminServiceEntity service) {
+        return service == null || service.getName() == null ? "" : service.getName();
+    }
+
     @Transactional
     public CustomerCartResponse updateQuantity(Long userId, CustomerUpdateCartItemRequest request) {
         CustomerCartItemEntity item = customerCartItemRepository.findByIdAndUserId(request.getItemId(), userId)
@@ -236,12 +250,12 @@ public class CustomerCartService {
         CartConfigEntity config = cartConfigService.currentEntity();
         Integer requestedQuantity = request.getQuantity();
         if (requestedQuantity != null && requestedQuantity < config.getMinServiceQuantity()) {
-            throw new CodedValidationException("QUANTITY_EXCEEDED",
+            throw new CodedValidationException(QUANTITY_EXCEEDED_CODE,
                     "quantity must be at least " + config.getMinServiceQuantity());
         }
         if (requestedQuantity != null && requestedQuantity > config.getMaxServiceQuantity()) {
-            throw new CodedValidationException("QUANTITY_EXCEEDED",
-                    "quantity must not exceed " + config.getMaxServiceQuantity());
+            throw new CodedValidationException(QUANTITY_EXCEEDED_CODE,
+                    QUANTITY_MUST_NOT_EXCEED_MESSAGE + config.getMaxServiceQuantity());
         }
         if (requestedQuantity != null) {
             item.setQuantity(requestedQuantity);
@@ -256,20 +270,20 @@ public class CustomerCartService {
             if (duplicate != null) {
                 int mergedQuantity = safeQuantity(duplicate) + safeQuantity(item);
                 if (mergedQuantity > config.getMaxServiceQuantity()) {
-                    throw new CodedValidationException("QUANTITY_EXCEEDED",
-                            "quantity must not exceed " + config.getMaxServiceQuantity());
+                    throw new CodedValidationException(QUANTITY_EXCEEDED_CODE,
+                            QUANTITY_MUST_NOT_EXCEED_MESSAGE + config.getMaxServiceQuantity());
                 }
                 duplicate.setQuantity(mergedQuantity);
                 cartItemAddonRepository.deleteByCartItemId(item.getId());
                 customerCartItemRepository.delete(item);
                 customerCartItemRepository.save(duplicate);
-                return getCart(userId);
+                return buildCart(userId);
             }
             item.setAddonSignature(newSignature);
             applyFamilySelection(item, familySelection);
         }
         customerCartItemRepository.save(item);
-        return getCart(userId);
+        return buildCart(userId);
     }
 
     @Transactional
@@ -427,42 +441,7 @@ public class CustomerCartService {
     }
 
     private String toAbsoluteImageUrl(String raw) {
-        String base = sanitizeBaseUrl(mediaPublicBaseUrl);
-        if (raw == null || raw.isBlank()) {
-            return base + "/defaults/service.png";
-        }
-        String trimmed = raw.trim();
-        String lower = trimmed.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("http://") || lower.startsWith("https://")) {
-            if (lower.contains("localhost") || lower.contains("127.0.0.1") || lower.contains("0.0.0.0")) {
-                String path = extractPath(trimmed);
-                return path == null ? base + "/defaults/service.png" : base + path;
-            }
-            return lower.startsWith("http://") ? "https://" + trimmed.substring(7) : trimmed;
-        }
-        String normalized = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
-        return base + normalized;
-    }
-
-    private String sanitizeBaseUrl(String baseUrl) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return "https://cdn.lexho.com";
-        }
-        String trimmed = baseUrl.trim();
-        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
-    }
-
-    private String extractPath(String url) {
-        try {
-            java.net.URI uri = java.net.URI.create(url);
-            String path = uri.getPath();
-            if (path == null || path.isBlank()) {
-                return null;
-            }
-            return path.startsWith("/") ? path : "/" + path;
-        } catch (IllegalArgumentException ex) {
-            return null;
-        }
+        return CartImageUrlResolver.toDeviceReachableImageUrl(raw, mediaPublicBaseUrl);
     }
 
     private String toServiceType(String categoryName) {

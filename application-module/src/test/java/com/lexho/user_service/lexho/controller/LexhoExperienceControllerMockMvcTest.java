@@ -8,6 +8,7 @@ import com.lexho.catalog.repository.CategoryRepository;
 import com.lexho.provider.entity.Partner;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.entity.AdminCategoryEntity;
+import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.admin.entity.SupportFaq;
 import com.lexho.user_service.admin.entity.SupportFaqCategory;
@@ -40,7 +41,7 @@ import com.lexho.user_service.lexho.entity.LexhoFavorite;
 import com.lexho.user_service.lexho.entity.LexhoAddress;
 import com.lexho.user_service.lexho.entity.LexhoReferralCode;
 import com.lexho.user_service.lexho.service.LexhoAddressService;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.notification.service.NotificationManagementService;
 import com.lexho.user_service.notification.service.NotificationRealtimeService;
 import com.lexho.user_service.notification.dto.NotificationPageResponse;
@@ -87,6 +88,7 @@ class LexhoExperienceControllerMockMvcTest {
     private OrderService orderService;
     private BannerPromotionRepository bannerRepository;
     private AdminCategoryRepository categoryRepository;
+    private AdminServiceEntityRepository adminServiceEntityRepository;
     private PartnerRepository partnerRepository;
     private ServiceabilityService serviceabilityService;
     private OrderRepository orderRepository;
@@ -124,6 +126,7 @@ class LexhoExperienceControllerMockMvcTest {
         orderService = mock(OrderService.class);
         bannerRepository = mock(BannerPromotionRepository.class);
         categoryRepository = mock(AdminCategoryRepository.class);
+        adminServiceEntityRepository = mock(AdminServiceEntityRepository.class);
         partnerRepository = mock(PartnerRepository.class);
         serviceabilityService = mock(ServiceabilityService.class);
         orderRepository = mock(OrderRepository.class);
@@ -156,6 +159,8 @@ class LexhoExperienceControllerMockMvcTest {
         ServiceabilityCheckResponse serviceable = mock(ServiceabilityCheckResponse.class);
         when(serviceable.isServiceable()).thenReturn(true);
         when(serviceabilityService.resolveForCustomer(nullable(Long.class))).thenReturn(serviceable);
+        when(adminServiceEntityRepository.searchActiveCatalogForCustomer(nullable(String.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
 
         LexhoExperienceController controller = new LexhoExperienceController(
                 homeService,
@@ -167,8 +172,9 @@ class LexhoExperienceControllerMockMvcTest {
                 bannerRepository,
                 mock(CategoryRepository.class),
                 categoryRepository,
+                adminServiceEntityRepository,
                 partnerRepository,
-                mock(PartnerProfileRepository.class),
+                mock(PartnerOperationalProfileRepository.class),
                 reviewRepository,
                 favoriteRepository,
                 referralCodeRepository,
@@ -234,7 +240,72 @@ class LexhoExperienceControllerMockMvcTest {
                 .andExpect(status().isOk());
         mockMvc.perform(get("/api/search/services").param("keyword", " clean ").requestAttr("userId", 7L))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.message").value("Search result for  clean "));
+                .andExpect(jsonPath("$.message").value("Search results fetched"));
+    }
+
+    @Test
+    void browsingEndpointsShouldFallbackToAdminServicesWhenPartnersAreEmpty() throws Exception {
+        AdminCategoryEntity category = new AdminCategoryEntity();
+        ReflectionTestUtils.setField(category, "id", 5L);
+        category.setName("Cleaning");
+
+        AdminServiceEntity service = new AdminServiceEntity();
+        ReflectionTestUtils.setField(service, "id", 21L);
+        service.setName("Kitchen Cleaning");
+        service.setCategory(category);
+        service.setDescription("Deep kitchen cleaning");
+        service.setBasePrice(BigDecimal.valueOf(499));
+        service.setDurationMinutes(90);
+        service.setImageUrl("/services/kitchen.png");
+
+        when(partnerRepository.findAll()).thenReturn(List.of());
+        when(adminServiceEntityRepository.searchActiveCatalogForCustomer(eq("clean"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(service)));
+        when(mediaUrlResolver.toPublicUrl("/services/kitchen.png")).thenReturn("https://cdn.lexho/services/kitchen.png");
+
+        mockMvc.perform(get("/api/search/services")
+                        .param("keyword", "clean")
+                        .requestAttr("userId", 7L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.data", hasSize(1)))
+                .andExpect(jsonPath("$.data.data[0].serviceId").value("21"))
+                .andExpect(jsonPath("$.data.data[0].name").value("Kitchen Cleaning"))
+                .andExpect(jsonPath("$.data.data[0].imageUrl").value("https://cdn.lexho/services/kitchen.png"));
+    }
+
+    @Test
+    void browsingEndpointsShouldPreferAdminServicesOverLegacyPartners() throws Exception {
+        AdminCategoryEntity category = new AdminCategoryEntity();
+        ReflectionTestUtils.setField(category, "id", 5L);
+        category.setName("Cleaning");
+
+        AdminServiceEntity service = new AdminServiceEntity();
+        ReflectionTestUtils.setField(service, "id", 21L);
+        service.setName("Kitchen Cleaning");
+        service.setCategory(category);
+        service.setDescription("Deep kitchen cleaning");
+        service.setBasePrice(BigDecimal.valueOf(499));
+        service.setDurationMinutes(90);
+        service.setImageUrl("/services/kitchen.png");
+
+        Partner available = new Partner();
+        available.setId(11L);
+        available.setName("Legacy Cleaner");
+        available.setAvailable(true);
+        available.setCategoryId(5L);
+        available.setPrice(299.0);
+        available.setRating(4.9);
+
+        when(partnerRepository.findAll()).thenReturn(List.of(available));
+        when(adminServiceEntityRepository.searchActiveCatalogForCustomer(isNull(), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(service)));
+        when(mediaUrlResolver.toPublicUrl("/services/kitchen.png")).thenReturn("https://cdn.lexho/services/kitchen.png");
+
+        mockMvc.perform(get("/api/services/popular").requestAttr("userId", 7L))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.data", hasSize(1)))
+                .andExpect(jsonPath("$.data.data[0].serviceId").value("21"))
+                .andExpect(jsonPath("$.data.data[0].name").value("Kitchen Cleaning"));
     }
 
     @Test
@@ -378,23 +449,24 @@ class LexhoExperienceControllerMockMvcTest {
         order.setUserId(7L);
         order.setTotalAmount(499.0);
         when(orderRepository.findById(12L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(12L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         mockMvc.perform(get("/api/payments/legacy-options")
                         .param("bookingId", "12").param("amount", "499"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.methods", hasSize(3)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.methods", hasSize(2)))
                 .andExpect(jsonPath("$.data.bookingId").value("12"))
                 .andExpect(jsonPath("$.data.amount").value(499));
         mockMvc.perform(post("/api/payments/options").contentType("application/json")
                         .content("{\"bookingId\":\"12\",\"amount\":499}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.methods", hasSize(3)));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.methods", hasSize(2)));
         mockMvc.perform(post("/api/payments/initiate").requestAttr("userId", 7L)
                         .contentType("application/json")
                         .content("{\"bookingId\":\"12\",\"mode\":\"upi\",\"amount\":499}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("SUCCESS"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("PENDING"))
                 .andExpect(jsonPath("$.data.razorpayOptions.currency").value("INR"));
         mockMvc.perform(get("/api/payments/status/12").requestAttr("userId", 7L))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.data.message").value("Payment successful"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.message").value("Payment pending"));
         mockMvc.perform(post("/api/payments/refund").requestAttr("userId", 7L)
                         .contentType("application/json")
                         .content("{\"bookingId\":\"12\",\"amount\":100}"))
@@ -609,15 +681,11 @@ class LexhoExperienceControllerMockMvcTest {
         scheduled.setUserId(7L);
         scheduled.setBookingType("SCHEDULED");
         scheduled.setStatus(OrderStatus.CREATED);
+        scheduled.setPaymentStatus(PaymentStatus.SUCCESS);
         scheduled.setScheduledAt(LocalDateTime.of(2026, 6, 20, 10, 0));
         when(orderRepository.findById(26L)).thenReturn(Optional.of(scheduled));
+        when(orderRepository.findByIdForUpdate(26L)).thenReturn(Optional.of(scheduled));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        Order locked = new Order();
-        locked.setId(27L);
-        locked.setUserId(7L);
-        locked.setStatus(OrderStatus.SERVICE_STARTED);
-        when(orderRepository.findById(27L)).thenReturn(Optional.of(locked));
 
         when(slotDateTimePolicy.zoneId()).thenReturn(ZoneId.systemDefault());
         when(slotDateTimePolicy.now()).thenReturn(LocalDateTime.of(2026, 6, 20, 10, 0));
@@ -628,6 +696,9 @@ class LexhoExperienceControllerMockMvcTest {
         when(slotDateTimePolicy.parseSlotStart(LocalDate.of(2026, 6, 21), "10:00-11:00"))
                 .thenReturn(LocalDateTime.of(2026, 6, 21, 10, 0));
         when(slotDateTimePolicy.isExpired(any())).thenReturn(false);
+        when(customerCartSlotService.slotsForDate(LocalDate.of(2026, 6, 21))).thenReturn(java.util.Map.of(
+                "slots", List.of(java.util.Map.of("startTime", "10:00", "slot", "10:00-11:00"))
+        ));
         when(customerCartSlotService.slotRowForDate(LocalDate.of(2026, 6, 21), "10:00-11:00"))
                 .thenReturn(java.util.Map.of("available", true));
 
@@ -641,23 +712,15 @@ class LexhoExperienceControllerMockMvcTest {
                         .contentType("application/json")
                         .content("{\"date\":\"2026-06-21T10:00:00\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("CREATED"))
-                .andExpect(jsonPath("$.data.assignmentStatus").value("SCHEDULED"));
-
-        mockMvc.perform(post("/api/bookings/27/reschedule")
-                        .requestAttr("userId", 7L)
-                        .contentType("application/json")
-                        .content("{\"date\":\"2026-06-21\",\"slot\":\"10:00-11:00\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.allowed").value(false))
-                .andExpect(jsonPath("$.data.remainingReschedules").value(0));
+                .andExpect(jsonPath("$.data.bookingId").value(26))
+                .andExpect(jsonPath("$.data.scheduledAt").exists());
 
         mockMvc.perform(post("/api/bookings/26/reschedule")
                         .requestAttr("userId", 7L)
                         .contentType("application/json")
                         .content("{\"date\":\"2026-06-21\",\"slot\":\"10:00-11:00\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.allowed").value(true))
+                .andExpect(jsonPath("$.data.bookingId").value(26))
                 .andExpect(jsonPath("$.data.scheduledAt").exists());
 
         mockMvc.perform(put("/api/bookings/reschedule/26")
@@ -671,6 +734,8 @@ class LexhoExperienceControllerMockMvcTest {
                         .contentType("application/json")
                         .content("{\"date\":\"2026-06-21\"}"))
                 .andExpect(status().isBadRequest());
+
+        verify(customerCartSlotService, atLeast(2)).lockSlotCapacity();
     }
 
     @Test

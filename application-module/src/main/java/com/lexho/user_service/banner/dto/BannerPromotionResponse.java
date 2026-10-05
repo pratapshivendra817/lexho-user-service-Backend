@@ -19,6 +19,7 @@ public class BannerPromotionResponse {
     private String subtitle;
     private String description;
     private String bannerImageUrl;
+    private String imageUrl;
     private BannerPromoType promoType;
     private BannerStatus status;
     private Integer slotNumber;

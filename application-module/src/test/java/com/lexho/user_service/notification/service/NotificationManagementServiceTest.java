@@ -29,6 +29,7 @@ import com.lexho.user_service.notification.exception.NotificationValidationExcep
 import com.lexho.user_service.notification.event.NotificationDispatchEvent;
 import com.lexho.user_service.notification.mapper.NotificationMapper;
 import com.lexho.user_service.lexho.repository.LexhoUserProfileRepository;
+import com.lexho.user_service.localization.service.PartnerLocalizationService;
 import com.lexho.user_service.security.SecurityUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -82,6 +83,8 @@ class NotificationManagementServiceTest {
     private ApplicationEventPublisher eventPublisher;
     @Mock
     private SecurityUtils securityUtils;
+    @Mock
+    private PartnerLocalizationService localizationService;
 
     @InjectMocks
     private NotificationManagementService notificationManagementService;

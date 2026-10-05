@@ -53,7 +53,7 @@ class LexhoAuthServiceTest {
 
         when(passwordEncoder.encode(any())).thenReturn("otp-hash");
         when(passwordEncoder.matches(any(), any())).thenReturn(true);
-        when(profiles.findByMobile("9999999999")).thenReturn(Optional.empty());
+        when(profiles.findByMobileAndRole("9999999999", Role.CUSTOMER)).thenReturn(Optional.empty());
         when(profiles.save(any())).thenAnswer(invocation -> {
             LexhoUserProfile profile = invocation.getArgument(0);
             ReflectionTestUtils.setField(profile, "id", 7L);
@@ -103,6 +103,28 @@ class LexhoAuthServiceTest {
         expired.setExpiresAt(LocalDateTime.now().minusMinutes(1));
         when(refreshTokens.findByToken(any())).thenReturn(Optional.of(expired));
         assertThatThrownBy(() -> service.refreshToken("expired")).isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void createsRoleScopedProfileWhenSameMobileAlreadyExistsWithDifferentRole() {
+        LexhoOtpChallenge challenge = activeChallenge("9876543210", Role.PARTNER, "otp-hash");
+        when(otpChallenges.findTopByMobileAndRoleAndConsumedAtIsNullOrderByCreatedAtDesc("9876543210", "PARTNER"))
+                .thenReturn(Optional.of(challenge));
+        when(passwordEncoder.matches("123456", "otp-hash")).thenReturn(true);
+        when(profiles.findByMobileAndRole("9876543210", Role.PARTNER)).thenReturn(Optional.empty());
+        when(profiles.save(any())).thenAnswer(invocation -> {
+            LexhoUserProfile profile = invocation.getArgument(0);
+            if (profile.getId() == null) {
+                ReflectionTestUtils.setField(profile, "id", 42L);
+            }
+            return profile;
+        });
+        when(jwt.generateToken(42L, "9876543210", Role.PARTNER)).thenReturn("partner-access");
+
+        var response = service.verifyOtp("9876543210", "123456", "PARTNER");
+
+        assertThat(response.token()).isEqualTo("partner-access");
+        assertThat(response.user().role()).isEqualTo("PARTNER");
     }
 
     @Test

@@ -33,6 +33,9 @@ public class BannerUpsertRequest {
     @Size(max = 1000, message = "Banner image URL must be at most 1000 characters")
     private String bannerImageUrl;
 
+    @Size(max = 1000, message = "Image URL must be at most 1000 characters")
+    private String imageUrl;
+
     @NotNull(message = "Promo type is required")
     private BannerPromoType promoType;
 

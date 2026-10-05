@@ -10,6 +10,7 @@ import java.util.Map;
 
 @Component
 public class MapboxDirectionsClient {
+    private static final String DRIVING_TRAFFIC_PROFILE = "driving-traffic";
 
     private final MapboxProperties properties;
     private RestTemplate restTemplate = new RestTemplate();
@@ -40,31 +41,8 @@ public class MapboxDirectionsClient {
             if (body == null || !(body.get("routes") instanceof List<?> routes) || routes.isEmpty()) {
                 return null;
             }
-            RouteResult best = null;
-            int alternativesConsidered = 0;
-            for (Object candidate : routes) {
-                if (!(candidate instanceof Map route)) {
-                    continue;
-                }
-                Double distanceMeters = toDouble(route.get("distance"));
-                Double durationSeconds = toDouble(route.get("duration"));
-                String polyline = route.get("geometry") instanceof String value ? value : null;
-                if (distanceMeters == null || durationSeconds == null) {
-                    continue;
-                }
-                alternativesConsidered++;
-                RouteResult current = new RouteResult(
-                        round2(distanceMeters / 1000d),
-                        (int) Math.ceil(durationSeconds / 60d),
-                        polyline,
-                        "MAPBOX",
-                        "driving-traffic".equals(profile),
-                        1
-                );
-                if (best == null || isBetter(current, best)) {
-                    best = current;
-                }
-            }
+            RouteSelection selection = selectBestRoute(routes, profile);
+            RouteResult best = selection.best();
             if (best == null) {
                 return null;
             }
@@ -74,7 +52,7 @@ public class MapboxDirectionsClient {
                     best.polyline(),
                     best.provider(),
                     best.trafficAware(),
-                    Math.max(alternativesConsidered, 1)
+                    Math.max(selection.alternativesConsidered(), 1)
             );
         } catch (RuntimeException ignored) {
             return null;
@@ -92,14 +70,50 @@ public class MapboxDirectionsClient {
         return candidateDistance < currentBestDistance;
     }
 
+    private RouteSelection selectBestRoute(List<?> routes, String profile) {
+        RouteResult best = null;
+        int alternativesConsidered = 0;
+        for (Object candidate : routes) {
+            RouteResult current = routeResult(candidate, profile);
+            if (current == null) {
+                continue;
+            }
+            alternativesConsidered++;
+            if (best == null || isBetter(current, best)) {
+                best = current;
+            }
+        }
+        return new RouteSelection(best, alternativesConsidered);
+    }
+
+    private RouteResult routeResult(Object candidate, String profile) {
+        if (!(candidate instanceof Map route)) {
+            return null;
+        }
+        Double distanceMeters = toDouble(route.get("distance"));
+        Double durationSeconds = toDouble(route.get("duration"));
+        if (distanceMeters == null || durationSeconds == null) {
+            return null;
+        }
+        String polyline = route.get("geometry") instanceof String value ? value : null;
+        return new RouteResult(
+                round2(distanceMeters / 1000d),
+                (int) Math.ceil(durationSeconds / 60d),
+                polyline,
+                "MAPBOX",
+                DRIVING_TRAFFIC_PROFILE.equals(profile),
+                1
+        );
+    }
+
     private String normalizeProfile(String profile) {
         if (profile == null || profile.isBlank()) {
-            return "driving-traffic";
+            return DRIVING_TRAFFIC_PROFILE;
         }
         String normalized = profile.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {
-            case "driving", "driving-traffic", "walking", "cycling" -> normalized;
-            default -> "driving-traffic";
+            case "driving", DRIVING_TRAFFIC_PROFILE, "walking", "cycling" -> normalized;
+            default -> DRIVING_TRAFFIC_PROFILE;
         };
     }
 
@@ -129,5 +143,8 @@ public class MapboxDirectionsClient {
             Boolean trafficAware,
             Integer alternativesConsidered
     ) {
+    }
+
+    private record RouteSelection(RouteResult best, int alternativesConsidered) {
     }
 }

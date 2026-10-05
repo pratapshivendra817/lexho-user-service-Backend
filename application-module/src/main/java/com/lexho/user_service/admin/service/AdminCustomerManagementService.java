@@ -6,6 +6,8 @@ import com.lexho.user_service.customer.profile.repository.CustomerAccountDeleteR
 import com.lexho.user_service.customer.profile.repository.CustomerRepository;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
+import com.lexho.user_service.util.LexhoConstants;
+import com.lexho.user_service.util.StringSanitizers;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -52,14 +54,14 @@ public class AdminCustomerManagementService {
     @Transactional(readOnly = true)
     public Map<String, Object> byId(Long customerId) {
         CustomerEntity customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(LexhoConstants.CUSTOMER_NOT_FOUND));
         return toRow(customer);
     }
 
     @Transactional
     public Map<String, Object> updateStatus(Long customerId, Boolean active) {
         CustomerEntity customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(LexhoConstants.CUSTOMER_NOT_FOUND));
         customer.setActive(active);
         return toRow(customerRepository.save(customer));
     }
@@ -72,7 +74,7 @@ public class AdminCustomerManagementService {
                                                  Boolean profileImageApproved,
                                                  String adminNotes) {
         CustomerEntity customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(LexhoConstants.CUSTOMER_NOT_FOUND));
         if (profileEditLocked != null) {
             customer.setProfileEditLocked(profileEditLocked);
         }
@@ -93,7 +95,8 @@ public class AdminCustomerManagementService {
 
     @Transactional(readOnly = true)
     public Map<String, Object> listDeleteRequests(Boolean resolved, int page, int size) {
-        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), Sort.by("createdAt").descending());
+        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100),
+                Sort.by(LexhoConstants.FIELD_CREATED_AT).descending());
         Page<CustomerAccountDeleteRequestEntity> result = resolved == null
                 ? deleteRequestRepository.findAll(pageable)
                 : deleteRequestRepository.findByResolved(resolved, pageable);
@@ -123,7 +126,7 @@ public class AdminCustomerManagementService {
 
         if (approve) {
             CustomerEntity customer = customerRepository.findById(request.getUserId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+                    .orElseThrow(() -> new ResourceNotFoundException(LexhoConstants.CUSTOMER_NOT_FOUND));
             customer.setActive(false);
             customer.setProfileEditLocked(true);
             customerRepository.save(customer);
@@ -147,8 +150,8 @@ public class AdminCustomerManagementService {
         row.put("profileImageApproved", customer.getProfileImageApproved());
         row.put("adminNotes", customer.getAdminNotes());
         row.put("addressCount", lexhoAddressRepository.findByUserId(customer.getId()).size());
-        row.put("createdAt", customer.getCreatedAt());
-        row.put("updatedAt", customer.getUpdatedAt());
+        row.put(LexhoConstants.FIELD_CREATED_AT, customer.getCreatedAt());
+        row.put(LexhoConstants.FIELD_UPDATED_AT, customer.getUpdatedAt());
         return row;
     }
 
@@ -161,25 +164,22 @@ public class AdminCustomerManagementService {
         row.put("resolutionReason", request.getResolutionReason());
         row.put("resolvedByAdminId", request.getResolvedByAdminId());
         row.put("resolvedAt", request.getResolvedAt());
-        row.put("createdAt", request.getCreatedAt());
+        row.put(LexhoConstants.FIELD_CREATED_AT, request.getCreatedAt());
         return row;
     }
 
     private String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        return StringSanitizers.trimToNull(value);
     }
 
     private String sortByOrDefault(String sortBy) {
         if (sortBy == null || sortBy.isBlank()) {
-            return "updatedAt";
+            return LexhoConstants.FIELD_UPDATED_AT;
         }
         return switch (sortBy) {
-            case "id", "fullName", "email", "phoneNumber", "mobile", "createdAt", "updatedAt", "active" -> sortBy;
-            default -> "updatedAt";
+            case "id", "fullName", "email", "phoneNumber", "mobile",
+                    LexhoConstants.FIELD_CREATED_AT, LexhoConstants.FIELD_UPDATED_AT, "active" -> sortBy;
+            default -> LexhoConstants.FIELD_UPDATED_AT;
         };
     }
 }

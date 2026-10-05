@@ -2,6 +2,7 @@ package com.lexho.payment.service;
 
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
+import com.lexho.booking.service.OrderLifecycleService;
 import com.lexho.common.enums.OrderStatus;
 import com.lexho.common.enums.PaymentStatus;
 import com.lexho.payment.dto.AdminRefundRequest;
@@ -15,6 +16,7 @@ import com.lexho.payment.event.PaymentRefundProcessedEvent;
 import com.lexho.payment.repository.PaymentRefundRepository;
 import com.lexho.payment.repository.PaymentTransactionRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -40,7 +42,14 @@ class AdminPaymentServiceTest {
     @Mock PaymentRefundRepository refundRepository;
     @Mock RazorpayGateway gateway;
     @Mock ApplicationEventPublisher eventPublisher;
-    @InjectMocks AdminPaymentService service;
+    AdminPaymentService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new AdminPaymentService(orderRepository, transactionRepository, refundRepository, gateway,
+                eventPublisher, new OrderLifecycleService(orderRepository), null);
+        lenient().when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    }
 
     @Test
     void dashboardShouldAggregatePaymentCounters() {
@@ -184,6 +193,42 @@ class AdminPaymentServiceTest {
         assertEquals(PaymentStatus.SUCCESS, booking.getPaymentStatus());
         assertEquals(OrderStatus.CONFIRMED, booking.getStatus());
         verify(eventPublisher).publishEvent(any(PaymentCapturedEvent.class));
+    }
+
+    @Test
+    void reconcileLatestShouldBeIdempotentAndNotMoveTerminalBookingsBackwards() {
+        PaymentTransaction paidTransaction = transaction(1L, PaymentTransactionStatus.PAID);
+        Order confirmedBooking = booking(10L);
+        confirmedBooking.setStatus(OrderStatus.CONFIRMED);
+        confirmedBooking.setPaymentStatus(PaymentStatus.SUCCESS);
+        when(transactionRepository.findTopByBookingIdOrderByCreatedAtDesc(10L)).thenReturn(Optional.of(paidTransaction));
+        when(gateway.fetchPayment("pay_1"))
+                .thenReturn(new RazorpayGateway.RazorpayPayment("pay_1", "order_1", 10000L, "captured"));
+        when(gateway.toPaise(new BigDecimal("100.00"))).thenReturn(10000L);
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(confirmedBooking));
+        when(orderRepository.findById(10L)).thenReturn(Optional.of(confirmedBooking));
+        when(refundRepository.findByBookingIdOrderByCreatedAtDesc(10L)).thenReturn(List.of());
+        when(transactionRepository.findByBookingIdOrderByCreatedAtDesc(10L)).thenReturn(List.of(paidTransaction));
+
+        var response = service.reconcileLatest(10L);
+
+        assertEquals("PAID", response.transactions().get(0).paymentStatus());
+        assertEquals(OrderStatus.CONFIRMED, confirmedBooking.getStatus());
+        verify(eventPublisher, never()).publishEvent(any(PaymentCapturedEvent.class));
+
+        PaymentTransaction cancelledTransaction = transaction(2L, PaymentTransactionStatus.CREATED);
+        Order cancelledBooking = booking(11L);
+        cancelledBooking.setStatus(OrderStatus.CANCELLED);
+        cancelledTransaction.setBookingId(11L);
+        when(transactionRepository.findTopByBookingIdOrderByCreatedAtDesc(11L)).thenReturn(Optional.of(cancelledTransaction));
+        when(orderRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(cancelledBooking));
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(cancelledBooking));
+        when(refundRepository.findByBookingIdOrderByCreatedAtDesc(11L)).thenReturn(List.of());
+        when(transactionRepository.findByBookingIdOrderByCreatedAtDesc(11L)).thenReturn(List.of(cancelledTransaction));
+
+        service.reconcileLatest(11L);
+
+        assertEquals(OrderStatus.CANCELLED, cancelledBooking.getStatus());
     }
 
     private static PaymentTransaction transaction(Long id, PaymentTransactionStatus status) {

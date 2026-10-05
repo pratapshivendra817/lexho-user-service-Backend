@@ -13,10 +13,7 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DataJpaTest(properties = {
-        "spring.jpa.hibernate.ddl-auto=create-drop",
-        "spring.datasource.url=jdbc:h2:mem:authdb;MODE=MySQL;DB_CLOSE_DELAY=-1"
-})
+@DataJpaTest(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 class RefreshTokenRepositoryTest {
 
     @Autowired

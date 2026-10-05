@@ -17,6 +17,7 @@ import com.lexho.user_service.customer.location.service.ReverseGeocodingService;
 import com.lexho.user_service.customer.location.service.ServiceabilityService;
 import com.lexho.user_service.geo.events.GeoEventPublisher;
 import com.lexho.user_service.geo.events.GeoEventType;
+import com.lexho.user_service.util.GeoDistanceCalculator;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
@@ -134,35 +135,9 @@ public class LocationServiceImpl implements LocationService {
         location.setLastIdempotencyKey(request.idempotencyKey == null ? null : request.idempotencyKey.trim());
         location.setLastLocationFingerprint(incomingFingerprint);
         repository.save(location);
-        Map<String, Object> locationPayload = new HashMap<>();
-        locationPayload.put("lat", request.latitude);
-        locationPayload.put("lng", request.longitude);
-        locationPayload.put("pincode", pincode);
-        locationPayload.put("serviceable", serviceable);
-        geoEventPublisher.publish(GeoEventType.LOCATION_UPDATED, customerId, locationPayload);
-        if (Boolean.TRUE.equals(request.manualConfirmed)) {
-            Map<String, Object> confirmPayload = new HashMap<>();
-            confirmPayload.put("pincode", pincode);
-            geoEventPublisher.publish(GeoEventType.ADDRESS_CONFIRMED, customerId, confirmPayload);
-        }
-        if (Boolean.TRUE.equals(request.mockLocation) || suspiciousJump || riskScore >= 50.0d) {
-            auditLocation(customerId, location, "RISK_SIGNAL", "mock/suspicious/high-risk update");
-            geoEventPublisher.publish(GeoEventType.SPOOF_DETECTED, customerId, Map.of(
-                    "mockLocation", Boolean.TRUE.equals(request.mockLocation),
-                    "suspiciousJump", suspiciousJump,
-                    "riskScore", riskScore
-            ));
-        }
+        publishLocationEvents(customerId, request, location, pincode, serviceable, suspiciousJump, riskScore);
 
-        LocationUpdateResponse response = toResponse(location);
-        response.formattedAddress = firstText(reverse.formattedAddress, response.formattedAddress);
-        response.area = firstText(reverse.area, response.area);
-        response.city = firstText(reverse.city, response.city);
-        response.state = firstText(reverse.state, response.state);
-        response.country = firstText(reverse.country, response.country, "India");
-        response.pincode = pincode;
-        response.landmark = firstText(reverse.landmark, response.landmark);
-        return response;
+        return responseWithReverseGeocode(location, reverse, pincode);
     }
 
     @Override
@@ -226,6 +201,63 @@ public class LocationServiceImpl implements LocationService {
         return response;
     }
 
+    private void publishLocationEvents(Long customerId,
+                                       LocationUpdateRequest request,
+                                       CustomerCurrentLocation location,
+                                       String pincode,
+                                       boolean serviceable,
+                                       boolean suspiciousJump,
+                                       double riskScore) {
+        Map<String, Object> locationPayload = new HashMap<>();
+        locationPayload.put("lat", request.latitude);
+        locationPayload.put("lng", request.longitude);
+        locationPayload.put("pincode", pincode);
+        locationPayload.put("serviceable", serviceable);
+        geoEventPublisher.publish(GeoEventType.LOCATION_UPDATED, customerId, locationPayload);
+        publishManualConfirmation(customerId, request, pincode);
+        publishRiskSignal(customerId, request, location, suspiciousJump, riskScore);
+    }
+
+    private void publishManualConfirmation(Long customerId, LocationUpdateRequest request, String pincode) {
+        if (!Boolean.TRUE.equals(request.manualConfirmed)) {
+            return;
+        }
+        Map<String, Object> confirmPayload = new HashMap<>();
+        confirmPayload.put("pincode", pincode);
+        geoEventPublisher.publish(GeoEventType.ADDRESS_CONFIRMED, customerId, confirmPayload);
+    }
+
+    private void publishRiskSignal(Long customerId,
+                                   LocationUpdateRequest request,
+                                   CustomerCurrentLocation location,
+                                   boolean suspiciousJump,
+                                   double riskScore) {
+        boolean mockLocation = Boolean.TRUE.equals(request.mockLocation);
+        if (!mockLocation && !suspiciousJump && riskScore < 50.0d) {
+            return;
+        }
+        auditLocation(customerId, location, "RISK_SIGNAL", "mock/suspicious/high-risk update");
+        geoEventPublisher.publish(GeoEventType.SPOOF_DETECTED, customerId, Map.of(
+                "mockLocation", mockLocation,
+                "suspiciousJump", suspiciousJump,
+                "riskScore", riskScore
+        ));
+    }
+
+    private LocationUpdateResponse responseWithReverseGeocode(CustomerCurrentLocation location,
+                                                              ReverseGeocodeResponse reverse,
+                                                              String pincode) {
+        LocationUpdateResponse response = toResponse(location);
+        response.formattedAddress = firstText(reverse.formattedAddress, response.formattedAddress);
+        response.area = firstText(reverse.area, response.area);
+        response.city = firstText(reverse.city, response.city);
+        response.state = firstText(reverse.state, response.state);
+        response.country = firstText(reverse.country, response.country, "India");
+        response.pincode = pincode;
+        response.landmark = firstText(reverse.landmark, response.landmark);
+        return response;
+    }
+
     private String firstText(String... values) {
         for (String value : values) {
             if (value != null && !value.isBlank()) {
@@ -251,7 +283,11 @@ public class LocationServiceImpl implements LocationService {
         if (existing.getLatitude() == null || existing.getLongitude() == null) {
             return false;
         }
-        double meters = haversineMeters(existing.getLatitude().doubleValue(), existing.getLongitude().doubleValue(), newLat, newLng);
+        double meters = GeoDistanceCalculator.haversineMeters(
+                existing.getLatitude().doubleValue(),
+                existing.getLongitude().doubleValue(),
+                newLat,
+                newLng);
         // Using a conservative 60-second minimum delta for retry-heavy mobile traffic.
         double kmh = (meters / 1000.0d) * 60.0d;
         return kmh > impossibleJumpSpeedKmh;
@@ -261,19 +297,12 @@ public class LocationServiceImpl implements LocationService {
         if (existing.getLatitude() == null || existing.getLongitude() == null) {
             return false;
         }
-        double meters = haversineMeters(existing.getLatitude().doubleValue(), existing.getLongitude().doubleValue(), newLat, newLng);
+        double meters = GeoDistanceCalculator.haversineMeters(
+                existing.getLatitude().doubleValue(),
+                existing.getLongitude().doubleValue(),
+                newLat,
+                newLng);
         return meters <= thresholdMeters;
-    }
-
-    private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
-        final double earthRadius = 6371000.0d;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadius * c;
     }
 
     private double computeRiskScore(boolean mockLocation, boolean suspiciousJump, int spoofCount, Double confidenceScore) {

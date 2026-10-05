@@ -1,5 +1,6 @@
 package com.lexho.user_service.admin.service;
 
+import com.lexho.user_service.health.DatabaseHealthChecker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -7,13 +8,10 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
 import java.lang.management.ManagementFactory;
-import java.sql.Connection;
-import java.sql.Statement;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -76,21 +74,7 @@ public class AdminMonitoringService {
         if (dataSource == null) {
             return "DOWN";
         }
-
-        Connection connection = null;
-        try {
-            connection = DataSourceUtils.getConnection(dataSource);
-            try (Statement statement = connection.createStatement()) {
-                statement.execute("SELECT 1");
-            }
-            return "UP";
-        } catch (Exception exception) {
-            return "DOWN";
-        } finally {
-            if (connection != null) {
-                DataSourceUtils.releaseConnection(connection, dataSource);
-            }
-        }
+        return DatabaseHealthChecker.check(dataSource);
     }
 
     private String checkRedis() {

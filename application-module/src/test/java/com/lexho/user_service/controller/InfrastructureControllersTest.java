@@ -3,24 +3,16 @@ package com.lexho.user_service.controller;
 import com.lexho.booking.entity.Booking;
 import com.lexho.booking.enums.BookingStatus;
 import com.lexho.booking.service.BookingManagementService;
-import com.lexho.provider.entity.Partner;
-import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user.dto.BookingSummaryClientResponse;
 import com.lexho.user_service.dto.ApiResponse;
-import com.lexho.user_service.dto.PartnerCreateRequestDTO;
-import com.lexho.user_service.security.SecurityUtils;
 import com.lexho.user_service.service.DeprecatedApiUsageService;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.access.AccessDeniedException;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -72,93 +64,4 @@ class InfrastructureControllersTest {
         assertThat(response.getCancelledBookings()).isEqualTo(1);
     }
 
-    @Test
-    void partnerControllerCoversListLookupAndDeleteBranches() {
-        PartnerRepository partnerRepository = mock(PartnerRepository.class);
-        SecurityUtils securityUtils = mock(SecurityUtils.class);
-        PartnerController controller = new PartnerController(partnerRepository, securityUtils);
-        Partner partner = partner(7L, "Partner A");
-        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
-        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(7L));
-
-        when(partnerRepository.findBySubCategoryIdAndAvailableTrueOrderByRatingDesc(10L)).thenReturn(List.of(partner));
-        when(partnerRepository.findBySubCategoryIdAndAvailableTrueOrderByPriceAsc(10L)).thenReturn(List.of(partner));
-        when(partnerRepository.findBySubCategoryIdAndAvailableTrue(10L)).thenReturn(List.of(partner));
-        when(partnerRepository.findById(7L)).thenReturn(Optional.of(partner));
-        when(partnerRepository.existsById(7L)).thenReturn(true);
-        when(partnerRepository.findByNameAndSubCategoryId("Partner B", 20L)).thenReturn(List.of());
-        when(partnerRepository.save(any(Partner.class))).thenAnswer(invocation -> {
-            Partner saved = invocation.getArgument(0);
-            saved.setId(99L);
-            return saved;
-        });
-
-        assertThat(controller.getPartners(10L, "rating").getData()).hasSize(1);
-        assertThat(controller.getPartners(10L, "price").getData()).hasSize(1);
-        assertThat(controller.getPartners(10L, null).getData()).hasSize(1);
-        assertThat(controller.getById(7L).isSuccess()).isTrue();
-        assertThat(controller.delete(7L).isSuccess()).isTrue();
-
-        PartnerCreateRequestDTO request = new PartnerCreateRequestDTO();
-        request.setName("Partner B");
-        request.setCategoryId(10L);
-        request.setSubCategoryId(20L);
-        request.setRating(4.7);
-        request.setTotalReviews(14L);
-        request.setPrice(300.0);
-        request.setAvailable(true);
-        request.setExperience(6);
-        request.setImage("img.png");
-        request.setVerificationStatus("APPROVED");
-
-        ApiResponse<?> create = controller.create(request);
-
-        assertThat(create.isSuccess()).isTrue();
-        verify(partnerRepository).deleteById(7L);
-        verify(partnerRepository).save(any(Partner.class));
-    }
-
-    @Test
-    void partnerControllerRejectsDuplicateAndNullCreateRequestsWithoutSaving() {
-        PartnerRepository partnerRepository = mock(PartnerRepository.class);
-        PartnerController controller = new PartnerController(partnerRepository, mock(SecurityUtils.class));
-        PartnerCreateRequestDTO request = new PartnerCreateRequestDTO();
-        request.setName("Partner C");
-        request.setSubCategoryId(21L);
-        when(partnerRepository.findByNameAndSubCategoryId("Partner C", 21L)).thenReturn(List.of(new Partner()));
-
-        assertThat(controller.create(null).isSuccess()).isFalse();
-        assertThat(controller.create(request).isSuccess()).isFalse();
-        verify(partnerRepository, never()).save(any(Partner.class));
-    }
-
-    @Test
-    void partnerControllerRejectsForeignPartnerLookupAndDelete() {
-        PartnerRepository partnerRepository = mock(PartnerRepository.class);
-        SecurityUtils securityUtils = mock(SecurityUtils.class);
-        PartnerController controller = new PartnerController(partnerRepository, securityUtils);
-        when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
-        when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(7L));
-
-        org.junit.jupiter.api.Assertions.assertThrows(AccessDeniedException.class, () -> controller.getById(8L));
-        org.junit.jupiter.api.Assertions.assertThrows(AccessDeniedException.class, () -> controller.delete(8L));
-        verify(partnerRepository, never()).findById(8L);
-        verify(partnerRepository, never()).existsById(8L);
-    }
-
-    private Partner partner(Long id, String name) {
-        Partner partner = new Partner();
-        partner.setId(id);
-        partner.setName(name);
-        partner.setCategoryId(1L);
-        partner.setSubCategoryId(10L);
-        partner.setRating(4.8);
-        partner.setTotalReviews(22L);
-        partner.setPrice(299.0);
-        partner.setAvailable(true);
-        partner.setExperience(7);
-        partner.setImage("p.png");
-        partner.setVerificationStatus("APPROVED");
-        return partner;
-    }
 }

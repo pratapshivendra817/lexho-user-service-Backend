@@ -19,6 +19,8 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
 
     Optional<Notification> findByIdAndDeletedFalse(Long id);
 
+    boolean existsByIdempotencyKey(String idempotencyKey);
+
     List<Notification> findByUserIdAndDeletedFalseOrderByCreatedAtDesc(Long userId);
 
     List<Notification> findByUserIdAndChannelTypeAndDeletedFalseOrderByCreatedAtDesc(Long userId, ChannelType channelType);

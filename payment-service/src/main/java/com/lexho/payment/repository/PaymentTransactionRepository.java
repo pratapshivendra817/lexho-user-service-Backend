@@ -25,6 +25,7 @@ public interface PaymentTransactionRepository extends JpaRepository<PaymentTrans
     );
     List<PaymentTransaction> findByBookingIdOrderByCreatedAtDesc(Long bookingId);
     long countByPaymentStatus(PaymentTransactionStatus paymentStatus);
+    long countByCustomerIdAndPaymentStatusIn(Long customerId, List<PaymentTransactionStatus> paymentStatuses);
 
     @Query("""
             SELECT t FROM PaymentTransaction t
