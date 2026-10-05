@@ -1,7 +1,6 @@
 package com.lexho.user_service.dispatch.service;
 
 import com.lexho.provider.entity.Partner;
-import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.dispatch.dto.PartnerSkillsUpdateRequest;
@@ -9,6 +8,7 @@ import com.lexho.user_service.dispatch.entity.PartnerServiceSkillEntity;
 import com.lexho.user_service.dispatch.repository.PartnerServiceSkillRepository;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
+import com.lexho.user_service.lexhopartner.service.PartnerMarketplaceService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,22 +21,21 @@ import java.util.Set;
 @Service
 public class PartnerSkillService {
 
-    private final PartnerRepository partnerRepository;
+    private final PartnerMarketplaceService partnerMarketplaceService;
     private final AdminServiceEntityRepository adminServiceEntityRepository;
     private final PartnerServiceSkillRepository partnerServiceSkillRepository;
 
-    public PartnerSkillService(PartnerRepository partnerRepository,
+    public PartnerSkillService(com.lexho.provider.repository.PartnerRepository partnerRepository,
                                AdminServiceEntityRepository adminServiceEntityRepository,
                                PartnerServiceSkillRepository partnerServiceSkillRepository) {
-        this.partnerRepository = partnerRepository;
+        this.partnerMarketplaceService = new PartnerMarketplaceService(partnerRepository);
         this.adminServiceEntityRepository = adminServiceEntityRepository;
         this.partnerServiceSkillRepository = partnerServiceSkillRepository;
     }
 
     @Transactional
     public Map<String, Object> upsertSkills(Long partnerId, PartnerSkillsUpdateRequest request) {
-        Partner partner = partnerRepository.findById(partnerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
+        Partner partner = partnerMarketplaceService.require(partnerId);
 
         Set<Long> resolvedSubServiceIds = new LinkedHashSet<>();
         if (request != null && request.getSubServiceIds() != null) {
@@ -75,7 +74,7 @@ public class PartnerSkillService {
         if (partner.getSubCategoryId() == null && !resolvedSubServiceIds.isEmpty()) {
             partner.setSubCategoryId(resolvedSubServiceIds.iterator().next());
         }
-        partnerRepository.save(partner);
+        partnerMarketplaceService.save(partner);
 
         return Map.of(
                 "partnerId", partnerId,
@@ -86,7 +85,7 @@ public class PartnerSkillService {
 
     @Transactional(readOnly = true)
     public Map<String, Object> getSkills(Long partnerId) {
-        partnerRepository.findById(partnerId).orElseThrow(() -> new ResourceNotFoundException("Partner not found"));
+        partnerMarketplaceService.require(partnerId);
         List<Long> subServiceIds = partnerServiceSkillRepository.findByPartnerId(partnerId)
                 .stream()
                 .map(PartnerServiceSkillEntity::getSubServiceId)

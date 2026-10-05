@@ -22,8 +22,8 @@ import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.customer.location.dto.ReverseGeocodeResponse;
 import com.lexho.user_service.geo.events.GeoEventPublisher;
 import com.lexho.user_service.geo.events.GeoEventType;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import com.lexho.user_service.service.DeprecatedApiUsageService;
 import com.lexho.user_service.service.DeprecationControlService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -53,7 +53,7 @@ class PartnerDispatchControllerTest {
     @Mock DeprecationControlService deprecationControlService;
     @Mock DeprecatedApiUsageService deprecatedApiUsageService;
     @Mock PartnerSkillService partnerSkillService;
-    @Mock PartnerProfileRepository partnerProfileRepository;
+    @Mock PartnerOperationalProfileRepository partnerProfileRepository;
     @Mock PartnerGeoIndexService partnerGeoIndexService;
     @Mock GeoEventPublisher geoEventPublisher;
     @Mock TrackingLifecycleService trackingLifecycleService;
@@ -160,7 +160,7 @@ class PartnerDispatchControllerTest {
 
     @Test
     void availabilityShouldRejectAdminLockedPartner() {
-        PartnerProfile profile = new PartnerProfile();
+        PartnerOperationalProfile profile = new PartnerOperationalProfile();
         profile.setId(7L);
         profile.setAvailabilityLockedUntil(LocalDateTime.now().plusHours(1));
         when(partnerProfileRepository.findById(7L)).thenReturn(Optional.of(profile));

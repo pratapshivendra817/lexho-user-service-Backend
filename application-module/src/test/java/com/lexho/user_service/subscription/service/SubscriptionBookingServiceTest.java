@@ -6,6 +6,7 @@ import com.lexho.booking.entity.Order;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.audit.service.AuditLogService;
+import com.lexho.user_service.coupon.service.CouponService;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexho.entity.LexhoAddress;
 import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
@@ -32,6 +33,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,13 +65,16 @@ class SubscriptionBookingServiceTest {
     private AuditLogService auditLogService;
     @Mock
     private GeoFenceValidationService geoFenceValidationService;
+    @Mock
+    private CouponService couponService;
 
     private SubscriptionBookingService service;
 
     @BeforeEach
     void setUp() {
         service = new SubscriptionBookingService(masterRepository, frequencyRepository, visitRepository,
-                serviceRepository, addressRepository, pricingService, orderRepository, geoFenceValidationService);
+                serviceRepository, addressRepository, pricingService, orderRepository, geoFenceValidationService,
+                couponService);
         ReflectionTestUtils.setField(service, "auditLogService", auditLogService);
         lenient().when(pricingService.familySizeLabel(null)).thenReturn(null);
     }
@@ -225,14 +230,13 @@ class SubscriptionBookingServiceTest {
     }
 
     @Test
-    void cancelRejectsTerminalStatesAndCancelsActiveSubscriptionEvenWhenAuditFails() {
+    void cancelIsIdempotentAndCancelsFutureScheduledAndRescheduledVisits() {
         SubscriptionMaster cancelled = master(1L, SubscriptionStatus.CANCELLED);
-        when(masterRepository.findByIdAndCustomerId(1L, 7L)).thenReturn(Optional.of(cancelled));
-        assertThatThrownBy(() -> service.cancel(7L, 1L))
-                .isInstanceOf(SubscriptionValidationException.class);
+        when(masterRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(cancelled));
+        service.cancel(7L, 1L);
 
         SubscriptionMaster active = master(2L, SubscriptionStatus.ACTIVE);
-        when(masterRepository.findByIdAndCustomerId(2L, 7L)).thenReturn(Optional.of(active));
+        when(masterRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(active));
         doThrow(new IllegalStateException("audit unavailable")).when(auditLogService)
                 .log(7L, null, 102L, "SUBSCRIPTION_CANCELLED", "ACTIVE", "CANCELLED");
 
@@ -241,54 +245,60 @@ class SubscriptionBookingServiceTest {
         assertThat(active.getStatus()).isEqualTo(SubscriptionStatus.CANCELLED);
         verify(visitRepository).cancelFutureScheduled(2L, VisitStatus.SCHEDULED,
                 VisitStatus.CANCELLED, LocalDate.now());
+        verify(visitRepository).cancelFutureScheduled(2L, VisitStatus.RESCHEDULED,
+                VisitStatus.CANCELLED, LocalDate.now());
     }
 
     @Test
     void pauseAndResumeEnforceStateTransitions() {
         SubscriptionMaster pending = master(1L, SubscriptionStatus.PENDING);
-        when(masterRepository.findByIdAndCustomerId(1L, 7L)).thenReturn(Optional.of(pending));
+        when(masterRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(pending));
         assertThatThrownBy(() -> service.pause(7L, 1L))
                 .isInstanceOf(SubscriptionValidationException.class)
                 .hasMessageContaining("ACTIVE");
 
         SubscriptionMaster active = master(2L, SubscriptionStatus.ACTIVE);
-        when(masterRepository.findByIdAndCustomerId(2L, 7L)).thenReturn(Optional.of(active));
+        when(masterRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(active));
         when(masterRepository.save(active)).thenReturn(active);
         when(serviceRepository.findById(5L)).thenReturn(Optional.empty());
         when(frequencyRepository.findBySubscriptionIdOrderByIdAsc(2L)).thenReturn(List.of());
         when(visitRepository.findBySubscriptionIdOrderByVisitDateAscIdAsc(2L)).thenReturn(List.of());
         assertThat(service.pause(7L, 2L)).containsEntry("status", "PAUSED");
 
-        when(masterRepository.findByIdAndCustomerId(2L, 7L)).thenReturn(Optional.of(active));
+        when(masterRepository.findByIdForUpdate(2L)).thenReturn(Optional.of(active));
         when(masterRepository.save(active)).thenReturn(active);
         assertThat(service.resume(7L, 2L)).containsEntry("status", "ACTIVE");
-        assertThatThrownBy(() -> service.resume(7L, 2L))
+        assertThat(service.resume(7L, 2L)).containsEntry("status", "ACTIVE");
+
+        SubscriptionMaster pendingResume = master(3L, SubscriptionStatus.PENDING);
+        when(masterRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(pendingResume));
+        assertThatThrownBy(() -> service.resume(7L, 3L))
                 .isInstanceOf(SubscriptionValidationException.class)
                 .hasMessageContaining("PAUSED");
     }
 
     @Test
     void skipVisitCoversMissingPastWrongStateAndSuccess() {
-        when(masterRepository.findByIdAndCustomerId(1L, 7L))
+        when(masterRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(master(1L, SubscriptionStatus.ACTIVE)));
-        when(visitRepository.findByIdAndSubscriptionId(99L, 1L)).thenReturn(Optional.empty());
+        when(visitRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.skipVisit(7L, 1L, 99L))
                 .isInstanceOf(ResourceNotFoundException.class);
 
         SubscriptionVisit past = visit(11L, VisitStatus.SCHEDULED, LocalDate.now());
-        when(visitRepository.findByIdAndSubscriptionId(11L, 1L)).thenReturn(Optional.of(past));
+        when(visitRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(past));
         assertThatThrownBy(() -> service.skipVisit(7L, 1L, 11L))
                 .isInstanceOf(SubscriptionValidationException.class)
                 .hasMessageContaining("future");
 
         SubscriptionVisit completed = visit(12L, VisitStatus.COMPLETED, LocalDate.now().plusDays(1));
-        when(visitRepository.findByIdAndSubscriptionId(12L, 1L)).thenReturn(Optional.of(completed));
+        when(visitRepository.findByIdForUpdate(12L)).thenReturn(Optional.of(completed));
         assertThatThrownBy(() -> service.skipVisit(7L, 1L, 12L))
                 .isInstanceOf(SubscriptionValidationException.class)
                 .hasMessageContaining("SCHEDULED");
 
         SubscriptionVisit scheduled = visit(13L, VisitStatus.SCHEDULED, LocalDate.now().plusDays(1));
-        when(visitRepository.findByIdAndSubscriptionId(13L, 1L)).thenReturn(Optional.of(scheduled));
+        when(visitRepository.findByIdForUpdate(13L)).thenReturn(Optional.of(scheduled));
         service.skipVisit(7L, 1L, 13L);
         assertThat(scheduled.getStatus()).isEqualTo(VisitStatus.SKIPPED);
         verify(visitRepository).save(scheduled);
@@ -296,10 +306,10 @@ class SubscriptionBookingServiceTest {
 
     @Test
     void rescheduleVisitCoversDateStateDuplicateAndSuccess() {
-        when(masterRepository.findByIdAndCustomerId(1L, 7L))
+        when(masterRepository.findByIdForUpdate(1L))
                 .thenReturn(Optional.of(master(1L, SubscriptionStatus.ACTIVE)));
         SubscriptionVisit visit = visit(11L, VisitStatus.SCHEDULED, LocalDate.now().plusDays(1));
-        when(visitRepository.findByIdAndSubscriptionId(11L, 1L)).thenReturn(Optional.of(visit));
+        when(visitRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(visit));
 
         assertThatThrownBy(() -> service.rescheduleVisit(7L, 1L, 11L,
                 new RescheduleVisitRequest(LocalDate.now())))
@@ -322,15 +332,20 @@ class SubscriptionBookingServiceTest {
                 .hasMessageContaining("already exists");
 
         service.rescheduleVisit(7L, 1L, 11L, new RescheduleVisitRequest(newDate));
+        service.rescheduleVisit(7L, 1L, 11L, new RescheduleVisitRequest(newDate));
         assertThat(visit.getVisitDate()).isEqualTo(newDate);
         assertThat(visit.getRescheduledDate()).isEqualTo(newDate);
         assertThat(visit.getStatus()).isEqualTo(VisitStatus.RESCHEDULED);
+        verify(visitRepository, org.mockito.Mockito.times(1)).save(visit);
     }
 
     @Test
     void createCleaningSubscriptionShouldPersistMasterVisitsAndPaymentBooking() {
         CreateSubscriptionRequest request = request(List.of("monday", "wednesday"),
                 LocalDate.of(2026, 6, 22), LocalDate.of(2026, 6, 29), "10:00", BigDecimal.valueOf(2), null, "CLEANING");
+        AtomicReference<SubscriptionMaster> savedMasterReference = new AtomicReference<>();
+        when(masterRepository.findByCustomerIdAndIdempotencyKey(7L, "subscription-create-1"))
+                .thenAnswer(invocation -> Optional.ofNullable(savedMasterReference.get()));
 
         AdminServiceEntity adminService = adminService(true, "SUBSCRIPTION", "Cleaning");
         ReflectionTestUtils.setField(adminService, "id", 2L);
@@ -352,12 +367,13 @@ class SubscriptionBookingServiceTest {
         when(masterRepository.save(any())).thenAnswer(invocation -> {
             SubscriptionMaster master = invocation.getArgument(0);
             ReflectionTestUtils.setField(master, "id", 900L);
+            savedMasterReference.set(master);
             return master;
         });
         when(frequencyRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(visitRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        var response = service.create(7L, request);
+        var response = service.create(7L, request, "subscription-create-1");
 
         assertThat(response.id()).isEqualTo(900L);
         assertThat(response.bookingId()).isEqualTo(700L);
@@ -368,6 +384,19 @@ class SubscriptionBookingServiceTest {
         verify(orderRepository).save(any(Order.class));
         verify(frequencyRepository).saveAll(any());
         verify(visitRepository).saveAll(any());
+
+        var replay = service.create(7L, request, "subscription-create-1");
+        assertThat(replay.id()).isEqualTo(response.id());
+        assertThat(replay.bookingId()).isEqualTo(response.bookingId());
+        verify(addressRepository, org.mockito.Mockito.times(2))
+                .findByUserIdAndIsDeletedFalseForUpdate(7L);
+        verify(orderRepository, org.mockito.Mockito.times(1)).save(any(Order.class));
+
+        CreateSubscriptionRequest changedRequest = request(List.of("monday", "wednesday"),
+                LocalDate.of(2026, 6, 22), LocalDate.of(2026, 6, 29), "11:00", BigDecimal.valueOf(2), null, "CLEANING");
+        assertThatThrownBy(() -> service.create(7L, changedRequest, "subscription-create-1"))
+                .isInstanceOf(SubscriptionValidationException.class)
+                .hasMessageContaining("Idempotency key was already used");
     }
 
     @Test
@@ -424,7 +453,7 @@ class SubscriptionBookingServiceTest {
                                               com.lexho.user_service.subscription.enums.FamilySize familySize,
                                               String serviceType) {
         return new CreateSubscriptionRequest(2L, 3L, null, serviceType, days, start, end,
-                null, duration, familySize, slot, null);
+                null, duration, familySize, slot, null, null);
     }
 
     private SubscriptionMaster master(Long id, SubscriptionStatus status) {

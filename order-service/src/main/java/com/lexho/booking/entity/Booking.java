@@ -22,10 +22,10 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.util.concurrent.ThreadLocalRandom;
 
 @Entity
 @Table(
@@ -39,6 +39,7 @@ import java.util.concurrent.ThreadLocalRandom;
 @Getter
 @Setter
 public class Booking {
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -100,7 +101,7 @@ public class Booking {
         createdAt = now;
         updatedAt = now;
         if (bookingId == null || bookingId.isBlank()) {
-            bookingId = "BK" + ThreadLocalRandom.current().nextInt(1000, 10000);
+            bookingId = "BK" + (SECURE_RANDOM.nextInt(9000) + 1000);
         }
         if (bookingStatus == null) {
             bookingStatus = BookingStatus.PENDING;
@@ -115,4 +116,3 @@ public class Booking {
         updatedAt = LocalDateTime.now();
     }
 }
-

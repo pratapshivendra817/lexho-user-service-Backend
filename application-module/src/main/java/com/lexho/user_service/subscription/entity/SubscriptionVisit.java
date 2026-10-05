@@ -20,6 +20,12 @@ public class SubscriptionVisit {
     @Column(name = "subscription_id", nullable = false)
     private Long subscriptionId;
 
+    @Column(name = "booking_id", unique = true)
+    private Long bookingId;
+
+    public Long getBookingId() { return bookingId; }
+    public void setBookingId(Long bookingId) { this.bookingId = bookingId; }
+
     @Column(name = "visit_date", nullable = false)
     private LocalDate visitDate;
 

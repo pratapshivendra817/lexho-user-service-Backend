@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
+import com.lexho.common.enums.PaymentStatus;
 import com.lexho.provider.entity.Partner;
 import com.lexho.provider.repository.PartnerRepository;
 import com.lexho.user_service.admin.entity.AdminCategoryEntity;
@@ -94,7 +95,8 @@ class DispatchOrchestrationSkillFilterTest {
                 dispatchScoringPolicy,
                 objectMapper,
                 trackingLifecycleService,
-                dispatchProperties()
+                dispatchProperties(),
+                new PartnerDispatchEligibilityService()
         );
     }
 
@@ -145,7 +147,8 @@ class DispatchOrchestrationSkillFilterTest {
         order.setId(9001L);
         order.setStatus(OrderStatus.BOOKING_CREATED);
         order.setBookingType("SCHEDULED");
-        when(orderRepository.findById(9001L)).thenReturn(Optional.of(order));
+        order.setPaymentStatus(PaymentStatus.SUCCESS);
+        when(orderRepository.findByIdForUpdate(9001L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
 
         LexhoAddress address = new LexhoAddress();
@@ -222,6 +225,10 @@ class DispatchOrchestrationSkillFilterTest {
         when(partnerServiceRequestRepository.findByCartId(9001L)).thenReturn(List.of());
         lenient().when(partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(9001L, 1L, PartnerServiceRequestStatus.PENDING)).thenReturn(false);
         lenient().when(partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(9001L, 2L, PartnerServiceRequestStatus.PENDING)).thenReturn(false);
+        lenient().when(partnerShiftRepository.findByPartnerIdForUpdate(1L)).thenReturn(Optional.of(shiftRaj));
+        lenient().when(partnerShiftRepository.findByPartnerIdForUpdate(2L)).thenReturn(Optional.of(shiftAman));
+        lenient().when(partnerRepository.findById(1L)).thenReturn(Optional.of(raj));
+        lenient().when(partnerRepository.findById(2L)).thenReturn(Optional.of(aman));
 
         return new BaseData(order, address, raj, aman);
     }

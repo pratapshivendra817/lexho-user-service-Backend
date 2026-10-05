@@ -31,6 +31,12 @@ public class SubscriptionMaster {
     @Column(name = "booking_id")
     private Long bookingId;
 
+    @Column(name = "idempotency_key", length = 100)
+    private String idempotencyKey;
+
+    @Column(name = "request_hash", length = 64, columnDefinition = "CHAR(64)")
+    private String requestHash;
+
     @Column(name = "booking_mode", length = 30)
     private String bookingMode;
 
@@ -96,6 +102,10 @@ public class SubscriptionMaster {
     public void setAddressId(Long addressId) { this.addressId = addressId; }
     public Long getBookingId() { return bookingId; }
     public void setBookingId(Long bookingId) { this.bookingId = bookingId; }
+    public String getIdempotencyKey() { return idempotencyKey; }
+    public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
+    public String getRequestHash() { return requestHash; }
+    public void setRequestHash(String requestHash) { this.requestHash = requestHash; }
     public String getBookingMode() { return bookingMode; }
     public void setBookingMode(String bookingMode) { this.bookingMode = bookingMode; }
     public String getServiceType() { return serviceType; }

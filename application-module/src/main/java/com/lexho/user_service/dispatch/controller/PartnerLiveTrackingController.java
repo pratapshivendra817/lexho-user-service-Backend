@@ -10,8 +10,10 @@ import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.security.SecurityUtils;
 import com.lexho.user_service.dispatch.service.TrackingLifecycleService;
 import com.lexho.user_service.dispatch.service.TrackingLifecycleState;
+import com.lexho.user_service.util.GeoDistanceCalculator;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PreDestroy;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +37,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RestController
 @RequestMapping("/api/v1/partners/live")
 public class PartnerLiveTrackingController {
+    private static final String FIELD_TRACKING_STATE = "trackingState";
+    private static final String FIELD_LAST_SEEN_AT = "lastSeenAt";
+
     private static final Set<OrderStatus> CUSTOMER_TRACKABLE_STATUSES = EnumSet.of(
             OrderStatus.PARTNER_ASSIGNED,
             OrderStatus.PARTNER_ACCEPTED,
@@ -91,6 +96,11 @@ public class PartnerLiveTrackingController {
         return emitter;
     }
 
+    @PreDestroy
+    void shutdownEmitterExecutor() {
+        emitterExecutor.shutdownNow();
+    }
+
     private void assertTrackingAccessAllowed(Long partnerId) {
         String currentRole = securityUtils.getCurrentRole().orElse("");
         Long currentUserId = securityUtils.getCurrentUserId()
@@ -126,17 +136,19 @@ public class PartnerLiveTrackingController {
                 } else {
                     emitter.send(SseEmitter.event().name("heartbeat").data(Map.of(
                             "partnerId", partnerId,
-                            "trackingState", payload.get("trackingState"),
-                            "lastSeenAt", payload.get("lastSeenAt"),
+                            FIELD_TRACKING_STATE, payload.get(FIELD_TRACKING_STATE),
+                            FIELD_LAST_SEEN_AT, payload.get(FIELD_LAST_SEEN_AT),
                             "seq", seq
                     )));
                 }
                 Thread.sleep(resolveSseIntervalMs(payload));
             }
             emitter.complete();
-        } catch (IOException | InterruptedException ex) {
-            emitter.completeWithError(ex);
+        } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
+            emitter.completeWithError(ex);
+        } catch (IOException ex) {
+            emitter.completeWithError(ex);
         } finally {
             activeStreams.decrementAndGet();
         }
@@ -148,8 +160,8 @@ public class PartnerLiveTrackingController {
         Map<String, Object> payload = new HashMap<>();
         payload.put("partnerId", partnerId);
         payload.put("online", shift != null && shift.isOnline());
-        payload.put("trackingState", resolveTrackingState(shift, location, partnerId));
-        if (location != null) {
+        payload.put(FIELD_TRACKING_STATE, resolveTrackingState(shift, location, partnerId));
+        if (location != null && location.getLatitude() != null && location.getLongitude() != null) {
             double lat = location.getLatitude().doubleValue();
             double lng = location.getLongitude().doubleValue();
             payload.put("lat", lat);
@@ -157,12 +169,12 @@ public class PartnerLiveTrackingController {
             payload.put("geohash", location.getGeohash());
             payload.put("pincode", location.getPincode());
             payload.put("seq", location.getLocationSeq());
-            payload.put("lastSeenAt", location.getUpdatedAt() == null ? null : location.getUpdatedAt().atOffset(ZoneOffset.UTC).toString());
+            payload.put(FIELD_LAST_SEEN_AT, location.getUpdatedAt() == null ? null : location.getUpdatedAt().atOffset(ZoneOffset.UTC).toString());
             Snapshot previous = previousSnapshots.get(partnerId);
             if (previous != null && location.getUpdatedAt() != null && previous.timeMs > 0) {
                 long nowMs = location.getUpdatedAt().toInstant(ZoneOffset.UTC).toEpochMilli();
                 long deltaMs = Math.max(1L, nowMs - previous.timeMs);
-                double distanceMeters = haversineMeters(previous.lat, previous.lng, lat, lng);
+                double distanceMeters = GeoDistanceCalculator.haversineMeters(previous.lat, previous.lng, lat, lng);
                 double speedKmh = (distanceMeters / deltaMs) * 3_600.0d;
                 payload.put("speedKmh", round2(speedKmh));
                 payload.put("headingDegrees", round2(initialBearing(previous.lat, previous.lng, lat, lng)));
@@ -177,7 +189,7 @@ public class PartnerLiveTrackingController {
     }
 
     private long resolveSseIntervalMs(Map<String, Object> payload) {
-        Object stateObj = payload.get("trackingState");
+        Object stateObj = payload.get(FIELD_TRACKING_STATE);
         TrackingLifecycleState state = TrackingLifecycleState.from(
                 stateObj == null ? null : stateObj.toString(),
                 TrackingLifecycleState.ASSIGNED
@@ -205,19 +217,12 @@ public class PartnerLiveTrackingController {
         if (location == null || location.getLatitude() == null || location.getLongitude() == null) return TrackingLifecycleState.ASSIGNED.name();
         Snapshot previous = previousSnapshots.get(partnerId);
         if (previous == null) return TrackingLifecycleState.ASSIGNED.name();
-        double movedMeters = haversineMeters(previous.lat, previous.lng, location.getLatitude().doubleValue(), location.getLongitude().doubleValue());
+        double movedMeters = GeoDistanceCalculator.haversineMeters(
+                previous.lat,
+                previous.lng,
+                location.getLatitude().doubleValue(),
+                location.getLongitude().doubleValue());
         return movedMeters >= movingThresholdMeters ? TrackingLifecycleState.EN_ROUTE.name() : TrackingLifecycleState.ASSIGNED.name();
-    }
-
-    private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
-        double earthRadius = 6371000.0d;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadius * c;
     }
 
     private double initialBearing(double lat1, double lon1, double lat2, double lon2) {

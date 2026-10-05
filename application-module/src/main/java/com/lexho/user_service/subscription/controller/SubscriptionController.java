@@ -32,6 +32,7 @@ import java.util.Map;
 @RestController
 @RequestMapping({"/api/subscription", "/api/subscriptions"})
 public class SubscriptionController {
+    private static final String ATTR_USER_ID = "userId";
 
     private final SubscriptionBookingService subscriptionBookingService;
     private final SubscriptionPricingService subscriptionPricingService;
@@ -46,17 +47,21 @@ public class SubscriptionController {
     }
 
     @PostMapping("/create")
-    public ApiResponse<SubscriptionCreateResponse> create(@RequestAttribute("userId") Long customerId,
-                                                          @Valid @RequestBody CreateSubscriptionRequest request) {
+    public ApiResponse<SubscriptionCreateResponse> create(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                          @Valid @RequestBody CreateSubscriptionRequest request,
+                                                          @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         validateSubscriptionEnabled();
-        return ApiResponse.success("Subscription created", subscriptionBookingService.create(customerId, request));
+        return ApiResponse.success("Subscription created",
+                subscriptionBookingService.create(customerId, request, idempotencyKey));
     }
 
     @PostMapping("/bookings")
-    public ApiResponse<SubscriptionCreateResponse> createBookingAlias(@RequestAttribute("userId") Long customerId,
-                                                                      @Valid @RequestBody CreateSubscriptionRequest request) {
+    public ApiResponse<SubscriptionCreateResponse> createBookingAlias(@RequestAttribute(ATTR_USER_ID) Long customerId,
+                                                                      @Valid @RequestBody CreateSubscriptionRequest request,
+                                                                      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         validateSubscriptionEnabled();
-        return ApiResponse.success("Subscription created", subscriptionBookingService.create(customerId, request));
+        return ApiResponse.success("Subscription created",
+                subscriptionBookingService.create(customerId, request, idempotencyKey));
     }
 
     private void validateSubscriptionEnabled() {
@@ -96,65 +101,65 @@ public class SubscriptionController {
     }
 
     @GetMapping("/list")
-    public ApiResponse<List<SubscriptionListItemResponse>> list(@RequestAttribute("userId") Long customerId) {
+    public ApiResponse<List<SubscriptionListItemResponse>> list(@RequestAttribute(ATTR_USER_ID) Long customerId) {
         return ApiResponse.success("Subscriptions fetched", subscriptionBookingService.list(customerId));
     }
 
     @GetMapping
-    public ApiResponse<List<Map<String, Object>>> subscriptions(@RequestAttribute("userId") Long customerId) {
+    public ApiResponse<List<Map<String, Object>>> subscriptions(@RequestAttribute(ATTR_USER_ID) Long customerId) {
         return ApiResponse.success("Subscriptions fetched", subscriptionBookingService.subscriptionCards(customerId));
     }
 
     @GetMapping("/{subscriptionId}")
-    public ApiResponse<Map<String, Object>> subscriptionCard(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<Map<String, Object>> subscriptionCard(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                                              @PathVariable Long subscriptionId) {
         return ApiResponse.success("Subscription fetched",
                 subscriptionBookingService.subscriptionCard(customerId, subscriptionId));
     }
 
     @GetMapping("/{subscriptionId}/detail")
-    public ApiResponse<SubscriptionDetailResponse> detail(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<SubscriptionDetailResponse> detail(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                                           @PathVariable Long subscriptionId) {
         return ApiResponse.success("Subscription fetched",
                 subscriptionBookingService.detail(customerId, subscriptionId));
     }
 
     @PostMapping("/{subscriptionId}/pause")
-    public ApiResponse<Map<String, Object>> pause(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<Map<String, Object>> pause(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                                   @PathVariable Long subscriptionId) {
         return ApiResponse.success("Subscription paused",
                 subscriptionBookingService.pause(customerId, subscriptionId));
     }
 
     @PostMapping("/{subscriptionId}/resume")
-    public ApiResponse<Map<String, Object>> resume(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<Map<String, Object>> resume(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                                    @PathVariable Long subscriptionId) {
         return ApiResponse.success("Subscription resumed",
                 subscriptionBookingService.resume(customerId, subscriptionId));
     }
 
     @GetMapping("/{subscriptionId}/calendar")
-    public List<SubscriptionCalendarItemResponse> calendar(@RequestAttribute("userId") Long customerId,
+    public List<SubscriptionCalendarItemResponse> calendar(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                                            @PathVariable Long subscriptionId) {
         return subscriptionBookingService.calendar(customerId, subscriptionId);
     }
 
     @GetMapping("/{subscriptionId}/visits")
-    public ApiResponse<Map<String, Object>> visits(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<Map<String, Object>> visits(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                                    @PathVariable Long subscriptionId) {
         return ApiResponse.success("Subscription visits fetched",
                 subscriptionBookingService.visits(customerId, subscriptionId));
     }
 
     @PostMapping("/{subscriptionId}/cancel")
-    public ApiResponse<Void> cancel(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<Void> cancel(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                     @PathVariable Long subscriptionId) {
         subscriptionBookingService.cancel(customerId, subscriptionId);
         return ApiResponse.success("Subscription cancelled", null);
     }
 
     @PostMapping("/{subscriptionId}/visits/{visitId}/skip")
-    public ApiResponse<Void> skipVisit(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<Void> skipVisit(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                        @PathVariable Long subscriptionId,
                                        @PathVariable Long visitId) {
         subscriptionBookingService.skipVisit(customerId, subscriptionId, visitId);
@@ -162,7 +167,7 @@ public class SubscriptionController {
     }
 
     @PostMapping("/{subscriptionId}/visits/{visitId}/reschedule")
-    public ApiResponse<Void> rescheduleVisit(@RequestAttribute("userId") Long customerId,
+    public ApiResponse<Void> rescheduleVisit(@RequestAttribute(ATTR_USER_ID) Long customerId,
                                              @PathVariable Long subscriptionId,
                                              @PathVariable Long visitId,
                                              @Valid @RequestBody RescheduleVisitRequest request) {

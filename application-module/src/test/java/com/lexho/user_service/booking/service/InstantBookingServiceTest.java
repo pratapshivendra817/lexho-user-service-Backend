@@ -17,6 +17,7 @@ import com.lexho.user_service.customer.location.service.ReverseGeocodeService;
 import com.lexho.user_service.customer.repository.CustomerCatalogRepository;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.exception.UnauthorizedException;
+import com.lexho.user_service.review.repository.ReviewRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -27,6 +28,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -45,164 +47,103 @@ class InstantBookingServiceTest {
     @Mock CustomerAddressRepository addressRepository;
     @Mock ReverseGeocodeService reverseGeocodeService;
     @Mock UserRepository userRepository;
+    @Mock ReviewRepository reviewRepository;
     @InjectMocks InstantBookingService service;
 
     @Test
-    void createInstantShouldUseCoordinateObjectAndReverseGeocodedAddress() {
-        AdminServiceEntity catalogService = catalogService(5L);
-        InstantBookingCreateRequest request = request();
-        request.latitude = 1.0;
-        request.longitude = 2.0;
-        request.coordinates = new InstantBookingCreateRequest.Coordinates();
-        request.coordinates.lat = 28.61;
-        request.coordinates.lng = 77.20;
-        ReverseGeocodeResponse reverse = new ReverseGeocodeResponse();
-        reverse.formattedAddress = "New Delhi";
-        when(catalogRepository.findById(5L)).thenReturn(Optional.of(catalogService));
-        when(reverseGeocodeService.reverse(28.61, 77.20)).thenReturn(reverse);
-        when(orderRepository.save(any())).thenAnswer(invocation -> {
-            Order saved = invocation.getArgument(0);
-            saved.setId(100L);
-            return saved;
-        });
+    void createShouldFailClosedInsteadOfBypassingPaymentDispatchFlow() {
+        BookingValidationException exception = assertThrows(BookingValidationException.class,
+                () -> service.create(7L, request()));
 
-        var response = service.create(7L, request);
-
-        assertEquals(100L, response.bookingId);
-        assertEquals("INSTANT", response.bookingType);
-        assertEquals("SEARCHING_PARTNER", response.assignmentStatus);
-        assertEquals(30, response.slaMinutes);
-        assertEquals("New Delhi", response.fullAddress);
-        assertEquals(80.0, response.totalAmount);
-        ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
-        verify(orderRepository).save(captor.capture());
-        assertEquals(1, captor.getValue().getItems().size());
+        assertEquals("LEGACY_BOOKING_FLOW_DISABLED", exception.getErrorCode());
+        verifyNoInteractions(catalogRepository, reverseGeocodeService, orderRepository);
     }
 
     @Test
-    void createScheduledShouldUseOwnedSavedAddressAndDiscountedPrice() {
-        UUID addressId = UUID.randomUUID();
-        CustomerAddress address = new CustomerAddress();
-        address.setFlatNo("12A");
-        address.setBuildingName("Tower");
-        address.setAddressLine("Main Road");
-        address.setCity("Gurugram");
-        InstantBookingCreateRequest request = request();
-        request.bookingType = " scheduled ";
-        request.date = LocalDate.of(2026, 7, 1);
-        request.slot = "10:30-11:30";
-        request.addressId = addressId.toString();
-        when(catalogRepository.findById(5L)).thenReturn(Optional.of(catalogService(5L)));
-        when(addressRepository.findByIdAndCustomerIdAndIsDeletedFalse(addressId, 7L)).thenReturn(Optional.of(address));
-        when(orderRepository.save(any())).thenAnswer(invocation -> {
-            Order saved = invocation.getArgument(0);
-            saved.setId(101L);
-            return saved;
-        });
-
-        var response = service.create(7L, request);
-
-        assertEquals("SCHEDULED", response.bookingType);
-        assertEquals("SCHEDULED", response.assignmentStatus);
-        assertEquals("10:30-11:30", response.slot);
-        assertEquals("12A, Tower, Main Road, Gurugram", response.fullAddress);
-        assertNull(response.slaMinutes);
-        verifyNoInteractions(reverseGeocodeService);
-    }
-
-    @Test
-    void createShouldRejectMissingUnavailableAndInvalidPriceServices() {
-        InstantBookingCreateRequest request = request();
-        when(catalogRepository.findById(5L)).thenReturn(Optional.empty());
-        assertThrows(ResourceNotFoundException.class, () -> service.create(7L, request));
-
-        AdminServiceEntity unavailable = catalogService(5L);
-        unavailable.setActive(false);
-        when(catalogRepository.findById(5L)).thenReturn(Optional.of(unavailable));
-        assertThrows(BookingValidationException.class, () -> service.create(7L, request));
-
-        AdminServiceEntity noPrice = catalogService(5L);
-        noPrice.setBasePrice(null);
-        noPrice.setDiscountedPrice(null);
-        when(catalogRepository.findById(5L)).thenReturn(Optional.of(noPrice));
-        ReverseGeocodeResponse reverse = new ReverseGeocodeResponse();
-        reverse.city = "Delhi";
-        when(reverseGeocodeService.reverse(anyDouble(), anyDouble())).thenReturn(reverse);
-        assertThrows(BookingValidationException.class, () -> service.create(7L, request));
-    }
-
-    @Test
-    void scheduledCreateShouldValidateDateAndSlotFormat() {
+    void createShouldFailClosedBeforeLegacyScheduledValidation() {
         InstantBookingCreateRequest request = request();
         request.bookingType = "SCHEDULED";
-        when(catalogRepository.findById(5L)).thenReturn(Optional.of(catalogService(5L)));
 
-        BookingValidationException missingDate = assertThrows(BookingValidationException.class,
-                () -> service.create(7L, request));
-        assertEquals("DATE_REQUIRED", missingDate.getErrorCode());
-        request.date = LocalDate.of(2026, 7, 1);
-        BookingValidationException missingSlot = assertThrows(BookingValidationException.class,
-                () -> service.create(7L, request));
-        assertEquals("SLOT_REQUIRED", missingSlot.getErrorCode());
-        request.slot = "morning";
         BookingValidationException invalidSlot = assertThrows(BookingValidationException.class,
                 () -> service.create(7L, request));
-        assertEquals("INVALID_SLOT", invalidSlot.getErrorCode());
+        assertEquals("LEGACY_BOOKING_FLOW_DISABLED", invalidSlot.getErrorCode());
     }
 
     @Test
-    void reverseAddressShouldFallBackAcrossFieldsAndCoordinates() {
-        InstantBookingCreateRequest request = request();
-        request.addressId = "not-a-uuid";
-        when(catalogRepository.findById(5L)).thenReturn(Optional.of(catalogService(5L)));
-        when(orderRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        ReverseGeocodeResponse area = new ReverseGeocodeResponse();
-        area.area = "Sector 21";
-        when(reverseGeocodeService.reverse(28.0, 77.0)).thenReturn(area);
-        assertEquals("Sector 21", service.create(7L, request).fullAddress);
-
-        ReverseGeocodeResponse empty = new ReverseGeocodeResponse();
-        when(reverseGeocodeService.reverse(28.0, 77.0)).thenReturn(empty);
-        assertEquals("28.0, 77.0", service.create(7L, request).fullAddress);
+    void createShouldFailClosedBeforeLegacyServiceLookup() {
+        assertThrows(BookingValidationException.class, () -> service.create(7L, request()));
+        verifyNoInteractions(catalogRepository);
     }
 
     @Test
     void detailsShouldRejectMissingAndForeignBookings() {
-        when(orderRepository.findById(99L)).thenReturn(Optional.empty());
+        when(orderRepository.findByIdForUpdate(99L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class, () -> service.details(7L, 99L));
         Order foreign = order(10L, OrderStatus.CONFIRMED);
         foreign.setUserId(8L);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(foreign));
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(foreign));
         assertThrows(UnauthorizedException.class, () -> service.details(7L, 10L));
     }
 
     @Test
+    void detailsFallsBackWhenOrderItemsContainNullRow() {
+        Order order = order(10L, OrderStatus.CONFIRMED);
+        order.setItems(new ArrayList<>());
+        order.getItems().add(null);
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(order));
+
+        var response = service.details(7L, 10L);
+
+        assertNull(response.serviceId);
+        assertNull(response.serviceName);
+    }
+
+    @Test
     void detailsShouldAttachAssignedPartnerAndMapLifecycleStatuses() {
-        Order order = order(10L, OrderStatus.PARTNER_REACHED);
+        Order order = order(10L, OrderStatus.ARRIVED);
         order.setAssignedPartnerId(20L);
+        order.setServiceStartPinNonce("abc123");
+        order.setServiceStartPinExpiresAt(LocalDateTime.now().plusMinutes(10));
         User partner = new User("9876543210", true);
         ReflectionTestUtils.setField(partner, "id", 20L);
         partner.setFullName("Ravi");
         partner.setProfileImage("photo.jpg");
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(order));
         when(catalogRepository.findById(5L)).thenReturn(Optional.of(catalogService(5L)));
         when(userRepository.findByIdAndDeletedFalse(20L)).thenReturn(Optional.of(partner));
 
         var response = service.details(7L, 10L);
 
         assertEquals("PARTNER_ARRIVED", response.assignmentStatus);
+        assertNotNull(response.serviceStartPin);
+        assertTrue(response.serviceStartPin.matches("\\d{4}"));
+        assertNotNull(response.serviceStartPinExpiresAt);
         assertEquals("Ravi", response.partnerName);
         assertEquals("9876543210", response.partnerPhone);
         assertEquals(12, response.etaMinutes);
+        assertEquals(false, response.meta.get("canReview"));
+        assertEquals(false, response.meta.get("reviewSubmitted"));
     }
 
     @Test
     void detailsShouldMapTerminalAndProgressMessages() {
-        Order order = order(10L, OrderStatus.SERVICE_STARTED);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        Order order = order(10L, OrderStatus.SERVICE_IN_PROGRESS);
+        order.setServiceCompletePinNonce("complete123");
+        order.setServiceCompletePinExpiresAt(LocalDateTime.now().plusMinutes(10));
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(order));
         assertEquals("IN_PROGRESS", service.details(7L, 10L).assignmentStatus);
+        assertTrue(service.details(7L, 10L).serviceCompletePin.matches("\\d{4}"));
         order.setStatus(OrderStatus.SERVICE_COMPLETED);
-        assertEquals("COMPLETED", service.details(7L, 10L).assignmentStatus);
+        var completed = service.details(7L, 10L);
+        assertEquals("COMPLETED", completed.status);
+        assertEquals("COMPLETED", completed.assignmentStatus);
+        assertNull(completed.serviceCompletePin);
+        assertEquals(true, completed.meta.get("canReview"));
+        assertEquals(false, completed.meta.get("reviewSubmitted"));
+        when(reviewRepository.existsByBookingIdAndDeletedFalse(10L)).thenReturn(true);
+        var reviewed = service.details(7L, 10L);
+        assertEquals(false, reviewed.meta.get("canReview"));
+        assertEquals(true, reviewed.meta.get("reviewSubmitted"));
         order.setStatus(OrderStatus.INSTANT_FAILED);
         assertEquals("INSTANT_FAILED", service.details(7L, 10L).status);
         order.setStatus(OrderStatus.CANCELLED);

@@ -50,7 +50,7 @@ class SubscriptionControllersTest {
         when(cartConfigService.currentEntity()).thenReturn(config);
         CreateSubscriptionRequest createRequest = mock(CreateSubscriptionRequest.class);
         SubscriptionCreateResponse created = mock(SubscriptionCreateResponse.class);
-        when(bookingService.create(7L, createRequest)).thenReturn(created);
+        when(bookingService.create(7L, createRequest, null)).thenReturn(created);
         SubscriptionQuoteRequest quoteRequest = mock(SubscriptionQuoteRequest.class);
         SubscriptionQuoteResponse quote = mock(SubscriptionQuoteResponse.class);
         when(pricingService.quote(quoteRequest)).thenReturn(quote);
@@ -71,8 +71,8 @@ class SubscriptionControllersTest {
         when(bookingService.visits(7L, 11L)).thenReturn(Map.of("count", 4));
         RescheduleVisitRequest reschedule = mock(RescheduleVisitRequest.class);
 
-        assertThat(controller.create(7L, createRequest).getData()).isSameAs(created);
-        assertThat(controller.createBookingAlias(7L, createRequest).getData()).isSameAs(created);
+        assertThat(controller.create(7L, createRequest, null).getData()).isSameAs(created);
+        assertThat(controller.createBookingAlias(7L, createRequest, null).getData()).isSameAs(created);
         assertThat(controller.quote(quoteRequest).getData()).isSameAs(quote);
         assertThat(controller.pricing(3L).getData()).hasSize(1);
         assertThat(controller.cookPricing(3L).getData()).hasSize(1);
@@ -101,7 +101,7 @@ class SubscriptionControllersTest {
         disabled.setSubscriptionBookingEnabled(false);
         when(cartConfigService.currentEntity()).thenReturn(disabled);
 
-        assertThatThrownBy(() -> controller.create(7L, mock(CreateSubscriptionRequest.class)))
+        assertThatThrownBy(() -> controller.create(7L, mock(CreateSubscriptionRequest.class), null))
                 .isInstanceOf(CodedValidationException.class)
                 .hasMessage("Subscription booking is currently disabled");
         verifyNoInteractions(bookingService);
@@ -113,7 +113,7 @@ class SubscriptionControllersTest {
         disabled.setSubscriptionCheckoutEnabled(false);
         when(cartConfigService.currentEntity()).thenReturn(disabled);
 
-        assertThatThrownBy(() -> controller.createBookingAlias(7L, mock(CreateSubscriptionRequest.class)))
+        assertThatThrownBy(() -> controller.createBookingAlias(7L, mock(CreateSubscriptionRequest.class), null))
                 .isInstanceOf(CodedValidationException.class);
     }
 

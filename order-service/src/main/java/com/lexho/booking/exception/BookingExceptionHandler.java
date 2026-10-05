@@ -12,14 +12,16 @@ import java.util.Map;
 @RestControllerAdvice(basePackages = "com.lexho.booking")
 public class BookingExceptionHandler {
 
+    private static final String MESSAGE_KEY = "message";
+
     @ExceptionHandler(BookingNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(BookingNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler({BookingOperationException.class, BookingValidationException.class})
     public ResponseEntity<Map<String, Object>> handleBadRequest(RuntimeException ex) {
-        return ResponseEntity.badRequest().body(Map.of("message", ex.getMessage()));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -29,7 +31,6 @@ public class BookingExceptionHandler {
                 .findFirst()
                 .map(FieldError::getDefaultMessage)
                 .orElse("Invalid request");
-        return ResponseEntity.badRequest().body(Map.of("message", message));
+        return ResponseEntity.badRequest().body(Map.of(MESSAGE_KEY, message));
     }
 }
-

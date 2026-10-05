@@ -23,15 +23,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.format.TextStyle;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 public class SubscriptionPricingService {
@@ -67,7 +61,7 @@ public class SubscriptionPricingService {
         if (visits == null || visits <= 0) {
             throw new SubscriptionValidationException("visits must be positive");
         }
-        BigDecimal perVisitPrice = resolvePerVisitPrice(serviceId, durationHours);
+        BigDecimal perVisitPrice = resolvePerVisitPriceInternal(serviceId, durationHours);
         return new SubscriptionPriceQuoteResponse(
                 serviceId,
                 strip(durationHours),
@@ -79,15 +73,15 @@ public class SubscriptionPricingService {
 
     @Transactional(readOnly = true)
     public SubscriptionQuoteResponse quote(SubscriptionQuoteRequest request) {
-        List<String> days = normalizeDays(request.frequencyDays());
+        List<String> days = SubscriptionScheduleSupport.normalizeDays(request.frequencyDays());
         validateDateRange(request.startDate(), request.endDate());
-        int visits = generateVisitDates(request.startDate(), request.endDate(), days).size();
+        int visits = SubscriptionScheduleSupport.generateVisitDates(request.startDate(), request.endDate(), days).size();
         String serviceType = normalizeServiceType(request.serviceType());
         if ("COOK".equals(serviceType)) {
             if (request.familySize() == null) {
                 throw new SubscriptionValidationException("familySize is required for COOK subscription");
             }
-            BigDecimal pricePerVisit = resolveCookPricePerVisit(request.serviceId(), request.familySize());
+            BigDecimal pricePerVisit = resolveCookPricePerVisitInternal(request.serviceId(), request.familySize());
             return new SubscriptionQuoteResponse(request.serviceId(), serviceType, request.familySize().name(),
                     familySizeLabel(request.familySize()), null, pricePerVisit, visits,
                     pricePerVisit.multiply(BigDecimal.valueOf(visits)), "INR");
@@ -95,13 +89,17 @@ public class SubscriptionPricingService {
         if (request.durationHours() == null) {
             throw new SubscriptionValidationException("durationHours is required for CLEANING subscription");
         }
-        BigDecimal pricePerVisit = resolvePerVisitPrice(request.serviceId(), request.durationHours());
+        BigDecimal pricePerVisit = resolvePerVisitPriceInternal(request.serviceId(), request.durationHours());
         return new SubscriptionQuoteResponse(request.serviceId(), serviceType, null, null, strip(request.durationHours()),
                 pricePerVisit, visits, pricePerVisit.multiply(BigDecimal.valueOf(visits)), "INR");
     }
 
     @Transactional(readOnly = true)
     public BigDecimal resolvePerVisitPrice(Long serviceId, BigDecimal durationHours) {
+        return resolvePerVisitPriceInternal(serviceId, durationHours);
+    }
+
+    private BigDecimal resolvePerVisitPriceInternal(Long serviceId, BigDecimal durationHours) {
         return durationPriceRepository.findByServiceIdAndDurationHoursAndActiveTrue(serviceId, durationHours)
                 .or(() -> durationPriceRepository.findByServiceIdIsNullAndDurationHoursAndActiveTrue(durationHours))
                 .map(SubscriptionDurationPrice::getPerVisitPrice)
@@ -110,6 +108,10 @@ public class SubscriptionPricingService {
 
     @Transactional(readOnly = true)
     public BigDecimal resolveCookPricePerVisit(Long serviceId, FamilySize familySize) {
+        return resolveCookPricePerVisitInternal(serviceId, familySize);
+    }
+
+    private BigDecimal resolveCookPricePerVisitInternal(Long serviceId, FamilySize familySize) {
         return cookPricingRepository.findByServiceIdAndFamilySizeAndActiveTrue(serviceId, familySize)
                 .or(() -> cookPricingRepository.findByServiceIdIsNullAndFamilySizeAndActiveTrue(familySize))
                 .map(CookSubscriptionPricing::getPricePerVisit)
@@ -279,47 +281,6 @@ public class SubscriptionPricingService {
         if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
             throw new SubscriptionValidationException("startDate must not be after endDate");
         }
-    }
-
-    private List<String> normalizeDays(List<String> days) {
-        if (days == null) {
-            return List.of();
-        }
-        Set<String> normalized = new LinkedHashSet<>();
-        for (String rawDay : days) {
-            if (rawDay == null || rawDay.isBlank()) {
-                continue;
-            }
-            DayOfWeek dayOfWeek = parseDay(rawDay);
-            normalized.add(dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH));
-        }
-        return List.copyOf(normalized);
-    }
-
-    private DayOfWeek parseDay(String value) {
-        String normalized = value.trim().toUpperCase(Locale.ROOT);
-        for (DayOfWeek day : DayOfWeek.values()) {
-            if (day.name().equals(normalized)
-                    || day.getDisplayName(TextStyle.FULL, Locale.ENGLISH).toUpperCase(Locale.ROOT).equals(normalized)) {
-                return day;
-            }
-        }
-        throw new SubscriptionValidationException("Invalid frequency day: " + value);
-    }
-
-    private List<LocalDate> generateVisitDates(LocalDate startDate, LocalDate endDate, List<String> frequencyDays) {
-        Set<DayOfWeek> weekdays = frequencyDays.stream()
-                .map(this::parseDay)
-                .collect(Collectors.toSet());
-        List<LocalDate> dates = new ArrayList<>();
-        LocalDate cursor = startDate;
-        while (!cursor.isAfter(endDate)) {
-            if (weekdays.contains(cursor.getDayOfWeek())) {
-                dates.add(cursor);
-            }
-            cursor = cursor.plusDays(1);
-        }
-        return dates;
     }
 
     private BigDecimal strip(BigDecimal value) {

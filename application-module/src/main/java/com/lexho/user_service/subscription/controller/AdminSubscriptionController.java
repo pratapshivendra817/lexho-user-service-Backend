@@ -5,6 +5,7 @@ import com.lexho.user_service.subscription.dto.AdminPartnerAssignRequest;
 import com.lexho.user_service.subscription.dto.AdminSubscriptionAssignmentResponse;
 import com.lexho.user_service.subscription.dto.AdminSubscriptionDetailResponse;
 import com.lexho.user_service.subscription.dto.AdminSubscriptionListResponse;
+import com.lexho.user_service.subscription.dto.AdminVisitAssignmentResponse;
 import com.lexho.user_service.subscription.dto.AdminSubscriptionStatusUpdateRequest;
 import com.lexho.user_service.subscription.dto.AdminSubscriptionVisitStatusUpdateRequest;
 import com.lexho.user_service.subscription.dto.SubscriptionCalendarItemResponse;
@@ -90,9 +91,9 @@ public class AdminSubscriptionController {
     }
 
     @PatchMapping("/{subscriptionId}/visits/{visitId}/assign-partner")
-    public ApiResponse<?> assignVisitPartner(@PathVariable Long subscriptionId,
-                                             @PathVariable Long visitId,
-                                             @Valid @RequestBody AdminPartnerAssignRequest request) {
+    public ApiResponse<AdminVisitAssignmentResponse> assignVisitPartner(@PathVariable Long subscriptionId,
+                                                                       @PathVariable Long visitId,
+                                                                       @Valid @RequestBody AdminPartnerAssignRequest request) {
         return ApiResponse.success("Visit partner assigned",
                 adminSubscriptionManagementService.assignVisitPartner(subscriptionId, visitId, request));
     }

@@ -1,7 +1,11 @@
 package com.lexho.user_service.subscription.service;
 
+import com.lexho.booking.entity.Order;
+import com.lexho.booking.repository.OrderRepository;
+import com.lexho.common.enums.PaymentStatus;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
+import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
 import com.lexho.user_service.config.DispatchProperties;
 import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
@@ -12,8 +16,9 @@ import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexho.entity.LexhoAddress;
 import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
+import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
 import com.lexho.user_service.subscription.dto.AdminPartnerAssignRequest;
 import com.lexho.user_service.subscription.dto.AdminSubscriptionStatusUpdateRequest;
 import com.lexho.user_service.subscription.dto.AdminSubscriptionVisitStatusUpdateRequest;
@@ -54,16 +59,19 @@ import static org.mockito.Mockito.*;
 class AdminSubscriptionManagementServiceTest {
 
     @Mock SubscriptionMasterRepository subscriptionMasterRepository;
+    @Mock OrderRepository orderRepository;
     @Mock SubscriptionFrequencyRepository subscriptionFrequencyRepository;
     @Mock SubscriptionVisitRepository subscriptionVisitRepository;
     @Mock AdminServiceEntityRepository serviceRepository;
     @Mock SubscriptionPartnerAssignmentRepository subscriptionPartnerAssignmentRepository;
     @Mock SubscriptionVisitPartnerAssignmentRepository visitPartnerAssignmentRepository;
-    @Mock PartnerProfileRepository partnerProfileRepository;
+    @Mock PartnerServiceRequestRepository partnerServiceRequestRepository;
+    @Mock PartnerOperationalProfileRepository partnerProfileRepository;
     @Mock PartnerServiceSkillRepository partnerServiceSkillRepository;
     @Mock LexhoAddressRepository lexhoAddressRepository;
     @Mock PartnerShiftRepository partnerShiftRepository;
     @Mock CurrentPartnerLocationRepository currentPartnerLocationRepository;
+    @Mock ServiceableAreaRepository serviceableAreaRepository;
 
     private AdminSubscriptionManagementService service;
 
@@ -71,18 +79,36 @@ class AdminSubscriptionManagementServiceTest {
     void setUp() {
         service = new AdminSubscriptionManagementService(
                 subscriptionMasterRepository,
+                orderRepository,
                 subscriptionFrequencyRepository,
                 subscriptionVisitRepository,
                 serviceRepository,
                 subscriptionPartnerAssignmentRepository,
                 visitPartnerAssignmentRepository,
+                partnerServiceRequestRepository,
                 partnerProfileRepository,
                 partnerServiceSkillRepository,
                 lexhoAddressRepository,
                 partnerShiftRepository,
                 currentPartnerLocationRepository,
-                dispatchProperties()
+                serviceableAreaRepository,
+                dispatchProperties(),
+                new com.lexho.user_service.dispatch.service.PartnerDispatchEligibilityService()
         );
+        lenient().when(subscriptionMasterRepository.findByIdForUpdate(anyLong()))
+                .thenAnswer(invocation -> subscriptionMasterRepository.findById(invocation.getArgument(0)));
+        lenient().when(subscriptionVisitRepository.findByIdForUpdate(anyLong()))
+                .thenAnswer(invocation -> subscriptionVisitRepository.findByIdAndSubscriptionId(
+                        invocation.getArgument(0), 10L));
+        lenient().when(orderRepository.findByIdForUpdate(anyLong())).thenAnswer(invocation -> {
+            Order order = new Order();
+            order.setPaymentStatus(PaymentStatus.SUCCESS);
+            return Optional.of(order);
+        });
+        lenient().when(orderRepository.existsByAssignedPartnerIdAndScheduledAtGreaterThanEqualAndScheduledAtLessThanAndStatusInAndIdNot(
+                anyLong(), any(), any(), anySet(), anyLong())).thenReturn(false);
+        lenient().when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("122001"))
+                .thenReturn(true);
     }
 
     @Test
@@ -156,13 +182,35 @@ class AdminSubscriptionManagementServiceTest {
         assertEquals("CANCELLED", response.status());
         verify(subscriptionVisitRepository).cancelFutureScheduled(eq(10L), eq(VisitStatus.SCHEDULED),
                 eq(VisitStatus.CANCELLED), any(LocalDate.class));
+        verify(subscriptionVisitRepository).cancelFutureScheduled(eq(10L), eq(VisitStatus.RESCHEDULED),
+                eq(VisitStatus.CANCELLED), any(LocalDate.class));
         verify(subscriptionMasterRepository).save(subscription);
+    }
+
+    @Test
+    void updateStatusShouldAllowOnlyLifecycleTransitions() {
+        SubscriptionMaster active = subscription(10L);
+        when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(active));
+        when(subscriptionVisitRepository.findBySubscriptionIdOrderByVisitDateAscIdAsc(10L)).thenReturn(List.of());
+        when(subscriptionFrequencyRepository.findBySubscriptionIdOrderByIdAsc(10L)).thenReturn(List.of());
+        when(serviceRepository.findById(5L)).thenReturn(Optional.empty());
+
+        service.updateStatus(10L, new AdminSubscriptionStatusUpdateRequest(SubscriptionStatus.PAUSED));
+        assertEquals(SubscriptionStatus.PAUSED, active.getStatus());
+
+        active.setStatus(SubscriptionStatus.COMPLETED);
+        BadRequestException exception = assertThrows(BadRequestException.class,
+                () -> service.updateStatus(10L,
+                        new AdminSubscriptionStatusUpdateRequest(SubscriptionStatus.ACTIVE)));
+        assertEquals("Cannot change subscription status from COMPLETED to ACTIVE. "
+                + "Allowed transitions: none (terminal status)", exception.getMessage());
+        verify(subscriptionMasterRepository, times(1)).save(active);
     }
 
     @Test
     void updateVisitStatusShouldPersistAllowedStatusAndRejectRescheduled() {
         SubscriptionMaster subscription = subscription(10L);
-        SubscriptionVisit visit = visit(100L, VisitStatus.SCHEDULED);
+        SubscriptionVisit visit = visit(100L, VisitStatus.IN_PROGRESS);
         when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
         when(subscriptionVisitRepository.findByIdAndSubscriptionId(100L, 10L)).thenReturn(Optional.of(visit));
         when(subscriptionVisitRepository.save(visit)).thenReturn(visit);
@@ -179,7 +227,7 @@ class AdminSubscriptionManagementServiceTest {
     @Test
     void assignPartnerShouldCreateAssignmentAndNormalizeReason() {
         SubscriptionMaster subscription = subscription(10L);
-        PartnerProfile partner = partner(20L, "Partner");
+        PartnerOperationalProfile partner = partner(20L, "Partner");
         LexhoAddress address = address();
         when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
         when(partnerProfileRepository.findById(20L)).thenReturn(Optional.of(partner));
@@ -204,7 +252,7 @@ class AdminSubscriptionManagementServiceTest {
     @Test
     void replacePartnerShouldRequireExistingAssignment() {
         SubscriptionMaster subscription = subscription(10L);
-        PartnerProfile partner = partner(21L, "Replacement");
+        PartnerOperationalProfile partner = partner(21L, "Replacement");
         when(lexhoAddressRepository.findById(8L)).thenReturn(Optional.of(address()));
         when(partnerShiftRepository.findByPartnerId(21L)).thenReturn(Optional.of(activeShift(21L)));
         when(currentPartnerLocationRepository.findByPartnerId(21L)).thenReturn(Optional.of(location(21L, 28.4599, 77.0270)));
@@ -221,13 +269,15 @@ class AdminSubscriptionManagementServiceTest {
     void assignVisitPartnerShouldPersistAndMapFallbackName() {
         SubscriptionMaster subscription = subscription(10L);
         SubscriptionVisit visit = visit(100L, VisitStatus.SCHEDULED);
-        PartnerProfile partner = partner(20L, null);
+        visit.setVisitDate(LocalDate.now().plusDays(1));
+        PartnerOperationalProfile partner = partner(20L, null);
         partner.setFullName("Full Name");
         when(lexhoAddressRepository.findById(8L)).thenReturn(Optional.of(address()));
         when(partnerShiftRepository.findByPartnerId(20L)).thenReturn(Optional.of(activeShift(20L)));
         when(currentPartnerLocationRepository.findByPartnerId(20L)).thenReturn(Optional.of(location(20L, 28.4599, 77.0270)));
         when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
         when(subscriptionVisitRepository.findByIdAndSubscriptionId(100L, 10L)).thenReturn(Optional.of(visit));
+        when(subscriptionVisitRepository.findByIdForUpdate(100L)).thenReturn(Optional.of(visit));
         when(partnerProfileRepository.findById(20L)).thenReturn(Optional.of(partner));
         when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(20L, 5L)).thenReturn(true);
         when(visitPartnerAssignmentRepository.findByVisitId(100L)).thenReturn(Optional.empty());
@@ -240,7 +290,7 @@ class AdminSubscriptionManagementServiceTest {
         var response = service.assignVisitPartner(10L, 100L, new AdminPartnerAssignRequest(20L, " "));
 
         assertEquals("Full Name", response.partnerName());
-        assertNull(response.reason());
+        assertTrue(response.reason().startsWith("ADMIN_PREFERRED_PARTNER:"));
     }
 
     @Test
@@ -269,13 +319,13 @@ class AdminSubscriptionManagementServiceTest {
         assertThrows(ResourceNotFoundException.class,
                 () -> service.assignPartner(10L, new AdminPartnerAssignRequest(90L, null)));
 
-        PartnerProfile deleted = partner(91L, "Deleted");
+        PartnerOperationalProfile deleted = partner(91L, "Deleted");
         deleted.setDeleted(true);
         when(partnerProfileRepository.findById(91L)).thenReturn(Optional.of(deleted));
         assertThrows(BadRequestException.class,
                 () -> service.assignPartner(10L, new AdminPartnerAssignRequest(91L, null)));
 
-        PartnerProfile unskilled = partner(92L, "Unskilled");
+        PartnerOperationalProfile unskilled = partner(92L, "Unskilled");
         when(partnerProfileRepository.findById(92L)).thenReturn(Optional.of(unskilled));
         when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(92L, 5L)).thenReturn(false);
         assertThrows(BadRequestException.class,
@@ -288,13 +338,13 @@ class AdminSubscriptionManagementServiceTest {
         when(subscriptionMasterRepository.findById(10L)).thenReturn(Optional.of(subscription));
         when(lexhoAddressRepository.findById(8L)).thenReturn(Optional.of(address()));
 
-        PartnerProfile offline = partner(30L, "Offline");
+        PartnerOperationalProfile offline = partner(30L, "Offline");
         offline.setOnline(false);
         when(partnerProfileRepository.findById(30L)).thenReturn(Optional.of(offline));
         assertThrows(BadRequestException.class,
                 () -> service.assignPartner(10L, new AdminPartnerAssignRequest(30L, null)));
 
-        PartnerProfile far = partner(31L, "Far");
+        PartnerOperationalProfile far = partner(31L, "Far");
         when(partnerProfileRepository.findById(31L)).thenReturn(Optional.of(far));
         when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(31L, 5L)).thenReturn(true);
         when(partnerShiftRepository.findByPartnerId(31L)).thenReturn(Optional.of(activeShift(31L)));
@@ -302,7 +352,7 @@ class AdminSubscriptionManagementServiceTest {
         assertThrows(BadRequestException.class,
                 () -> service.assignPartner(10L, new AdminPartnerAssignRequest(31L, null)));
 
-        PartnerProfile slow = partner(32L, "Slow");
+        PartnerOperationalProfile slow = partner(32L, "Slow");
         when(partnerProfileRepository.findById(32L)).thenReturn(Optional.of(slow));
         when(partnerServiceSkillRepository.existsByPartnerIdAndSubServiceId(32L, 5L)).thenReturn(true);
         when(partnerShiftRepository.findByPartnerId(32L)).thenReturn(Optional.of(activeShift(32L)));
@@ -335,6 +385,7 @@ class AdminSubscriptionManagementServiceTest {
         subscription.setTimeSlot("10:00-12:00");
         subscription.setPrice(BigDecimal.valueOf(2000));
         subscription.setStatus(SubscriptionStatus.ACTIVE);
+        subscription.setBookingId(1000L + id);
         return subscription;
     }
 
@@ -348,8 +399,8 @@ class AdminSubscriptionManagementServiceTest {
         return visit;
     }
 
-    private static PartnerProfile partner(Long id, String name) {
-        PartnerProfile partner = new PartnerProfile();
+    private static PartnerOperationalProfile partner(Long id, String name) {
+        PartnerOperationalProfile partner = new PartnerOperationalProfile();
         partner.setId(id);
         partner.setName(name);
         partner.setOnline(true);
@@ -361,6 +412,7 @@ class AdminSubscriptionManagementServiceTest {
         LexhoAddress address = new LexhoAddress();
         address.setLatitude(BigDecimal.valueOf(28.4595));
         address.setLongitude(BigDecimal.valueOf(77.0266));
+        address.setPincode("122001");
         return address;
     }
 

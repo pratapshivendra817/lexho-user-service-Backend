@@ -9,8 +9,11 @@ import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
 import com.lexho.user_service.audit.service.AuditLogService;
+import com.lexho.user_service.coupon.service.CouponService;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
+import com.lexho.user_service.customer.location.entity.CustomerAddress;
+import com.lexho.user_service.customer.location.repository.CustomerAddressRepository;
 import com.lexho.user_service.subscription.dto.CreateSubscriptionRequest;
 import com.lexho.user_service.subscription.dto.RescheduleVisitRequest;
 import com.lexho.user_service.subscription.dto.SubscriptionCalendarItemResponse;
@@ -27,38 +30,42 @@ import com.lexho.user_service.subscription.exception.SubscriptionValidationExcep
 import com.lexho.user_service.subscription.repository.SubscriptionFrequencyRepository;
 import com.lexho.user_service.subscription.repository.SubscriptionMasterRepository;
 import com.lexho.user_service.subscription.repository.SubscriptionVisitRepository;
+import com.lexho.user_service.util.LexhoConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.DayOfWeek;
 import java.time.LocalDate;
-import java.time.format.TextStyle;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 public class SubscriptionBookingService {
+    private static final Logger LOG = LoggerFactory.getLogger(SubscriptionBookingService.class);
 
     private final SubscriptionMasterRepository subscriptionMasterRepository;
     private final SubscriptionFrequencyRepository subscriptionFrequencyRepository;
     private final SubscriptionVisitRepository subscriptionVisitRepository;
     private final AdminServiceEntityRepository serviceRepository;
     private final LexhoAddressRepository addressRepository;
+    private final CustomerAddressRepository customerAddressRepository;
     private final SubscriptionPricingService subscriptionPricingService;
     private final OrderRepository orderRepository;
     private final GeoFenceValidationService geoFenceValidationService;
-
-    @Autowired(required = false)
-    private AuditLogService auditLogService;
+    private final CouponService couponService;
+    private final AuditLogService auditLogService;
 
     public SubscriptionBookingService(SubscriptionMasterRepository subscriptionMasterRepository,
                                       SubscriptionFrequencyRepository subscriptionFrequencyRepository,
@@ -67,21 +74,81 @@ public class SubscriptionBookingService {
                                       LexhoAddressRepository addressRepository,
                                       SubscriptionPricingService subscriptionPricingService,
                                       OrderRepository orderRepository,
-                                      GeoFenceValidationService geoFenceValidationService) {
+                                      GeoFenceValidationService geoFenceValidationService,
+                                      CouponService couponService) {
+        this(subscriptionMasterRepository, subscriptionFrequencyRepository, subscriptionVisitRepository,
+                serviceRepository, addressRepository, subscriptionPricingService, orderRepository,
+                geoFenceValidationService, couponService, Optional.empty(), null);
+    }
+
+    @Autowired
+    public SubscriptionBookingService(SubscriptionMasterRepository subscriptionMasterRepository,
+                                      SubscriptionFrequencyRepository subscriptionFrequencyRepository,
+                                      SubscriptionVisitRepository subscriptionVisitRepository,
+                                      AdminServiceEntityRepository serviceRepository,
+                                      LexhoAddressRepository addressRepository,
+                                      SubscriptionPricingService subscriptionPricingService,
+                                      OrderRepository orderRepository,
+                                      GeoFenceValidationService geoFenceValidationService,
+                                      CouponService couponService,
+                                      Optional<AuditLogService> auditLogService) {
+        this(subscriptionMasterRepository, subscriptionFrequencyRepository, subscriptionVisitRepository,
+                serviceRepository, addressRepository, subscriptionPricingService, orderRepository,
+                geoFenceValidationService, couponService, auditLogService, null);
+    }
+
+    public SubscriptionBookingService(SubscriptionMasterRepository subscriptionMasterRepository,
+                                      SubscriptionFrequencyRepository subscriptionFrequencyRepository,
+                                      SubscriptionVisitRepository subscriptionVisitRepository,
+                                      AdminServiceEntityRepository serviceRepository,
+                                      LexhoAddressRepository addressRepository,
+                                      SubscriptionPricingService subscriptionPricingService,
+                                      OrderRepository orderRepository,
+                                      GeoFenceValidationService geoFenceValidationService,
+                                      CouponService couponService,
+                                      Optional<AuditLogService> auditLogService,
+                                      CustomerAddressRepository customerAddressRepository) {
         this.subscriptionMasterRepository = subscriptionMasterRepository;
         this.subscriptionFrequencyRepository = subscriptionFrequencyRepository;
         this.subscriptionVisitRepository = subscriptionVisitRepository;
         this.serviceRepository = serviceRepository;
         this.addressRepository = addressRepository;
+        this.customerAddressRepository = customerAddressRepository;
         this.subscriptionPricingService = subscriptionPricingService;
         this.orderRepository = orderRepository;
         this.geoFenceValidationService = geoFenceValidationService;
+        this.couponService = couponService;
+        this.auditLogService = optionalValue(auditLogService);
+    }
+
+    private static <T> T optionalValue(Optional<T> optional) {
+        return optional == null ? null : optional.orElse(null);
     }
 
     @Transactional
     public SubscriptionCreateResponse create(Long customerId, CreateSubscriptionRequest request) {
-        List<String> frequencyDays = normalizeDays(request.frequencyDays());
+        return create(customerId, request, null);
+    }
+
+    @Transactional
+    public SubscriptionCreateResponse create(Long customerId,
+                                             CreateSubscriptionRequest request,
+                                             String idempotencyKey) {
+        List<String> frequencyDays = SubscriptionScheduleSupport.normalizeDays(request.frequencyDays());
         validateBasicRequest(request, frequencyDays);
+        String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
+        String requestHash = requestHash(request, frequencyDays);
+        if (normalizedKey != null) {
+            addressRepository.findByUserIdAndIsDeletedFalseForUpdate(customerId);
+            SubscriptionMaster existing = subscriptionMasterRepository
+                    .findByCustomerIdAndIdempotencyKey(customerId, normalizedKey).orElse(null);
+            if (existing != null) {
+                if (!requestHash.equals(existing.getRequestHash())) {
+                    throw new SubscriptionValidationException("Idempotency key was already used for a different subscription request");
+                }
+                return subscriptionCreateResponse(existing);
+            }
+        }
 
         AdminServiceEntity service = serviceRepository.findByIdAndDeletedFalse(request.serviceId())
                 .orElseThrow(() -> new SubscriptionValidationException("Service not found"));
@@ -89,9 +156,7 @@ public class SubscriptionBookingService {
             throw new SubscriptionValidationException("Service does not support SUBSCRIPTION booking mode");
         }
 
-        com.lexho.user_service.lexho.entity.LexhoAddress address = addressRepository
-                .findByIdAndUserIdAndIsDeletedFalse(request.addressId(), customerId)
-                .orElse(null);
+        com.lexho.user_service.lexho.entity.LexhoAddress address = resolveAddress(customerId, request.addressId(), request.latitude(), request.longitude());
         if (address == null) {
             throw new SubscriptionValidationException("Address does not belong to logged-in customer");
         }
@@ -102,7 +167,11 @@ public class SubscriptionBookingService {
         }
 
         String serviceType = resolveServiceType(request, service);
-        List<LocalDate> generatedDates = generateVisitDates(request.startDate(), request.endDate(), frequencyDays);
+        List<LocalDate> generatedDates = SubscriptionScheduleSupport.generateVisitDates(
+                request.startDate(),
+                request.endDate(),
+                frequencyDays
+        );
         int visitCount = generatedDates.size();
         PriceSelection priceSelection = resolvePrice(request, serviceType, visitCount);
 
@@ -110,14 +179,15 @@ public class SubscriptionBookingService {
         paymentBooking.setUserId(customerId);
         paymentBooking.setStatus(OrderStatus.CONFIRMED);
         paymentBooking.setPaymentStatus(PaymentStatus.PENDING);
-        paymentBooking.setBookingType("SUBSCRIPTION");
+        paymentBooking.setBookingType(LexhoConstants.TYPE_SUBSCRIPTION);
         paymentBooking.setScheduledAt(request.startDate().atStartOfDay());
         paymentBooking.setAddress(formatAddress(address));
         paymentBooking.setTotalAmount(priceSelection.totalPrice().doubleValue());
+        couponService.applyToOrder(paymentBooking, request.couponCode(), request.serviceId(), LexhoConstants.TYPE_SUBSCRIPTION);
         OrderItem item = new OrderItem();
         item.setPartnerId(service.getId());
         item.setPartnerName(service.getName());
-        item.setPrice(priceSelection.totalPrice().doubleValue());
+        item.setPrice(paymentBooking.getTotalAmount());
         item.setQuantity(1);
         item.setOrder(paymentBooking);
         paymentBooking.setItems(new ArrayList<>(List.of(item)));
@@ -126,7 +196,7 @@ public class SubscriptionBookingService {
         SubscriptionMaster master = new SubscriptionMaster();
         master.setCustomerId(customerId);
         master.setServiceId(request.serviceId());
-        master.setAddressId(request.addressId());
+        master.setAddressId(address.getId());
         master.setBookingId(savedPaymentBooking.getId());
         master.setBookingMode(normalizeBookingMode(request.bookingMode()));
         master.setServiceType(serviceType);
@@ -139,6 +209,8 @@ public class SubscriptionBookingService {
         master.setTimeSlot(request.timeSlot().trim());
         master.setPrice(priceSelection.totalPrice());
         master.setStatus(SubscriptionStatus.PENDING);
+        master.setIdempotencyKey(normalizedKey);
+        master.setRequestHash(normalizedKey == null ? null : requestHash);
         SubscriptionMaster savedMaster = subscriptionMasterRepository.save(master);
 
         List<SubscriptionFrequency> frequencies = frequencyDays.stream()
@@ -163,27 +235,107 @@ public class SubscriptionBookingService {
                 .toList();
         List<SubscriptionVisit> savedVisits = subscriptionVisitRepository.saveAll(visits);
 
+        return subscriptionCreateResponse(savedMaster, frequencyDays, savedVisits);
+    }
+
+    private SubscriptionCreateResponse subscriptionCreateResponse(SubscriptionMaster master) {
+        List<String> frequencyDays = subscriptionFrequencyRepository
+                .findBySubscriptionIdOrderByIdAsc(master.getId()).stream()
+                .map(SubscriptionFrequency::getDayName)
+                .toList();
+        List<SubscriptionVisit> visits = subscriptionVisitRepository
+                .findBySubscriptionIdOrderByVisitDateAscIdAsc(master.getId());
+        return subscriptionCreateResponse(master, frequencyDays, visits);
+    }
+
+    private SubscriptionCreateResponse subscriptionCreateResponse(SubscriptionMaster master,
+                                                                  List<String> frequencyDays,
+                                                                  List<SubscriptionVisit> visits) {
         return new SubscriptionCreateResponse(
-                savedMaster.getId(),
-                savedMaster.getId(),
-                savedMaster.getBookingId(),
-                savedMaster.getServiceId(),
-                savedMaster.getAddressId(),
-                savedMaster.getBookingMode(),
-                savedMaster.getServiceType(),
-                frequencyDays,
-                savedMaster.getStartDate(),
-                savedMaster.getEndDate(),
-                savedMaster.getVisits(),
-                savedMaster.getDurationHours(),
-                savedMaster.getFamilySize() == null ? null : savedMaster.getFamilySize().name(),
-                subscriptionPricingService.familySizeLabel(savedMaster.getFamilySize()),
-                savedMaster.getPerVisitPrice(),
-                savedMaster.getTimeSlot(),
-                savedMaster.getPrice(),
-                savedMaster.getStatus().name(),
-                savedVisits.stream().map(this::toCalendarItem).toList()
+                master.getId(), master.getId(), master.getBookingId(), master.getServiceId(),
+                master.getAddressId(), master.getBookingMode(), master.getServiceType(), frequencyDays,
+                master.getStartDate(), master.getEndDate(), master.getVisits(), master.getDurationHours(),
+                master.getFamilySize() == null ? null : master.getFamilySize().name(),
+                subscriptionPricingService.familySizeLabel(master.getFamilySize()),
+                master.getPerVisitPrice(), master.getTimeSlot(), master.getPrice(), master.getStatus().name(),
+                visits.stream().map(this::toCalendarItem).toList()
         );
+    }
+
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return null;
+        }
+        String normalized = idempotencyKey.trim();
+        if (normalized.length() > 100) {
+            throw new SubscriptionValidationException("Idempotency-Key must not exceed 100 characters");
+        }
+        return normalized;
+    }
+
+    private String requestHash(CreateSubscriptionRequest request, List<String> frequencyDays) {
+        String canonical = String.join("|",
+                String.valueOf(request.serviceId()),
+                String.valueOf(request.addressId()),
+                String.valueOf(request.latitude()),
+                String.valueOf(request.longitude()),
+                String.valueOf(request.bookingMode()),
+                String.valueOf(request.serviceType()),
+                String.join(",", frequencyDays),
+                String.valueOf(request.startDate()),
+                String.valueOf(request.endDate()),
+                String.valueOf(request.durationHours()),
+                String.valueOf(request.familySize()),
+                String.valueOf(request.timeSlot() == null ? null : request.timeSlot().trim()),
+                String.valueOf(request.couponCode()));
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
+    }
+
+    private com.lexho.user_service.lexho.entity.LexhoAddress resolveAddress(Long customerId, String addressId, Double latitude, Double longitude) {
+        try {
+            Long legacyId = Long.valueOf(addressId);
+            return addressRepository.findByIdAndUserIdAndIsDeletedFalse(legacyId, customerId).orElse(null);
+        } catch (NumberFormatException ignored) {
+            // The customer location API uses UUIDs. Mirror that address into the legacy table,
+            // exactly as the scheduled booking flow does, so subscription bookings use one ID space.
+            if (customerAddressRepository == null) return null;
+            final UUID uuid;
+            try { uuid = UUID.fromString(addressId); } catch (IllegalArgumentException ex) { return null; }
+            CustomerAddress source = customerAddressRepository
+                    .findByIdAndCustomerIdAndIsDeletedFalse(uuid, customerId).orElse(null);
+            if (source == null) {
+                // Some deployments expose customer locations from a separate store. Use the
+                // customer's legacy address with the closest coordinates as a compatibility fallback.
+                return addressRepository.findByUserIdAndIsDeletedFalse(customerId).stream()
+                        .filter(a -> latitude == null || longitude == null || a.getLatitude() == null || a.getLongitude() == null
+                                || (Math.abs(a.getLatitude().doubleValue() - latitude) < 0.001
+                                && Math.abs(a.getLongitude().doubleValue() - longitude) < 0.001))
+                        .sorted((a, b) -> Boolean.compare(!a.isDefault(), !b.isDefault()))
+                        .findFirst().orElse(null);
+            }
+            String sourceKey = "CUSTOMER_LOCATION:" + uuid;
+            com.lexho.user_service.lexho.entity.LexhoAddress target = addressRepository
+                    .findByUserIdAndCreatedByAndIsDeletedFalse(customerId, sourceKey)
+                    .orElseGet(() -> { var a = new com.lexho.user_service.lexho.entity.LexhoAddress(); a.setUserId(customerId); return a; });
+            target.setHouseNo(firstNonBlank(source.getFlatNo(), source.getBuildingName(), source.getAddressLine()));
+            target.setArea(firstNonBlank(source.getArea(), source.getSector(), source.getAddressLine()));
+            target.setCity(source.getCity()); target.setState(source.getState()); target.setPincode(source.getPincode());
+            target.setLatitude(source.getLatitude()); target.setLongitude(source.getLongitude());
+            target.setAddressResolved(source.getLatitude() != null && source.getLongitude() != null);
+            target.setCreatedBy(sourceKey); target.setUpdatedBy("CUSTOMER_LOCATION_SYNC");
+            return addressRepository.save(target);
+        }
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) if (value != null && !value.isBlank()) return value;
+        return "Unknown";
     }
 
     @Transactional
@@ -308,7 +460,9 @@ public class SubscriptionBookingService {
         List<SubscriptionVisit> visits = subscriptionVisitRepository.findBySubscriptionIdOrderByVisitDateAscIdAsc(subscriptionId);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("upcomingVisits", visits.stream()
-                .filter(visit -> visit.getStatus() == VisitStatus.SCHEDULED || visit.getStatus() == VisitStatus.RESCHEDULED)
+                .filter(visit -> visit.getStatus() == VisitStatus.SCHEDULED || visit.getStatus() == VisitStatus.RESCHEDULED
+                        || visit.getStatus() == VisitStatus.ACCEPTED || visit.getStatus() == VisitStatus.ARRIVED
+                        || visit.getStatus() == VisitStatus.IN_PROGRESS)
                 .map(this::visitPayload)
                 .toList());
         payload.put("completedVisits", visits.stream()
@@ -324,8 +478,11 @@ public class SubscriptionBookingService {
 
     @Transactional
     public void cancel(Long customerId, Long subscriptionId) {
-        SubscriptionMaster subscription = getOwnedSubscription(customerId, subscriptionId);
-        if (subscription.getStatus() == SubscriptionStatus.CANCELLED || subscription.getStatus() == SubscriptionStatus.COMPLETED) {
+        SubscriptionMaster subscription = getOwnedSubscriptionForUpdate(customerId, subscriptionId);
+        if (subscription.getStatus() == SubscriptionStatus.CANCELLED) {
+            return;
+        }
+        if (subscription.getStatus() == SubscriptionStatus.COMPLETED) {
             throw new SubscriptionValidationException("Subscription cannot be cancelled in current state");
         }
         String oldStatus = subscription.getStatus().name();
@@ -337,12 +494,21 @@ public class SubscriptionBookingService {
                 VisitStatus.CANCELLED,
                 LocalDate.now()
         );
+        subscriptionVisitRepository.cancelFutureScheduled(
+                subscriptionId,
+                VisitStatus.RESCHEDULED,
+                VisitStatus.CANCELLED,
+                LocalDate.now()
+        );
         audit(customerId, subscription.getBookingId(), "SUBSCRIPTION_CANCELLED", oldStatus, "CANCELLED");
     }
 
     @Transactional
     public Map<String, Object> pause(Long customerId, Long subscriptionId) {
-        SubscriptionMaster subscription = getOwnedSubscription(customerId, subscriptionId);
+        SubscriptionMaster subscription = getOwnedSubscriptionForUpdate(customerId, subscriptionId);
+        if (subscription.getStatus() == SubscriptionStatus.PAUSED) {
+            return subscriptionCardPayload(subscription, serviceRepository.findById(subscription.getServiceId()).orElse(null));
+        }
         if (subscription.getStatus() != SubscriptionStatus.ACTIVE) {
             throw new SubscriptionValidationException("Only ACTIVE subscription can be paused");
         }
@@ -355,7 +521,10 @@ public class SubscriptionBookingService {
 
     @Transactional
     public Map<String, Object> resume(Long customerId, Long subscriptionId) {
-        SubscriptionMaster subscription = getOwnedSubscription(customerId, subscriptionId);
+        SubscriptionMaster subscription = getOwnedSubscriptionForUpdate(customerId, subscriptionId);
+        if (subscription.getStatus() == SubscriptionStatus.ACTIVE) {
+            return subscriptionCardPayload(subscription, serviceRepository.findById(subscription.getServiceId()).orElse(null));
+        }
         if (subscription.getStatus() != SubscriptionStatus.PAUSED) {
             throw new SubscriptionValidationException("Only PAUSED subscription can be resumed");
         }
@@ -368,8 +537,8 @@ public class SubscriptionBookingService {
 
     @Transactional
     public void skipVisit(Long customerId, Long subscriptionId, Long visitId) {
-        getOwnedSubscription(customerId, subscriptionId);
-        SubscriptionVisit visit = getVisit(subscriptionId, visitId);
+        getOwnedSubscriptionForUpdate(customerId, subscriptionId);
+        SubscriptionVisit visit = getVisitForUpdate(subscriptionId, visitId);
         if (!visit.getVisitDate().isAfter(LocalDate.now())) {
             throw new SubscriptionValidationException("Only future visit can be skipped");
         }
@@ -385,10 +554,17 @@ public class SubscriptionBookingService {
                                 Long subscriptionId,
                                 Long visitId,
                                 RescheduleVisitRequest request) {
-        getOwnedSubscription(customerId, subscriptionId);
-        SubscriptionVisit visit = getVisit(subscriptionId, visitId);
+        SubscriptionMaster subscription = getOwnedSubscriptionForUpdate(customerId, subscriptionId);
+        SubscriptionVisit visit = getVisitForUpdate(subscriptionId, visitId);
+        if (subscription.getStatus() != SubscriptionStatus.ACTIVE) {
+            throw new SubscriptionValidationException("Only ACTIVE subscription visits can be rescheduled");
+        }
         if (!request.newDate().isAfter(LocalDate.now())) {
             throw new SubscriptionValidationException("New date must be future date");
+        }
+        if (visit.getStatus() == VisitStatus.RESCHEDULED
+                && request.newDate().equals(visit.getVisitDate())) {
+            return;
         }
         if (visit.getStatus() != VisitStatus.SCHEDULED) {
             throw new SubscriptionValidationException("Only SCHEDULED visit can be rescheduled");
@@ -418,51 +594,19 @@ public class SubscriptionBookingService {
         }
     }
 
-    private List<String> normalizeDays(List<String> days) {
-        if (days == null) {
-            return List.of();
-        }
-        Set<String> normalized = new LinkedHashSet<>();
-        for (String rawDay : days) {
-            if (rawDay == null || rawDay.isBlank()) {
-                continue;
-            }
-            DayOfWeek dayOfWeek = parseDay(rawDay);
-            normalized.add(dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH));
-        }
-        return List.copyOf(normalized);
-    }
-
-    private DayOfWeek parseDay(String value) {
-        String normalized = value.trim().toUpperCase(Locale.ROOT);
-        for (DayOfWeek day : DayOfWeek.values()) {
-            if (day.name().equals(normalized)
-                    || day.getDisplayName(TextStyle.FULL, Locale.ENGLISH).toUpperCase(Locale.ROOT).equals(normalized)) {
-                return day;
-            }
-        }
-        throw new SubscriptionValidationException("Invalid frequency day: " + value);
-    }
-
-    private List<LocalDate> generateVisitDates(LocalDate startDate, LocalDate endDate, List<String> frequencyDays) {
-        Set<DayOfWeek> weekdays = frequencyDays.stream()
-                .map(this::parseDay)
-                .collect(Collectors.toSet());
-        List<LocalDate> dates = new ArrayList<>();
-        LocalDate cursor = startDate;
-        while (!cursor.isAfter(endDate)) {
-            if (weekdays.contains(cursor.getDayOfWeek())) {
-                dates.add(cursor);
-            }
-            cursor = cursor.plusDays(1);
-        }
-        dates.sort(Comparator.naturalOrder());
-        return dates;
-    }
-
     private boolean supportsSubscription(AdminServiceEntity service) {
         String serviceType = service.getServiceType();
-        return serviceType != null && serviceType.toUpperCase(Locale.ROOT).contains("SUBSCRIPTION");
+        if (serviceType != null && serviceType.toUpperCase(Locale.ROOT).contains(LexhoConstants.TYPE_SUBSCRIPTION)) {
+            return true;
+        }
+        // Home repeat booking uses the same catalog services as scheduled booking.
+        // Actual availability remains gated by subscription settings and configured pricing.
+        String category = String.valueOf(service.getCategoryName()).toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]", "");
+        return category.equals("cleaningservice") || category.equals("cleaning")
+                || category.equals("cookathome") || category.equals("cook")
+                || category.equals("vehiclewash") || category.equals("vehicalwash")
+                || category.equals("fitnesswellness") || category.equals("fitnessandwellness");
     }
 
     private PriceSelection resolvePrice(CreateSubscriptionRequest request, String serviceType, int visits) {
@@ -503,12 +647,13 @@ public class SubscriptionBookingService {
     }
 
     private String normalizeBookingMode(String bookingMode) {
-        return bookingMode == null || bookingMode.isBlank() ? "SUBSCRIPTION" : bookingMode.trim().toUpperCase(Locale.ROOT);
+        return bookingMode == null || bookingMode.isBlank()
+                ? LexhoConstants.TYPE_SUBSCRIPTION
+                : bookingMode.trim().toUpperCase(Locale.ROOT);
     }
 
     private String formatAddress(com.lexho.user_service.lexho.entity.LexhoAddress address) {
-        return List.of(address.getHouseNo(), address.getArea(), address.getCity(), address.getState(), address.getPincode())
-                .stream()
+        return java.util.stream.Stream.of(address.getHouseNo(), address.getArea(), address.getCity(), address.getState(), address.getPincode())
                 .filter(value -> value != null && !value.isBlank())
                 .collect(Collectors.joining(", "));
     }
@@ -518,9 +663,25 @@ public class SubscriptionBookingService {
                 .orElseThrow(() -> new ResourceNotFoundException("Subscription not found"));
     }
 
+    private SubscriptionMaster getOwnedSubscriptionForUpdate(Long customerId, Long subscriptionId) {
+        SubscriptionMaster subscription = subscriptionMasterRepository.findByIdForUpdate(subscriptionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Subscription not found"));
+        if (!subscription.getCustomerId().equals(customerId)) {
+            throw new ResourceNotFoundException("Subscription not found");
+        }
+        return subscription;
+    }
+
     private SubscriptionVisit getVisit(Long subscriptionId, Long visitId) {
         return subscriptionVisitRepository.findByIdAndSubscriptionId(visitId, subscriptionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Visit not found"));
+    }
+
+    private SubscriptionVisit getVisitForUpdate(Long subscriptionId, Long visitId) {
+        SubscriptionVisit visit = subscriptionVisitRepository.findByIdForUpdate(visitId)
+                .filter(candidate -> candidate.getSubscriptionId().equals(subscriptionId))
+                .orElseThrow(() -> new ResourceNotFoundException("Visit not found"));
+        return visit;
     }
 
     private long countVisits(List<SubscriptionVisit> visits, VisitStatus status) {
@@ -545,6 +706,10 @@ public class SubscriptionBookingService {
                 .orElse(null);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("subscriptionId", subscription.getId());
+        payload.put("serviceType", subscription.getServiceType());
+        payload.put("serviceName", serviceName(service));
+        payload.put("visits", subscription.getVisits());
+        addressRepository.findById(subscription.getAddressId()).ifPresent(address -> payload.put("fullAddress", formatAddress(address)));
         payload.put("planName", planName(subscription, service));
         payload.put("frequency", String.join(",", frequencyDays).toUpperCase(Locale.ROOT));
         payload.put("frequencyDays", frequencyDays);
@@ -594,6 +759,7 @@ public class SubscriptionBookingService {
     private Map<String, Object> visitPayload(SubscriptionVisit visit) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("visitId", visit.getId());
+        payload.put("bookingId", visit.getBookingId());
         payload.put("date", visit.getVisitDate());
         payload.put("timeSlot", visit.getTimeSlot());
         payload.put("status", visit.getStatus().name());
@@ -607,8 +773,8 @@ public class SubscriptionBookingService {
         }
         try {
             auditLogService.log(customerId, null, bookingId, action, oldValue, newValue);
-        } catch (RuntimeException ignored) {
-            // Audit failures must not break customer-facing subscription actions.
+        } catch (RuntimeException ex) {
+            LOG.warn("Subscription lifecycle audit failed bookingId={} action={}", bookingId, action, ex);
         }
     }
 

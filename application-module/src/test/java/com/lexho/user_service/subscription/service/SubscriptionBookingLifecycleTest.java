@@ -3,6 +3,7 @@ package com.lexho.user_service.subscription.service;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.user_service.admin.geo.service.GeoFenceValidationService;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
+import com.lexho.user_service.coupon.service.CouponService;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
 import com.lexho.user_service.subscription.dto.RescheduleVisitRequest;
@@ -39,12 +40,14 @@ class SubscriptionBookingLifecycleTest {
     @Mock SubscriptionPricingService pricingService;
     @Mock OrderRepository orderRepository;
     @Mock GeoFenceValidationService geoFenceValidationService;
+    @Mock CouponService couponService;
     private SubscriptionBookingService service;
 
     @BeforeEach
     void setUp() {
         service = new SubscriptionBookingService(masterRepository, frequencyRepository, visitRepository,
-                serviceRepository, addressRepository, pricingService, orderRepository, geoFenceValidationService);
+                serviceRepository, addressRepository, pricingService, orderRepository, geoFenceValidationService,
+                couponService);
     }
 
     @Test
@@ -109,7 +112,7 @@ class SubscriptionBookingLifecycleTest {
     void skipAndRescheduleValidateDateStatusAndCollision() {
         own(master(1L, 7L, SubscriptionStatus.ACTIVE));
         SubscriptionVisit visit = visit(5L, VisitStatus.SCHEDULED, 2);
-        when(visitRepository.findByIdAndSubscriptionId(5L, 1L)).thenReturn(Optional.of(visit));
+        when(visitRepository.findByIdForUpdate(5L)).thenReturn(Optional.of(visit));
         service.skipVisit(7L, 1L, 5L);
         assertEquals(VisitStatus.SKIPPED, visit.getStatus());
 
@@ -126,7 +129,9 @@ class SubscriptionBookingLifecycleTest {
     }
 
     private void own(SubscriptionMaster master) {
-        when(masterRepository.findByIdAndCustomerId(master.getId(), master.getCustomerId()))
+        lenient().when(masterRepository.findByIdAndCustomerId(master.getId(), master.getCustomerId()))
+                .thenReturn(Optional.of(master));
+        lenient().when(masterRepository.findByIdForUpdate(master.getId()))
                 .thenReturn(Optional.of(master));
     }
 

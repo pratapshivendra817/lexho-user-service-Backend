@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
+import com.lexho.common.enums.PaymentStatus;
 import com.lexho.user_service.admin.entity.AdminCategoryEntity;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
@@ -39,11 +40,13 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -103,7 +106,8 @@ class DispatchOrchestrationServiceTest {
                 dispatchScoringPolicy,
                 objectMapper,
                 trackingLifecycleService,
-                dispatchProperties()
+                dispatchProperties(),
+                new PartnerDispatchEligibilityService()
         );
         try {
             lenient().when(objectMapper.writeValueAsString(any())).thenReturn("{\"ok\":true}");
@@ -123,7 +127,15 @@ class DispatchOrchestrationServiceTest {
         shift.setActiveJobsCount(1);
 
         when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
-        when(partnerShiftRepository.findByPartnerId(99L)).thenReturn(Optional.of(shift));
+        Partner partner = new Partner();
+        partner.setId(99L);
+        partner.setAvailable(true);
+        partner.setVerificationStatus("APPROVED");
+        shift.setOnline(true);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(99L)).thenReturn(Optional.of(shift));
+        when(partnerRepository.findById(99L)).thenReturn(Optional.of(partner));
         when(orderRepository.save(any(Order.class))).thenAnswer(inv -> inv.getArgument(0));
         when(partnerShiftRepository.save(any(PartnerShiftEntity.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -164,11 +176,44 @@ class DispatchOrchestrationServiceTest {
     }
 
     @Test
+    void markPartnerAcceptedShouldRejectCancelledInstantOrder() {
+        Order order = new Order();
+        order.setId(3L);
+        order.setBookingType("INSTANT");
+        order.setStatus(OrderStatus.CANCELLED);
+
+        Partner partner = new Partner();
+        partner.setId(99L);
+        partner.setAvailable(true);
+        partner.setVerificationStatus("APPROVED");
+        PartnerShiftEntity shift = new PartnerShiftEntity();
+        shift.setPartnerId(99L);
+        shift.setOnline(true);
+        shift.setActiveJobsCount(0);
+        shift.setMaxActiveJobs(3);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
+
+        when(orderRepository.findByIdForUpdate(3L)).thenReturn(Optional.of(order));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(99L)).thenReturn(Optional.of(shift));
+        when(partnerRepository.findById(99L)).thenReturn(Optional.of(partner));
+
+        BadRequestException error = assertThrows(BadRequestException.class,
+                () -> dispatchOrchestrationService.markPartnerAccepted(3L, 99L, 10));
+
+        assertEquals("Order is not accepting partner assignment", error.getMessage());
+        assertEquals(OrderStatus.CANCELLED, order.getStatus());
+        assertEquals(0, shift.getActiveJobsCount());
+        verify(orderRepository, never()).save(any(Order.class));
+        verify(partnerShiftRepository, never()).save(any(PartnerShiftEntity.class));
+    }
+
+    @Test
     void dispatchOrderShouldRejectNonServiceablePincodeAndRecordFailureEvent() {
         Order order = baseOrder(1L, "INSTANT", OrderStatus.BOOKING_CREATED);
         LexhoAddress address = address("110001");
         AdminServiceEntity service = serviceEntity(5L, 2L);
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
         when(lexhoAddressRepository.findByIdAndUserId(2L, 3L)).thenReturn(Optional.of(address));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(false);
@@ -177,7 +222,7 @@ class DispatchOrchestrationServiceTest {
                 () -> dispatchOrchestrationService.dispatchOrder(1L, 3L, 2L, 5L, 1, null));
 
         assertEquals("Service is not available for this pincode", error.getMessage());
-        verify(bookingEventRepository).save(argThat(event ->
+        verify(bookingEventRepository, atLeastOnce()).save(argThat(event ->
                 "PARTNER_SEARCH_FAILED".equals(event.getEventType())));
     }
 
@@ -187,7 +232,7 @@ class DispatchOrchestrationServiceTest {
         LexhoAddress address = address("110001");
         AdminServiceEntity service = serviceEntity(5L, 2L);
         LocalDateTime scheduledAt = LocalDateTime.now().plusHours(5);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(order));
         when(lexhoAddressRepository.findByIdAndUserId(20L, 30L)).thenReturn(Optional.of(address));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
@@ -209,6 +254,8 @@ class DispatchOrchestrationServiceTest {
         shift.setOnline(true);
         shift.setActiveJobsCount(0);
         shift.setMaxActiveJobs(2);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
         Partner partner = new Partner();
         partner.setId(99L);
         partner.setAvailable(true);
@@ -220,7 +267,7 @@ class DispatchOrchestrationServiceTest {
         location.setLatitude(java.math.BigDecimal.valueOf(28.4596));
         location.setLongitude(java.math.BigDecimal.valueOf(77.0267));
 
-        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(order));
         when(lexhoAddressRepository.findByIdAndUserId(21L, 31L)).thenReturn(Optional.of(address));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
@@ -233,6 +280,8 @@ class DispatchOrchestrationServiceTest {
         when(partnerServiceRequestRepository.findByCartId(11L)).thenReturn(List.of());
         when(partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(11L, 99L, PartnerServiceRequestStatus.PENDING))
                 .thenReturn(false);
+        when(partnerShiftRepository.findByPartnerIdForUpdate(99L)).thenReturn(Optional.of(shift));
+        when(partnerRepository.findById(99L)).thenReturn(Optional.of(partner));
         when(partnerServiceRequestRepository.save(any(PartnerServiceRequestEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -249,6 +298,61 @@ class DispatchOrchestrationServiceTest {
     }
 
     @Test
+    void dispatchOrderShouldMoveCreatedInstantBookingIntoPartnerSearch() {
+        Order order = baseOrder(12L, "INSTANT", OrderStatus.CREATED);
+        LexhoAddress address = address("110001");
+        AdminServiceEntity service = serviceEntity(5L, 2L);
+        PartnerShiftEntity shift = new PartnerShiftEntity();
+        shift.setPartnerId(99L);
+        shift.setCurrentPincode("110001");
+        shift.setOnline(true);
+        shift.setActiveJobsCount(0);
+        shift.setMaxActiveJobs(2);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
+        Partner partner = new Partner();
+        partner.setId(99L);
+        partner.setAvailable(true);
+        partner.setSubCategoryId(5L);
+        partner.setVerificationStatus("APPROVED");
+        com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity location =
+                new com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity();
+        location.setPartnerId(99L);
+        location.setLatitude(java.math.BigDecimal.valueOf(28.4596));
+        location.setLongitude(java.math.BigDecimal.valueOf(77.0267));
+
+        when(orderRepository.findByIdForUpdate(12L)).thenReturn(Optional.of(order));
+        when(lexhoAddressRepository.findByIdAndUserId(22L, 32L)).thenReturn(Optional.of(address));
+        when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
+        when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
+        when(currentPartnerLocationRepository.findNearbyPartnerIds(anyDouble(), anyDouble(), eq(1.0d), eq(200))).thenReturn(List.of(99L));
+        when(partnerShiftRepository.findByPartnerIdInAndDeletedFalse(List.of(99L))).thenReturn(List.of(shift));
+        when(partnerRepository.findAllById(List.of(99L))).thenReturn(List.of(partner));
+        when(currentPartnerLocationRepository.findByPartnerId(99L)).thenReturn(Optional.of(location));
+        when(dispatchScoringPolicy.isWithinDispatchRadius(any(), anyDouble())).thenReturn(true);
+        when(dispatchScoringPolicy.comparator("110001")).thenReturn(Comparator.comparing(candidate -> 0));
+        when(partnerServiceRequestRepository.findByCartId(12L)).thenReturn(List.of());
+        when(partnerServiceRequestRepository.existsByCartIdAndPartnerIdAndStatus(12L, 99L, PartnerServiceRequestStatus.PENDING))
+                .thenReturn(false);
+        when(partnerShiftRepository.findByPartnerIdForUpdate(99L)).thenReturn(Optional.of(shift));
+        when(partnerRepository.findById(99L)).thenReturn(Optional.of(partner));
+        when(partnerServiceRequestRepository.save(any(PartnerServiceRequestEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        int created = dispatchOrchestrationService.dispatchOrder(12L, 32L, 22L, 5L, 1, LocalDateTime.now());
+
+        assertEquals(1, created);
+        assertEquals(OrderStatus.SEARCHING_PARTNER, order.getStatus());
+        verify(partnerServiceRequestRepository).save(argThat(request ->
+                request.getCartId().equals(12L)
+                        && request.getPartnerId().equals(99L)
+                        && request.getStatus() == PartnerServiceRequestStatus.PENDING));
+        verify(bookingEventRepository).save(argThat(event -> "SEARCHING_PARTNER".equals(event.getEventType())));
+        verify(bookingEventRepository).save(argThat(event -> "INSTANT_DISPATCHED".equals(event.getEventType())));
+    }
+
+    @Test
     void dispatchOrderShouldUseLegacyPartnerServiceAndStopWhenNoOnlinePartners() {
         Order order = baseOrder(15L, "INSTANT", OrderStatus.BOOKING_CREATED);
         LexhoAddress address = address(" 110001 ");
@@ -257,7 +361,7 @@ class DispatchOrchestrationServiceTest {
         legacyPartner.setSubCategoryId(5L);
         AdminServiceEntity service = serviceEntity(5L, 2L);
 
-        when(orderRepository.findById(15L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(15L)).thenReturn(Optional.of(order));
         when(lexhoAddressRepository.findByIdAndUserId(22L, 32L)).thenReturn(Optional.of(address));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(700L)).thenReturn(Optional.empty());
         when(partnerRepository.findById(700L)).thenReturn(Optional.of(legacyPartner));
@@ -284,6 +388,8 @@ class DispatchOrchestrationServiceTest {
         shift.setOnline(true);
         shift.setActiveJobsCount(0);
         shift.setMaxActiveJobs(2);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
         Partner partner = new Partner();
         partner.setId(99L);
         partner.setAvailable(true);
@@ -295,7 +401,7 @@ class DispatchOrchestrationServiceTest {
         location.setLatitude(java.math.BigDecimal.valueOf(28.4596));
         location.setLongitude(java.math.BigDecimal.valueOf(77.0267));
 
-        when(orderRepository.findById(16L)).thenReturn(Optional.of(order));
+        when(orderRepository.findByIdForUpdate(16L)).thenReturn(Optional.of(order));
         when(lexhoAddressRepository.findByIdAndUserId(23L, 33L)).thenReturn(Optional.of(address));
         when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
         when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
@@ -365,12 +471,130 @@ class DispatchOrchestrationServiceTest {
     }
 
     @Test
+    void dispatchPaidInstantBookingShouldWaitForSuccessfulPrepayment() {
+        Order order = baseOrder(20L, "INSTANT", OrderStatus.CREATED);
+        order.setPaymentStatus(PaymentStatus.PENDING);
+        when(orderRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(order));
+
+        int created = dispatchOrchestrationService.dispatchPaidInstantBooking(20L);
+
+        assertEquals(0, created);
+        assertEquals(OrderStatus.CREATED, order.getStatus());
+        verify(bookingEventRepository).save(argThat(event -> "DISPATCH_PAYMENT_PENDING".equals(event.getEventType())));
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    void dispatchPaidInstantBookingShouldBeIdempotentAfterDispatchStarted() {
+        Order order = baseOrder(21L, "INSTANT", OrderStatus.SEARCHING_PARTNER);
+        order.setPaymentStatus(PaymentStatus.SUCCESS);
+        order.setDispatchStartedAt(LocalDateTime.now().minusMinutes(1));
+        when(orderRepository.findByIdForUpdate(21L)).thenReturn(Optional.of(order));
+
+        int created = dispatchOrchestrationService.dispatchPaidInstantBooking(21L);
+
+        assertEquals(0, created);
+        assertEquals(OrderStatus.SEARCHING_PARTNER, order.getStatus());
+        verify(bookingEventRepository).save(argThat(event -> "DISPATCH_ALREADY_STARTED".equals(event.getEventType())));
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    void dispatchPaidScheduledBookingShouldRequirePaymentBeforeSearch() {
+        Order order = baseOrder(23L, "SCHEDULED", OrderStatus.SCHEDULED);
+        order.setPaymentStatus(PaymentStatus.PENDING);
+        order.setScheduledAt(LocalDateTime.now().plusMinutes(5));
+        when(orderRepository.findByIdForUpdate(23L)).thenReturn(Optional.of(order));
+
+        int created = dispatchOrchestrationService.dispatchPaidScheduledBooking(23L);
+
+        assertEquals(0, created);
+        assertEquals(OrderStatus.SCHEDULED, order.getStatus());
+        verify(bookingEventRepository).save(argThat(event ->
+                "DISPATCH_PAYMENT_PENDING".equals(event.getEventType())));
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    void dispatchPaidScheduledBookingShouldStartInsidePreDispatchWindow() {
+        Order order = baseOrder(24L, "SCHEDULED", OrderStatus.SCHEDULED);
+        order.setUserId(32L);
+        order.setDispatchAddressId(22L);
+        order.setDispatchServiceId(5L);
+        order.setScheduledAt(LocalDateTime.now().plusMinutes(5));
+        LexhoAddress address = address("110001");
+        AdminServiceEntity service = serviceEntity(5L, 2L);
+        when(orderRepository.findByIdForUpdate(24L)).thenReturn(Optional.of(order));
+        when(lexhoAddressRepository.findByIdAndUserId(22L, 32L)).thenReturn(Optional.of(address));
+        when(adminServiceEntityRepository.findByIdAndDeletedFalse(5L)).thenReturn(Optional.of(service));
+        when(serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse("110001")).thenReturn(true);
+        when(currentPartnerLocationRepository.findNearbyPartnerIds(anyDouble(), anyDouble(), anyDouble(), anyInt()))
+                .thenReturn(List.of());
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        int created = dispatchOrchestrationService.dispatchPaidScheduledBooking(24L);
+
+        assertEquals(0, created);
+        assertNull(order.getDispatchStartedAt());
+        assertEquals(OrderStatus.PARTNER_SEARCH, order.getStatus());
+        verify(bookingEventRepository, atLeastOnce()).save(argThat(event ->
+                "PARTNER_SEARCH_FAILED".equals(event.getEventType())));
+        verify(bookingEventRepository).save(argThat(event ->
+                "SCHEDULED_DISPATCH_RETRY_SCHEDULED".equals(event.getEventType())));
+    }
+
+    @Test
+    void dispatchPaidScheduledBookingShouldStopAfterMaximumAttempts() {
+        Order order = baseOrder(25L, "SCHEDULED", OrderStatus.PARTNER_SEARCH);
+        order.setScheduledAt(LocalDateTime.now().plusMinutes(5));
+        when(orderRepository.findByIdForUpdate(25L)).thenReturn(Optional.of(order));
+        when(bookingEventRepository.countByBookingIdAndEventType(25L, "SCHEDULED_DISPATCH_ATTEMPT"))
+                .thenReturn((long) DispatchOrchestrationService.MAX_SCHEDULED_DISPATCH_ATTEMPTS);
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        int created = dispatchOrchestrationService.dispatchPaidScheduledBooking(25L);
+
+        assertEquals(0, created);
+        assertEquals("NO_PARTNER_AVAILABLE_MAX_ATTEMPTS", order.getUnavailableReason());
+        verify(bookingEventRepository).save(argThat(event ->
+                "SCHEDULED_DISPATCH_EXHAUSTED".equals(event.getEventType())));
+    }
+
+    @Test
+    void handlePaymentFailedShouldNotRewindTerminalLifecycle() {
+        Order order = baseOrder(22L, "INSTANT", OrderStatus.SERVICE_STARTED);
+        order.setAssignedPartnerId(99L);
+        when(orderRepository.findByIdForUpdate(22L)).thenReturn(Optional.of(order));
+        when(partnerServiceRequestRepository.findByCartIdAndStatus(22L, PartnerServiceRequestStatus.PENDING))
+                .thenReturn(List.of());
+
+        dispatchOrchestrationService.handlePaymentFailed(22L, "FAILED");
+
+        assertEquals(OrderStatus.SERVICE_STARTED, order.getStatus());
+        assertEquals(99L, order.getAssignedPartnerId());
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
     void helperMethodsShouldCoverEtaSerializationAndScheduledAcceptance() throws Exception {
         assertEquals(16, dispatchOrchestrationService.estimateEtaMinutes(null));
         assertEquals(1, dispatchOrchestrationService.estimateEtaMinutes(java.math.BigDecimal.ZERO));
 
         Order scheduled = baseOrder(14L, "SCHEDULED", OrderStatus.CREATED);
+        Partner partner = new Partner();
+        partner.setId(55L);
+        partner.setAvailable(true);
+        partner.setVerificationStatus("APPROVED");
+        PartnerShiftEntity shift = new PartnerShiftEntity();
+        shift.setPartnerId(55L);
+        shift.setOnline(true);
+        shift.setActiveJobsCount(0);
+        shift.setMaxActiveJobs(3);
+        shift.setShiftStart(LocalDateTime.now().minusHours(1));
+        shift.setShiftEnd(LocalDateTime.now().plusHours(1));
         when(orderRepository.findByIdForUpdate(14L)).thenReturn(Optional.of(scheduled));
+        when(partnerRepository.findById(55L)).thenReturn(Optional.of(partner));
+        when(partnerShiftRepository.findByPartnerIdForUpdate(55L)).thenReturn(Optional.of(shift));
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         dispatchOrchestrationService.markPartnerAccepted(14L, 55L, 20);
@@ -400,6 +624,7 @@ class DispatchOrchestrationServiceTest {
         order.setId(id);
         order.setBookingType(bookingType);
         order.setStatus(status);
+        order.setPaymentStatus(PaymentStatus.SUCCESS);
         order.setAssignedPartnerId(null);
         return order;
     }

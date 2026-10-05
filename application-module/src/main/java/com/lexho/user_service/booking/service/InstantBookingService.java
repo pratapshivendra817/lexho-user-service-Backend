@@ -18,6 +18,9 @@ import com.lexho.user_service.customer.location.service.ReverseGeocodeService;
 import com.lexho.user_service.customer.repository.CustomerCatalogRepository;
 import com.lexho.user_service.exception.ResourceNotFoundException;
 import com.lexho.user_service.exception.UnauthorizedException;
+import com.lexho.user_service.review.repository.ReviewRepository;
+import com.lexho.user_service.util.LexhoConstants;
+import com.lexho.user_service.util.ServicePinHasher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +35,7 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -40,27 +44,50 @@ public class InstantBookingService {
     private static final int INSTANT_SLA_MINUTES = 30;
     private static final ZoneId INDIA_ZONE = ZoneId.of("Asia/Kolkata");
     private static final DateTimeFormatter SLOT_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final String PIN_SECRET = System.getenv().getOrDefault(
+            "SERVICE_PIN_SECRET",
+            "lexho-local-service-pin-secret-change-in-production"
+    );
 
     private final OrderRepository orderRepository;
     private final CustomerCatalogRepository catalogRepository;
     private final CustomerAddressRepository addressRepository;
     private final ReverseGeocodeService reverseGeocodeService;
     private final UserRepository userRepository;
+    private final ReviewRepository reviewRepository;
 
     public InstantBookingService(OrderRepository orderRepository,
                                  CustomerCatalogRepository catalogRepository,
                                  CustomerAddressRepository addressRepository,
                                  ReverseGeocodeService reverseGeocodeService,
-                                 UserRepository userRepository) {
+                                 UserRepository userRepository,
+                                 ReviewRepository reviewRepository) {
         this.orderRepository = orderRepository;
         this.catalogRepository = catalogRepository;
         this.addressRepository = addressRepository;
         this.reverseGeocodeService = reverseGeocodeService;
         this.userRepository = userRepository;
+        this.reviewRepository = reviewRepository;
     }
 
+    /**
+     * Legacy creation helper kept only for older tests/internal callers.
+     *
+     * <p>The production customer booking API is
+     * {@code LexhoExperienceController#createBooking}, which creates the order
+     * through {@code OrderService} and immediately runs dispatch orchestration for
+     * instant bookings. Do not add new API paths that call this method because it
+     * creates an order without the current cart, serviceability, payment and
+     * dispatch flow.</p>
+     */
+    @Deprecated(since = "2026-10", forRemoval = false)
     @Transactional
     public BookingStatusResponse create(Long customerId, InstantBookingCreateRequest request) {
+        throw new BookingValidationException("LEGACY_BOOKING_FLOW_DISABLED",
+                "Legacy instant booking creation is disabled. Use the cart/payment booking flow.");
+    }
+
+    private BookingStatusResponse legacyCreate(Long customerId, InstantBookingCreateRequest request) {
         double latitude = request.coordinates != null && request.coordinates.lat != null ? request.coordinates.lat : request.latitude;
         double longitude = request.coordinates != null && request.coordinates.lng != null ? request.coordinates.lng : request.longitude;
         AdminServiceEntity service = catalogRepository.findById(request.serviceId)
@@ -92,8 +119,8 @@ public class InstantBookingService {
 
     @Transactional(readOnly = true)
     public BookingStatusResponse details(Long customerId, Long bookingId) {
-        Order order = orderRepository.findById(bookingId)
-                .orElseThrow(() -> new ResourceNotFoundException("Booking not found"));
+        Order order = orderRepository.findByIdForUpdate(bookingId)
+                .orElseThrow(() -> new ResourceNotFoundException(LexhoConstants.BOOKING_NOT_FOUND));
         if (!order.getUserId().equals(customerId)) {
             throw new UnauthorizedException("You are not allowed to access this booking");
         }
@@ -107,7 +134,7 @@ public class InstantBookingService {
         if (order.getStatus() == OrderStatus.CANCELLED) {
             throw new BookingValidationException("BOOKING_CANCELLED", "Cancelled booking cannot be rescheduled");
         }
-        order.setBookingType("SCHEDULED");
+        order.setBookingType(LexhoConstants.STATUS_SCHEDULED);
         order.setScheduledAt(request.date.atZoneSameInstant(INDIA_ZONE).toLocalDateTime());
         order.setSlaMinutes(null);
         order.setPromisedStartTime(null);
@@ -122,13 +149,25 @@ public class InstantBookingService {
         if (!order.getStatus().canCancel()) {
             throw new BookingValidationException("CANNOT_CANCEL", "Booking cannot be cancelled at this stage");
         }
-        order.setStatus(OrderStatus.CANCELLED);
+        applyStatusTransition(order, OrderStatus.CANCELLED);
         return toResponse(orderRepository.save(order), firstService(order).orElse(null));
+    }
+
+    private void applyStatusTransition(Order order, OrderStatus targetStatus) {
+        OrderStatus current = order.getStatus();
+        if (current == targetStatus) {
+            return;
+        }
+        if (current == null || !current.canTransitionTo(targetStatus)) {
+            throw new BookingValidationException("INVALID_STATUS_TRANSITION",
+                    "Invalid booking status transition from " + current + " to " + targetStatus);
+        }
+        order.setStatus(targetStatus);
     }
 
     private Order findOwnedBooking(Long customerId, Long bookingId) {
         Order order = orderRepository.findById(bookingId)
-                .orElseThrow(() -> new ResourceNotFoundException("Booking not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(LexhoConstants.BOOKING_NOT_FOUND));
         if (!order.getUserId().equals(customerId)) {
             throw new UnauthorizedException("You are not allowed to access this booking");
         }
@@ -143,7 +182,7 @@ public class InstantBookingService {
     }
 
     private void applySchedule(Order order, InstantBookingCreateRequest request, String bookingType) {
-        if ("SCHEDULED".equals(bookingType)) {
+        if (LexhoConstants.STATUS_SCHEDULED.equals(bookingType)) {
             LocalDateTime scheduledAt = parseScheduledAt(request.date, request.slot);
             order.setScheduledAt(scheduledAt);
             order.setSlaMinutes(null);
@@ -225,7 +264,11 @@ public class InstantBookingService {
         if (order.getItems() == null || order.getItems().isEmpty()) {
             return Optional.empty();
         }
-        Long serviceId = order.getItems().get(0).getPartnerId();
+        OrderItem firstItem = order.getItems().get(0);
+        if (firstItem == null) {
+            return Optional.empty();
+        }
+        Long serviceId = firstItem.getPartnerId();
         return serviceId == null ? Optional.empty() : catalogRepository.findById(serviceId);
     }
 
@@ -247,9 +290,20 @@ public class InstantBookingService {
         response.totalAmount = order.getTotalAmount();
         response.fullAddress = order.getAddress();
         response.etaMinutes = etaMinutes(order);
+        attachServicePins(response, order);
         response.message = message(response.assignmentStatus);
         attachPartner(response, order);
+        attachReviewMeta(response, order);
         return response;
+    }
+
+    private void attachReviewMeta(BookingStatusResponse response, Order order) {
+        boolean reviewSubmitted = reviewRepository.existsByBookingIdAndDeletedFalse(order.getId());
+        boolean canReview = isCompletedForReview(order) && !reviewSubmitted;
+        response.meta = Map.of(
+                "canReview", canReview,
+                "reviewSubmitted", reviewSubmitted
+        );
     }
 
     private void attachPartner(BookingStatusResponse response, Order order) {
@@ -267,28 +321,33 @@ public class InstantBookingService {
 
     private String customerBookingStatus(Order order) {
         if (order.getStatus() == OrderStatus.CANCELLED) {
-            return "CANCELLED";
+            return LexhoConstants.STATUS_CANCELLED;
         }
         if (order.getStatus() == OrderStatus.INSTANT_FAILED) {
-            return "INSTANT_FAILED";
+            return LexhoConstants.STATUS_INSTANT_FAILED;
+        }
+        if (isCompletedForReview(order)) {
+            return LexhoConstants.STATUS_COMPLETED;
         }
         return "CONFIRMED";
     }
 
     private String assignmentStatus(Order order) {
-        if ("SCHEDULED".equalsIgnoreCase(order.getBookingType())
+        if (LexhoConstants.STATUS_SCHEDULED.equalsIgnoreCase(order.getBookingType())
                 && order.getStatus() == OrderStatus.CONFIRMED
                 && order.getAssignedPartnerId() == null) {
-            return "SCHEDULED";
+            return LexhoConstants.STATUS_SCHEDULED;
         }
         return switch (order.getStatus()) {
-            case PARTNER_ASSIGNED, PARTNER_ACCEPTED -> "PARTNER_ASSIGNED";
-            case PARTNER_REACHED -> "PARTNER_ARRIVED";
-            case SERVICE_STARTED -> "IN_PROGRESS";
-            case SERVICE_COMPLETED, PAYMENT_COMPLETED, DELIVERED -> "COMPLETED";
-            case INSTANT_FAILED -> "INSTANT_FAILED";
-            case CANCELLED -> "CANCELLED";
-            default -> order.getAssignedPartnerId() == null ? "SEARCHING_PARTNER" : "PARTNER_ASSIGNED";
+            case PARTNER_ASSIGNED, PARTNER_ACCEPTED -> LexhoConstants.STATUS_PARTNER_ASSIGNED;
+            case ARRIVED, PARTNER_REACHED -> "PARTNER_ARRIVED";
+            case SERVICE_STARTED, SERVICE_IN_PROGRESS -> "IN_PROGRESS";
+            case SERVICE_COMPLETED, PAYMENT_COMPLETED, DELIVERED -> LexhoConstants.STATUS_COMPLETED;
+            case INSTANT_FAILED -> LexhoConstants.STATUS_INSTANT_FAILED;
+            case CANCELLED -> LexhoConstants.STATUS_CANCELLED;
+            default -> order.getAssignedPartnerId() == null
+                    ? LexhoConstants.STATUS_SEARCHING_PARTNER
+                    : LexhoConstants.STATUS_PARTNER_ASSIGNED;
         };
     }
 
@@ -301,19 +360,58 @@ public class InstantBookingService {
 
     private String message(String assignmentStatus) {
         return switch (assignmentStatus) {
-            case "PARTNER_ASSIGNED" -> "Partner assigned and on the way.";
+            case LexhoConstants.STATUS_PARTNER_ASSIGNED -> "Partner assigned and on the way.";
             case "PARTNER_ARRIVED" -> "Partner has arrived.";
             case "IN_PROGRESS" -> "Service has started.";
-            case "COMPLETED" -> "Service completed.";
-            case "INSTANT_FAILED" -> "No partner is available right now.";
-            case "CANCELLED" -> "Booking cancelled.";
-            case "SCHEDULED" -> "Partner will be assigned before service.";
+            case LexhoConstants.STATUS_COMPLETED -> "Service completed.";
+            case LexhoConstants.STATUS_INSTANT_FAILED -> "No partner is available right now.";
+            case LexhoConstants.STATUS_CANCELLED -> "Booking cancelled.";
+            case LexhoConstants.STATUS_SCHEDULED -> "Partner will be assigned before service.";
             default -> "We are matching your request with nearby partners.";
         };
     }
 
+    private void attachServicePins(BookingStatusResponse response, Order order) {
+        LocalDateTime now = LocalDateTime.now();
+        if (isArrived(order) && activePin(order.getServiceStartPinNonce(), order.getServiceStartPinExpiresAt(),
+                order.getServiceStartPinConsumedAt(), now)) {
+            response.serviceStartPin = expectedPin(order.getId(), "START", order.getServiceStartPinNonce());
+            response.serviceStartPinExpiresAt = toOffset(order.getServiceStartPinExpiresAt());
+        }
+        if (isInProgress(order) && activePin(order.getServiceCompletePinNonce(), order.getServiceCompletePinExpiresAt(),
+                order.getServiceCompletePinConsumedAt(), now)) {
+            response.serviceCompletePin = expectedPin(order.getId(), "COMPLETE", order.getServiceCompletePinNonce());
+            response.serviceCompletePinExpiresAt = toOffset(order.getServiceCompletePinExpiresAt());
+        }
+    }
+
+    private boolean isArrived(Order order) {
+        return order.getStatus() == OrderStatus.ARRIVED || order.getStatus() == OrderStatus.PARTNER_REACHED;
+    }
+
+    private boolean isInProgress(Order order) {
+        return order.getStatus() == OrderStatus.SERVICE_STARTED || order.getStatus() == OrderStatus.SERVICE_IN_PROGRESS;
+    }
+
+    private boolean isCompletedForReview(Order order) {
+        return order.getStatus() == OrderStatus.SERVICE_COMPLETED
+                || order.getStatus() == OrderStatus.PAYMENT_COMPLETED
+                || order.getStatus() == OrderStatus.DELIVERED;
+    }
+
+    private boolean activePin(String nonce, LocalDateTime expiresAt, LocalDateTime consumedAt, LocalDateTime now) {
+        return nonce != null
+                && expiresAt != null
+                && consumedAt == null
+                && expiresAt.isAfter(now);
+    }
+
+    private String expectedPin(Long orderId, String purpose, String nonce) {
+        return ServicePinHasher.expectedPin(orderId, purpose, nonce, PIN_SECRET);
+    }
+
     private String slotFromScheduledAt(Order order) {
-        if (!"SCHEDULED".equalsIgnoreCase(order.getBookingType()) || order.getScheduledAt() == null) {
+        if (!LexhoConstants.STATUS_SCHEDULED.equalsIgnoreCase(order.getBookingType()) || order.getScheduledAt() == null) {
             return null;
         }
         LocalTime start = order.getScheduledAt().toLocalTime();
@@ -324,7 +422,8 @@ public class InstantBookingService {
         if (order.getItems() == null || order.getItems().isEmpty()) {
             return null;
         }
-        return order.getItems().get(0).getPartnerName();
+        OrderItem firstItem = order.getItems().get(0);
+        return firstItem == null ? null : firstItem.getPartnerName();
     }
 
     private OffsetDateTime toOffset(LocalDateTime value) {

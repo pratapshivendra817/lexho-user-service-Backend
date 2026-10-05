@@ -6,8 +6,8 @@ import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +44,7 @@ class PartnerNearbyServiceTest {
     @Mock
     private PartnerShiftRepository partnerShiftRepository;
     @Mock
-    private PartnerProfileRepository partnerProfileRepository;
+    private PartnerOperationalProfileRepository partnerProfileRepository;
     @Mock
     private CurrentPartnerLocationRepository currentPartnerLocationRepository;
 
@@ -82,8 +82,8 @@ class PartnerNearbyServiceTest {
                 geo("bad-id", 0.1), geo("2", 2.34567), geo("1", 1.23456)));
         PartnerShiftEntity shift1 = shift(1L, 1, 3, true);
         PartnerShiftEntity shift2 = shift(2L, 0, 3, true);
-        PartnerProfile profile1 = profile(1L, "Home Cook", 4.5, true, false);
-        PartnerProfile profile2 = profile(2L, "Cook", null, true, false);
+        PartnerOperationalProfile profile1 = profile(1L, "Home Cook", 4.5, true, false);
+        PartnerOperationalProfile profile2 = profile(2L, "Cook", null, true, false);
         CurrentPartnerLocationEntity location1 = location(1L, 28.61, 77.20, LocalDateTime.now());
         CurrentPartnerLocationEntity location2 = location(2L, 28.62, 77.21, LocalDateTime.now());
         when(partnerShiftRepository.findByPartnerIdInAndDeletedFalse(Set.of(1L, 2L)))
@@ -159,8 +159,8 @@ class PartnerNearbyServiceTest {
         return shift;
     }
 
-    private PartnerProfile profile(Long id, String category, Double rating, boolean online, boolean deleted) {
-        PartnerProfile profile = new PartnerProfile();
+    private PartnerOperationalProfile profile(Long id, String category, Double rating, boolean online, boolean deleted) {
+        PartnerOperationalProfile profile = new PartnerOperationalProfile();
         profile.setId(id);
         profile.setServiceCategory(category);
         profile.setRating(rating);

@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
@@ -55,11 +56,11 @@ class PartnerLiveTrackingControllerTest {
     void trackingAccessAllowsAdminPartnerSelfAndAssignedCustomer() {
         when(securityUtils.getCurrentRole()).thenReturn(Optional.of("ADMIN"));
         when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(1L));
-        invoke("assertTrackingAccessAllowed", 77L);
+        assertThatCode(() -> invoke("assertTrackingAccessAllowed", 77L)).doesNotThrowAnyException();
 
         when(securityUtils.getCurrentRole()).thenReturn(Optional.of("PARTNER"));
         when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(77L));
-        invoke("assertTrackingAccessAllowed", 77L);
+        assertThatCode(() -> invoke("assertTrackingAccessAllowed", 77L)).doesNotThrowAnyException();
 
         when(securityUtils.getCurrentRole()).thenReturn(Optional.of("CUSTOMER"));
         when(securityUtils.getCurrentUserId()).thenReturn(Optional.of(55L));
@@ -74,7 +75,7 @@ class PartnerLiveTrackingControllerTest {
                         OrderStatus.SERVICE_STARTED,
                         OrderStatus.SERVICE_IN_PROGRESS
                 ))).thenReturn(true);
-        invoke("assertTrackingAccessAllowed", 77L);
+        assertThatCode(() -> invoke("assertTrackingAccessAllowed", 77L)).doesNotThrowAnyException();
     }
 
     @Test
@@ -115,6 +116,24 @@ class PartnerLiveTrackingControllerTest {
                 .containsEntry("online", false)
                 .containsEntry("trackingState", "OFFLINE")
                 .doesNotContainKey("lat");
+    }
+
+    @Test
+    void snapshotSkipsCoordinatesWhenStoredLocationIsIncomplete() {
+        CurrentPartnerLocationEntity location = new CurrentPartnerLocationEntity();
+        PartnerShiftEntity shift = shift(true, 0);
+        when(locationRepository.findByPartnerIdAndDeletedFalse(10L)).thenReturn(Optional.of(location));
+        when(shiftRepository.findByPartnerIdAndDeletedFalse(10L)).thenReturn(Optional.of(shift));
+        when(lifecycleService.fetchState(10L)).thenReturn(TrackingLifecycleState.OFFLINE);
+
+        Map<String, Object> payload = invoke("snapshot", 10L);
+
+        assertThat(payload)
+                .containsEntry("partnerId", 10L)
+                .containsEntry("online", true)
+                .containsEntry("trackingState", "ASSIGNED")
+                .doesNotContainKey("lat")
+                .doesNotContainKey("lng");
     }
 
     @Test

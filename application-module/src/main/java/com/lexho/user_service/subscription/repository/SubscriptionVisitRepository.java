@@ -20,6 +20,12 @@ public interface SubscriptionVisitRepository extends JpaRepository<SubscriptionV
     Optional<SubscriptionVisit> findByIdAndSubscriptionId(Long id, Long subscriptionId);
     boolean existsBySubscriptionIdAndVisitDateAndIdNot(Long subscriptionId, LocalDate visitDate, Long id);
 
+    Optional<SubscriptionVisit> findByBookingId(Long bookingId);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select v from SubscriptionVisit v where v.id = :id")
+    Optional<SubscriptionVisit> findByIdForUpdate(@Param("id") Long id);
+
     long countBySubscriptionIdAndStatus(Long subscriptionId, VisitStatus status);
 
     @Modifying

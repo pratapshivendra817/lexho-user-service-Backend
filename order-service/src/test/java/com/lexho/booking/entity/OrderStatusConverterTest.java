@@ -13,6 +13,9 @@ class OrderStatusConverterTest {
     @Test
     void shouldMapLegacyAcceptedToPartnerAccepted() {
         assertEquals(OrderStatus.PARTNER_ACCEPTED, converter.convertToEntityAttribute("ACCEPTED"));
+        assertEquals(OrderStatus.SERVICE_STARTED, converter.convertToEntityAttribute("STARTED"));
+        assertEquals(OrderStatus.SERVICE_IN_PROGRESS, converter.convertToEntityAttribute("IN_PROGRESS"));
+        assertEquals(OrderStatus.SERVICE_COMPLETED, converter.convertToEntityAttribute("COMPLETED"));
     }
 
     @Test

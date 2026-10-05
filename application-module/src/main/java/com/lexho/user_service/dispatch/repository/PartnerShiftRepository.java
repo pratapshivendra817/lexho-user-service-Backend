@@ -2,6 +2,10 @@ package com.lexho.user_service.dispatch.repository;
 
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
@@ -17,6 +21,10 @@ public interface PartnerShiftRepository extends JpaRepository<PartnerShiftEntity
     List<PartnerShiftEntity> findByOnlineTrueAndDeletedFalseAndUpdatedAtBefore(LocalDateTime cutoff);
     List<PartnerShiftEntity> findByOnlineTrueAndDeletedFalseAndShiftEndBefore(LocalDateTime cutoff);
     boolean existsByOnlineTrueAndDeletedFalse();
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from PartnerShiftEntity s where s.partnerId = :partnerId and s.deleted = false")
+    Optional<PartnerShiftEntity> findByPartnerIdForUpdate(@Param("partnerId") Long partnerId);
 
     default Optional<PartnerShiftEntity> findByPartnerId(Long partnerId) {
         return findByPartnerIdAndDeletedFalse(partnerId);

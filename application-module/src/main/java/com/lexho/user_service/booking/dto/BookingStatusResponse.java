@@ -2,6 +2,7 @@ package com.lexho.user_service.booking.dto;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.Map;
 
 public class BookingStatusResponse {
     public Long id;
@@ -25,5 +26,10 @@ public class BookingStatusResponse {
     public String partnerPhone;
     public Double partnerRating;
     public String partnerProfileImage;
+    public String serviceStartPin;
+    public OffsetDateTime serviceStartPinExpiresAt;
+    public String serviceCompletePin;
+    public OffsetDateTime serviceCompletePinExpiresAt;
     public String message;
+    public Map<String, Object> meta;
 }

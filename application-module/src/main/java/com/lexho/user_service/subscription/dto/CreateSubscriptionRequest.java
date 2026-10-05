@@ -15,9 +15,12 @@ public record CreateSubscriptionRequest(
         @Positive(message = "serviceId must be positive")
         Long serviceId,
 
-        @NotNull(message = "addressId is required")
-        @Positive(message = "addressId must be positive")
-        Long addressId,
+        @NotBlank(message = "addressId is required")
+        String addressId,
+
+        Double latitude,
+
+        Double longitude,
 
         String bookingMode,
 
@@ -44,6 +47,18 @@ public record CreateSubscriptionRequest(
         String timeSlot,
 
         @DecimalMin(value = "0.01", message = "price must be greater than 0")
-        BigDecimal price
+        BigDecimal price,
+
+        @jakarta.validation.constraints.Size(max = 40, message = "couponCode must be 40 characters or less")
+        String couponCode
 ) {
+    /** Backwards-compatible constructor for internal callers that still use legacy numeric IDs. */
+    public CreateSubscriptionRequest(Long serviceId, Long addressId, String bookingMode, String serviceType,
+                                     List<String> frequencyDays, LocalDate startDate, LocalDate endDate,
+                                     Integer visits, BigDecimal durationHours,
+                                     com.lexho.user_service.subscription.enums.FamilySize familySize,
+                                     String timeSlot, BigDecimal price, String couponCode) {
+        this(serviceId, addressId == null ? null : String.valueOf(addressId), null, null, bookingMode, serviceType,
+                frequencyDays, startDate, endDate, visits, durationHours, familySize, timeSlot, price, couponCode);
+    }
 }

@@ -26,12 +26,15 @@ import com.lexho.user_service.dto.ApiResponse;
 import com.lexho.user_service.exception.BadRequestException;
 import com.lexho.user_service.service.DeprecatedApiUsageService;
 import com.lexho.user_service.service.DeprecationControlService;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
+import com.lexho.user_service.util.GeoDistanceCalculator;
 import com.lexho.booking.repository.OrderRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.Hidden;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -49,6 +52,15 @@ import java.util.Map;
 @RequestMapping({"/api/partner/dispatch", "/api/v1/partner/dispatch"})
 @PreAuthorize("hasRole('PARTNER')")
 public class PartnerDispatchController {
+    private static final Logger log = LoggerFactory.getLogger(PartnerDispatchController.class);
+    private static final String PARTNER_CACHE_PREFIX = "PARTNER:";
+    private static final String ONLINE_KEY = "online";
+    private static final String USER_ID_KEY = "userId";
+    private static final String PARTNER_ID_KEY = "partnerId";
+    private static final String CURRENT_PINCODE_KEY = "currentPincode";
+    private static final String TRACKING_STATE_KEY = "trackingState";
+    private static final String ACCEPTED_KEY = "accepted";
+    private static final String REASON_KEY = "reason";
 
     private final PartnerShiftRepository partnerShiftRepository;
     private final CurrentPartnerLocationRepository currentPartnerLocationRepository;
@@ -56,7 +68,7 @@ public class PartnerDispatchController {
     private final DeprecationControlService deprecationControlService;
     private final DeprecatedApiUsageService deprecatedApiUsageService;
     private final PartnerSkillService partnerSkillService;
-    private final PartnerProfileRepository partnerProfileRepository;
+    private final PartnerOperationalProfileRepository partnerProfileRepository;
     private final PartnerGeoIndexService partnerGeoIndexService;
     private final GeoEventPublisher geoEventPublisher;
     private final TrackingLifecycleService trackingLifecycleService;
@@ -76,7 +88,7 @@ public class PartnerDispatchController {
                                      DeprecationControlService deprecationControlService,
                                      DeprecatedApiUsageService deprecatedApiUsageService,
                                      PartnerSkillService partnerSkillService,
-                                     PartnerProfileRepository partnerProfileRepository,
+                                     PartnerOperationalProfileRepository partnerProfileRepository,
                                      PartnerGeoIndexService partnerGeoIndexService,
                                      GeoEventPublisher geoEventPublisher,
                                       TrackingLifecycleService trackingLifecycleService,
@@ -117,7 +129,7 @@ public class PartnerDispatchController {
     }
 
     @PostMapping("/shift/start")
-    public ApiResponse<Map<String, Object>> startShift(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<Map<String, Object>> startShift(@RequestAttribute(USER_ID_KEY) Long partnerId,
                                                         @RequestBody(required = false) PartnerShiftStartRequest request) {
         ensureAvailabilityUnlocked(partnerId);
         PartnerShiftEntity shift = partnerShiftRepository.findByPartnerId(partnerId).orElseGet(PartnerShiftEntity::new);
@@ -131,52 +143,54 @@ public class PartnerDispatchController {
         CurrentPartnerLocationEntity existingLocation = currentPartnerLocationRepository.findByPartnerId(partnerId).orElse(null);
         shift.setCurrentPincode(existingLocation == null ? null : existingLocation.getPincode());
         if (shift.getId() == null) {
-            shift.setCreatedBy("PARTNER:" + partnerId);
+            shift.setCreatedBy(PARTNER_CACHE_PREFIX + partnerId);
         }
-        shift.setUpdatedBy("PARTNER:" + partnerId);
+        shift.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
         partnerShiftRepository.save(shift);
-        geoEventPublisher.publish(GeoEventType.PARTNER_ONLINE, partnerId, Map.of("online", true));
+        geoEventPublisher.publish(GeoEventType.PARTNER_ONLINE, partnerId, Map.of(ONLINE_KEY, true));
+        log.info("SHIFT_STARTED partnerId={} onlineStatus=ONLINE serviceAvailability=unchanged", partnerId);
         Map<String, Object> response = new HashMap<>();
-        response.put("partnerId", partnerId);
-        response.put("online", true);
-        response.put("currentPincode", shift.getCurrentPincode());
+        response.put(PARTNER_ID_KEY, partnerId);
+        response.put(ONLINE_KEY, true);
+        response.put(CURRENT_PINCODE_KEY, shift.getCurrentPincode());
         return ApiResponse.success("Partner shift started", response);
     }
 
     @PostMapping("/shift/end")
-    public ApiResponse<Map<String, Object>> endShift(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<Map<String, Object>> endShift(@RequestAttribute(USER_ID_KEY) Long partnerId,
                                                       @RequestBody(required = false) PartnerShiftEndRequest request) {
         PartnerShiftEntity shift = partnerShiftRepository.findByPartnerId(partnerId).orElseGet(PartnerShiftEntity::new);
         shift.setPartnerId(partnerId);
         shift.setOnline(false);
         shift.setShiftEnd((request != null && request.shiftEnd != null) ? request.shiftEnd : LocalDateTime.now());
         if (shift.getId() == null) {
-            shift.setCreatedBy("PARTNER:" + partnerId);
+            shift.setCreatedBy(PARTNER_CACHE_PREFIX + partnerId);
         }
-        shift.setUpdatedBy("PARTNER:" + partnerId);
+        shift.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
         partnerShiftRepository.save(shift);
         partnerGeoIndexService.removePartner(partnerId);
-        geoEventPublisher.publish(GeoEventType.PARTNER_OFFLINE, partnerId, Map.of("online", false));
+        geoEventPublisher.publish(GeoEventType.PARTNER_OFFLINE, partnerId, Map.of(ONLINE_KEY, false));
+        log.info("SHIFT_ENDED partnerId={} onlineStatus=OFFLINE activeBookingCancellation=false", partnerId);
         return ApiResponse.success("Partner shift ended", Map.of(
-                "partnerId", partnerId,
-                "online", false
+                PARTNER_ID_KEY, partnerId,
+                ONLINE_KEY, false
         ));
     }
 
     @PatchMapping("/availability")
-    public ApiResponse<Map<String, Object>> updateAvailability(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<Map<String, Object>> updateAvailability(@RequestAttribute(USER_ID_KEY) Long partnerId,
                                                                 @Valid @RequestBody PartnerAvailabilityUpdateRequest request) {
         return updateAvailabilityInternal(partnerId, request);
     }
 
     @PutMapping("/availability")
-    public ApiResponse<Map<String, Object>> updateAvailabilityPut(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<Map<String, Object>> updateAvailabilityPut(@RequestAttribute(USER_ID_KEY) Long partnerId,
                                                                    @Valid @RequestBody PartnerAvailabilityUpdateRequest request) {
         return updateAvailabilityInternal(partnerId, request);
     }
 
     @GetMapping("/shift/history")
-    public ApiResponse<List<Map<String, Object>>> shiftHistory(@RequestAttribute("userId") Long partnerId) {
+    public ApiResponse<List<Map<String, Object>>> shiftHistory(@RequestAttribute(USER_ID_KEY) Long partnerId) {
         List<Map<String, Object>> history = partnerShiftRepository.findShiftHistoryByPartnerId(partnerId).stream()
                 .map(this::toShiftHistoryItem)
                 .toList();
@@ -184,7 +198,7 @@ public class PartnerDispatchController {
     }
 
     @GetMapping("/history")
-    public ApiResponse<List<Map<String, Object>>> history(@RequestAttribute("userId") Long partnerId) {
+    public ApiResponse<List<Map<String, Object>>> history(@RequestAttribute(USER_ID_KEY) Long partnerId) {
         return shiftHistory(partnerId);
     }
 
@@ -198,23 +212,25 @@ public class PartnerDispatchController {
             shift.setOnline(resolvedOnline);
             if (!resolvedOnline) {
                 partnerGeoIndexService.removePartner(partnerId);
-                geoEventPublisher.publish(GeoEventType.PARTNER_OFFLINE, partnerId, Map.of("online", false));
+                geoEventPublisher.publish(GeoEventType.PARTNER_OFFLINE, partnerId, Map.of(ONLINE_KEY, false));
+                log.info("OFFLINE partnerId={} newDispatch=false activeBookingCancellation=false", partnerId);
             } else {
-                geoEventPublisher.publish(GeoEventType.PARTNER_ONLINE, partnerId, Map.of("online", true));
+                geoEventPublisher.publish(GeoEventType.PARTNER_ONLINE, partnerId, Map.of(ONLINE_KEY, true));
+                log.info("ONLINE partnerId={}", partnerId);
             }
         }
         if (request.maxActiveJobs != null) {
             shift.setMaxActiveJobs(request.maxActiveJobs);
         }
         if (shift.getId() == null) {
-            shift.setCreatedBy("PARTNER:" + partnerId);
+            shift.setCreatedBy(PARTNER_CACHE_PREFIX + partnerId);
         }
-        shift.setUpdatedBy("PARTNER:" + partnerId);
+        shift.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
         partnerShiftRepository.save(shift);
         Map<String, Object> response = new HashMap<>();
-        response.put("partnerId", partnerId);
-        response.put("online", shift.isOnline());
-        response.put("currentPincode", shift.getCurrentPincode());
+        response.put(PARTNER_ID_KEY, partnerId);
+        response.put(ONLINE_KEY, shift.isOnline());
+        response.put(CURRENT_PINCODE_KEY, shift.getCurrentPincode());
         response.put("maxActiveJobs", shift.getMaxActiveJobs());
         return ApiResponse.success("Partner availability updated", response);
     }
@@ -222,11 +238,11 @@ public class PartnerDispatchController {
     private Map<String, Object> toShiftHistoryItem(PartnerShiftEntity shift) {
         Map<String, Object> item = new HashMap<>();
         item.put("id", shift.getId());
-        item.put("partnerId", shift.getPartnerId());
-        item.put("online", shift.isOnline());
+        item.put(PARTNER_ID_KEY, shift.getPartnerId());
+        item.put(ONLINE_KEY, shift.isOnline());
         item.put("shiftStart", shift.getShiftStart());
         item.put("shiftEnd", shift.getShiftEnd());
-        item.put("currentPincode", shift.getCurrentPincode());
+        item.put(CURRENT_PINCODE_KEY, shift.getCurrentPincode());
         item.put("activeJobsCount", shift.getActiveJobsCount());
         item.put("maxActiveJobs", shift.getMaxActiveJobs());
         item.put("updatedAt", shift.getUpdatedAt());
@@ -236,7 +252,7 @@ public class PartnerDispatchController {
     @Deprecated
     @Hidden
     @PostMapping("/shift")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> updateShift(@RequestAttribute("userId") Long partnerId,
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateShift(@RequestAttribute(USER_ID_KEY) Long partnerId,
                                                                          @Valid @RequestBody PartnerShiftUpdateRequest request) {
         deprecationControlService.ensureLegacyPartnerShiftEnabled();
         deprecatedApiUsageService.record("partner.dispatch.shift.legacy");
@@ -251,21 +267,21 @@ public class PartnerDispatchController {
             shift.setMaxActiveJobs(request.maxActiveJobs);
         }
         if (shift.getId() == null) {
-            shift.setCreatedBy("PARTNER:" + partnerId);
+            shift.setCreatedBy(PARTNER_CACHE_PREFIX + partnerId);
         }
-        shift.setUpdatedBy("PARTNER:" + partnerId);
+        shift.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
         partnerShiftRepository.save(shift);
         Map<String, Object> response = new HashMap<>();
-        response.put("partnerId", partnerId);
-        response.put("online", shift.isOnline());
-        response.put("currentPincode", shift.getCurrentPincode());
+        response.put(PARTNER_ID_KEY, partnerId);
+        response.put(ONLINE_KEY, shift.isOnline());
+        response.put(CURRENT_PINCODE_KEY, shift.getCurrentPincode());
         return ResponseEntity.ok()
                 .headers(deprecationHeaders("/api/partner/dispatch/shift/start, /api/partner/dispatch/shift/end, /api/partner/dispatch/availability"))
                 .body(ApiResponse.success("Partner shift updated (deprecated route)", response));
     }
 
     @PostMapping("/location")
-    public ApiResponse<Map<String, Object>> updateLocation(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<Map<String, Object>> updateLocation(@RequestAttribute(USER_ID_KEY) Long partnerId,
                                                             @Valid @RequestBody PartnerLocationUpdateRequest request) {
         geoIngestCounter.increment();
         PartnerShiftEntity shift = partnerShiftRepository.findByPartnerId(partnerId).orElse(null);
@@ -273,31 +289,12 @@ public class PartnerDispatchController {
             throw new BadRequestException("Partner must be online before updating location");
         }
         if (Boolean.FALSE.equals(request.gpsEnabled)) {
-            partnerGeoIndexService.removePartner(partnerId);
-            shift.setOnline(false);
-            shift.setUpdatedBy("PARTNER:" + partnerId);
-            partnerShiftRepository.save(shift);
-            geoEventPublisher.publish(GeoEventType.PARTNER_OFFLINE, partnerId, Map.of("online", false, "reason", "GPS_DISABLED"));
-            return ApiResponse.success("Partner marked offline because GPS is disabled", Map.of(
-                    "partnerId", partnerId,
-                    "online", false,
-                    "reason", "GPS_DISABLED"
-            ));
+            return disableGps(partnerId, shift);
         }
 
         CurrentPartnerLocationEntity location = currentPartnerLocationRepository.findAnyByPartnerId(partnerId)
                 .orElseGet(CurrentPartnerLocationEntity::new);
-
-        TrackingLifecycleState requestedState = TrackingLifecycleState.from(
-                request.trackingState,
-                resolveTrackingState(shift, location, request.latitude, request.longitude)
-        );
-        if (request.bookingId != null) {
-            Order order = orderRepository.findById(request.bookingId).orElse(null);
-            if (order != null) {
-                requestedState = trackingLifecycleService.deriveFromOrder(order.getBookingType(), order.getStatus(), requestedState);
-            }
-        }
+        TrackingLifecycleState requestedState = requestedTrackingState(shift, location, request);
         TrackingLifecycleState trackingState = trackingLifecycleService.resolveState(
                 requestedState,
                 request.latitude,
@@ -306,34 +303,13 @@ public class PartnerDispatchController {
                 request.customerLongitude
         );
         long minIngestMs = trackingLifecycleService.ingestMinIntervalMs(trackingState);
-        if (location.getUpdatedAt() != null) {
-            long elapsedMs = Duration.between(location.getUpdatedAt(), LocalDateTime.now()).toMillis();
-            if (elapsedMs < minIngestMs) {
-                location.setLastHeartbeatAt(LocalDateTime.now());
-                if (location.getId() != null) {
-                    currentPartnerLocationRepository.save(location);
-                }
-                return ApiResponse.success("Partner location throttled", Map.of(
-                        "partnerId", partnerId,
-                        "trackingState", trackingState.name(),
-                        "accepted", false,
-                        "nextUpdateAfterMs", minIngestMs - Math.max(0L, elapsedMs)
-                ));
-            }
+        ApiResponse<Map<String, Object>> throttled = throttleIfNeeded(partnerId, location, trackingState, minIngestMs);
+        if (throttled != null) {
+            return throttled;
         }
 
         if (trackingLifecycleService.isTerminal(trackingState)) {
-            trackingLifecycleService.persistState(partnerId, trackingState, request.bookingId);
-            partnerGeoIndexService.removePartner(partnerId);
-            shift.setOnline(false);
-            shift.setUpdatedBy("PARTNER:" + partnerId);
-            partnerShiftRepository.save(shift);
-            return ApiResponse.success("Tracking stopped for terminal state", Map.of(
-                    "partnerId", partnerId,
-                    "trackingState", trackingState.name(),
-                    "accepted", false,
-                    "shutdown", true
-            ));
+            return stopTerminalTracking(partnerId, request, shift, trackingState);
         }
 
         PartnerLocationOptimizationService.Decision decision =
@@ -342,6 +318,114 @@ public class PartnerDispatchController {
             geoFilteredCounter.increment();
         }
 
+        updateLocationEntity(partnerId, request, location, decision);
+        double fraudScore = partnerLocationOptimizationService.computeFraudScore(
+                location.getId() == null ? null : location,
+                request,
+                decision.suspicious()
+        );
+        location.setFraudScore(BigDecimal.valueOf(fraudScore));
+        location.setDeleted(false);
+        if (location.getId() == null) {
+            location.setCreatedBy(PARTNER_CACHE_PREFIX + partnerId);
+        }
+        location.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
+        boolean heartbeatMode = trackingState == TrackingLifecycleState.JOB_IN_PROGRESS || trackingState == TrackingLifecycleState.JOB_STARTED;
+        boolean heartbeatOnly = heartbeatMode || !decision.significantMovement();
+        currentPartnerLocationRepository.save(location);
+        refreshPartnerGeoIndex(partnerId, request, heartbeatOnly);
+        trackingLifecycleService.persistState(partnerId, trackingState, request.bookingId);
+        publishMovementEvents(partnerId, request, location, trackingState, heartbeatOnly);
+        publishFraudEvent(partnerId, decision, fraudScore);
+        updateShiftPincode(partnerId, shift, location.getPincode());
+        return ApiResponse.success("Partner location updated", Map.of(
+                PARTNER_ID_KEY, partnerId,
+                "pincode", location.getPincode(),
+                "source", location.getSource(),
+                TRACKING_STATE_KEY, trackingState.name(),
+                ACCEPTED_KEY, decision.acceptUpdate(),
+                "movementAccepted", decision.significantMovement(),
+                "locationSeq", location.getLocationSeq(),
+                "recommendedIngestMs", minIngestMs,
+                "recommendedSseMs", trackingLifecycleService.sseIntervalMs(trackingState)
+        ));
+    }
+
+    private ApiResponse<Map<String, Object>> disableGps(Long partnerId, PartnerShiftEntity shift) {
+        partnerGeoIndexService.removePartner(partnerId);
+        shift.setOnline(false);
+        shift.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
+        partnerShiftRepository.save(shift);
+        geoEventPublisher.publish(GeoEventType.PARTNER_OFFLINE, partnerId,
+                Map.of(ONLINE_KEY, false, REASON_KEY, "GPS_DISABLED"));
+        log.info("OFFLINE partnerId={} reason=GPS_DISABLED newDispatch=false activeBookingCancellation=false", partnerId);
+        return ApiResponse.success("Partner marked offline because GPS is disabled", Map.of(
+                PARTNER_ID_KEY, partnerId,
+                ONLINE_KEY, false,
+                REASON_KEY, "GPS_DISABLED"
+        ));
+    }
+
+    private TrackingLifecycleState requestedTrackingState(PartnerShiftEntity shift,
+                                                          CurrentPartnerLocationEntity location,
+                                                          PartnerLocationUpdateRequest request) {
+        TrackingLifecycleState requestedState = TrackingLifecycleState.from(
+                request.trackingState,
+                resolveTrackingState(shift, location, request.latitude, request.longitude)
+        );
+        if (request.bookingId == null) {
+            return requestedState;
+        }
+        Order order = orderRepository.findById(request.bookingId).orElse(null);
+        return order == null
+                ? requestedState
+                : trackingLifecycleService.deriveFromOrder(order.getBookingType(), order.getStatus(), requestedState);
+    }
+
+    private ApiResponse<Map<String, Object>> throttleIfNeeded(Long partnerId,
+                                                              CurrentPartnerLocationEntity location,
+                                                              TrackingLifecycleState trackingState,
+                                                              long minIngestMs) {
+        if (location.getUpdatedAt() == null) {
+            return null;
+        }
+        long elapsedMs = Duration.between(location.getUpdatedAt(), LocalDateTime.now()).toMillis();
+        if (elapsedMs >= minIngestMs) {
+            return null;
+        }
+        location.setLastHeartbeatAt(LocalDateTime.now());
+        if (location.getId() != null) {
+            currentPartnerLocationRepository.save(location);
+        }
+        return ApiResponse.success("Partner location throttled", Map.of(
+                PARTNER_ID_KEY, partnerId,
+                TRACKING_STATE_KEY, trackingState.name(),
+                ACCEPTED_KEY, false,
+                "nextUpdateAfterMs", minIngestMs - Math.max(0L, elapsedMs)
+        ));
+    }
+
+    private ApiResponse<Map<String, Object>> stopTerminalTracking(Long partnerId,
+                                                                  PartnerLocationUpdateRequest request,
+                                                                  PartnerShiftEntity shift,
+                                                                  TrackingLifecycleState trackingState) {
+        trackingLifecycleService.persistState(partnerId, trackingState, request.bookingId);
+        partnerGeoIndexService.removePartner(partnerId);
+        shift.setOnline(false);
+        shift.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
+        partnerShiftRepository.save(shift);
+        return ApiResponse.success("Tracking stopped for terminal state", Map.of(
+                PARTNER_ID_KEY, partnerId,
+                TRACKING_STATE_KEY, trackingState.name(),
+                ACCEPTED_KEY, false,
+                "shutdown", true
+        ));
+    }
+
+    private void updateLocationEntity(Long partnerId,
+                                      PartnerLocationUpdateRequest request,
+                                      CurrentPartnerLocationEntity location,
+                                      PartnerLocationOptimizationService.Decision decision) {
         location.setPartnerId(partnerId);
         location.setLatitude(BigDecimal.valueOf(request.latitude));
         location.setLongitude(BigDecimal.valueOf(request.longitude));
@@ -359,75 +443,59 @@ public class PartnerDispatchController {
             location.setFraudReason(decision.reason());
             location.setLastSuspiciousAt(LocalDateTime.now());
         }
-        double fraudScore = partnerLocationOptimizationService.computeFraudScore(
-                location.getId() == null ? null : location,
-                request,
-                decision.suspicious()
-        );
-        location.setFraudScore(BigDecimal.valueOf(fraudScore));
-        location.setDeleted(false);
-        if (location.getId() == null) {
-            location.setCreatedBy("PARTNER:" + partnerId);
-        }
-        location.setUpdatedBy("PARTNER:" + partnerId);
-        boolean heartbeatMode = trackingState == TrackingLifecycleState.JOB_IN_PROGRESS || trackingState == TrackingLifecycleState.JOB_STARTED;
-        boolean heartbeatOnly = heartbeatMode || !decision.significantMovement();
-        currentPartnerLocationRepository.save(location);
+    }
+
+    private void refreshPartnerGeoIndex(Long partnerId, PartnerLocationUpdateRequest request, boolean heartbeatOnly) {
         if (!heartbeatOnly) {
             geoBatchingService.queueGeoPointRefresh(partnerId);
-            partnerGeoIndexService.upsertPartnerLocation(partnerId, request.latitude, request.longitude, false);
-        } else {
-            partnerGeoIndexService.upsertPartnerLocation(partnerId, request.latitude, request.longitude, true);
         }
-        trackingLifecycleService.persistState(partnerId, trackingState, request.bookingId);
+        partnerGeoIndexService.upsertPartnerLocation(partnerId, request.latitude, request.longitude, heartbeatOnly);
+    }
+
+    private void publishMovementEvents(Long partnerId,
+                                       PartnerLocationUpdateRequest request,
+                                       CurrentPartnerLocationEntity location,
+                                       TrackingLifecycleState trackingState,
+                                       boolean heartbeatOnly) {
+        if (heartbeatOnly) {
+            return;
+        }
         Map<String, Object> movedPayload = new HashMap<>();
         movedPayload.put("lat", request.latitude);
         movedPayload.put("lng", request.longitude);
         movedPayload.put("pincode", location.getPincode());
-        movedPayload.put("trackingState", trackingState.name());
+        movedPayload.put(TRACKING_STATE_KEY, trackingState.name());
         movedPayload.put("seq", location.getLocationSeq());
-        boolean immediateLifecycle = trackingState == TrackingLifecycleState.ARRIVED
+        if (isImmediateLifecycle(trackingState)) {
+            geoBatchingService.publishImmediate(GeoEventType.PARTNER_MOVED, partnerId, movedPayload);
+        } else {
+            geoBatchingService.queuePartnerMoved(partnerId, movedPayload);
+        }
+    }
+
+    private boolean isImmediateLifecycle(TrackingLifecycleState trackingState) {
+        return trackingState == TrackingLifecycleState.ARRIVED
                 || trackingState == TrackingLifecycleState.JOB_STARTED
                 || trackingState == TrackingLifecycleState.JOB_COMPLETED
                 || trackingState == TrackingLifecycleState.CANCELLED;
-        if (!heartbeatOnly) {
-            if (immediateLifecycle) {
-                geoBatchingService.publishImmediate(GeoEventType.PARTNER_MOVED, partnerId, movedPayload);
-            } else {
-                geoBatchingService.queuePartnerMoved(partnerId, movedPayload);
-            }
+    }
+
+    private void publishFraudEvent(Long partnerId,
+                                   PartnerLocationOptimizationService.Decision decision,
+                                   double fraudScore) {
+        if (!decision.suspicious()) {
+            return;
         }
-        if (decision.suspicious()) {
-            geoEventPublisher.publish(GeoEventType.SPOOF_DETECTED, partnerId, Map.of(
-                    "reason", decision.reason(),
-                    "score", fraudScore
-            ));
-        }
-        shift.setCurrentPincode(location.getPincode());
-        shift.setUpdatedBy("PARTNER:" + partnerId);
-        partnerShiftRepository.save(shift);
-        return ApiResponse.success("Partner location updated", Map.of(
-                "partnerId", partnerId,
-                "pincode", location.getPincode(),
-                "source", location.getSource(),
-                "trackingState", trackingState.name(),
-                "accepted", decision.acceptUpdate(),
-                "movementAccepted", decision.significantMovement(),
-                "locationSeq", location.getLocationSeq(),
-                "recommendedIngestMs", minIngestMs,
-                "recommendedSseMs", trackingLifecycleService.sseIntervalMs(trackingState)
+        geoEventPublisher.publish(GeoEventType.SPOOF_DETECTED, partnerId, Map.of(
+                REASON_KEY, decision.reason(),
+                "score", fraudScore
         ));
     }
 
-    private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
-        double earthRadiusKm = 6371.0;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadiusKm * c;
+    private void updateShiftPincode(Long partnerId, PartnerShiftEntity shift, String pincode) {
+        shift.setCurrentPincode(pincode);
+        shift.setUpdatedBy(PARTNER_CACHE_PREFIX + partnerId);
+        partnerShiftRepository.save(shift);
     }
 
     private TrackingLifecycleState resolveTrackingState(PartnerShiftEntity shift, CurrentPartnerLocationEntity existing, double newLat, double newLng) {
@@ -437,12 +505,12 @@ public class PartnerDispatchController {
         if (existing.getLatitude() == null || existing.getLongitude() == null) {
             return TrackingLifecycleState.ASSIGNED;
         }
-        double movedMeters = haversineKm(
+        double movedMeters = GeoDistanceCalculator.haversineMeters(
                 existing.getLatitude().doubleValue(),
                 existing.getLongitude().doubleValue(),
                 newLat,
                 newLng
-        ) * 1000.0d;
+        );
         return movedMeters >= movingThresholdMeters ? TrackingLifecycleState.EN_ROUTE : TrackingLifecycleState.ASSIGNED;
     }
 
@@ -454,13 +522,13 @@ public class PartnerDispatchController {
     }
 
     @PutMapping("/skills")
-    public ApiResponse<Map<String, Object>> upsertSkills(@RequestAttribute("userId") Long partnerId,
+    public ApiResponse<Map<String, Object>> upsertSkills(@RequestAttribute(USER_ID_KEY) Long partnerId,
                                                           @Valid @RequestBody PartnerSkillsUpdateRequest request) {
         return ApiResponse.success("Partner skills updated", partnerSkillService.upsertSkills(partnerId, request));
     }
 
     @GetMapping("/skills")
-    public ApiResponse<Map<String, Object>> getSkills(@RequestAttribute("userId") Long partnerId) {
+    public ApiResponse<Map<String, Object>> getSkills(@RequestAttribute(USER_ID_KEY) Long partnerId) {
         return ApiResponse.success("Partner skills fetched", partnerSkillService.getSkills(partnerId));
     }
 

@@ -2,6 +2,7 @@ package com.lexho.user_service.dispatch.service;
 
 import com.lexho.user_service.dispatch.dto.PartnerLocationUpdateRequest;
 import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
+import com.lexho.user_service.util.GeoDistanceCalculator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -39,7 +40,7 @@ public class PartnerLocationOptimizationService {
             return new Decision(true, true, false, null);
         }
 
-        double movedMeters = haversineMeters(
+        double movedMeters = GeoDistanceCalculator.haversineMeters(
                 previous.getLatitude().doubleValue(),
                 previous.getLongitude().doubleValue(),
                 request.latitude,
@@ -94,17 +95,6 @@ public class PartnerLocationOptimizationService {
         long dtMs = Math.max(1L, Duration.between(previous.getUpdatedAt(), LocalDateTime.now()).toMillis());
         double speedKmh = (movedMeters / dtMs) * 3_600.0d;
         return speedKmh > impossibleSpeedKmh;
-    }
-
-    private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
-        double earthRadius = 6371000.0d;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadius * c;
     }
 
     public record Decision(boolean significantMovement, boolean acceptUpdate, boolean suspicious, String reason) {

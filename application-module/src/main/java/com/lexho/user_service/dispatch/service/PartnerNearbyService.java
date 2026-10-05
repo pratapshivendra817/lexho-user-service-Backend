@@ -6,8 +6,9 @@ import com.lexho.user_service.dispatch.entity.CurrentPartnerLocationEntity;
 import com.lexho.user_service.dispatch.entity.PartnerShiftEntity;
 import com.lexho.user_service.dispatch.repository.CurrentPartnerLocationRepository;
 import com.lexho.user_service.dispatch.repository.PartnerShiftRepository;
-import com.lexho.user_service.lexhopartner.entity.PartnerProfile;
-import com.lexho.user_service.lexhopartner.repository.PartnerProfileRepository;
+import com.lexho.user_service.lexhopartner.entity.PartnerOperationalProfile;
+import com.lexho.user_service.lexhopartner.repository.PartnerOperationalProfileRepository;
+import com.lexho.user_service.util.GeoDistanceCalculator;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -30,7 +31,7 @@ import java.util.Set;
 public class PartnerNearbyService {
     private final PartnerGeoIndexService partnerGeoIndexService;
     private final PartnerShiftRepository partnerShiftRepository;
-    private final PartnerProfileRepository partnerProfileRepository;
+    private final PartnerOperationalProfileRepository partnerProfileRepository;
     private final CurrentPartnerLocationRepository currentPartnerLocationRepository;
     private final long staleLocationMinutes;
     private final Timer nearbyLatencyTimer;
@@ -39,7 +40,7 @@ public class PartnerNearbyService {
 
     public PartnerNearbyService(PartnerGeoIndexService partnerGeoIndexService,
                                 PartnerShiftRepository partnerShiftRepository,
-                                PartnerProfileRepository partnerProfileRepository,
+                                PartnerOperationalProfileRepository partnerProfileRepository,
                                 CurrentPartnerLocationRepository currentPartnerLocationRepository,
                                 MeterRegistry meterRegistry,
                                 @Value("${app.dispatch.partner-location-stale-minutes:10}") long staleLocationMinutes) {
@@ -59,28 +60,41 @@ public class PartnerNearbyService {
 
     private PartnerNearbyResponse findNearbyInternal(PartnerNearbyRequest request) {
         Map<Long, Double> distanceByPartner = new HashMap<>();
-        List<GeoResult<RedisGeoCommands.GeoLocation<String>>> geoMatches = partnerGeoIndexService.findNearby(
-            request.lat,
-            request.lng,
-            request.radiusKm,
-            300
-        );
-        if (geoMatches.isEmpty()) {
-            List<Long> dbCandidates = currentPartnerLocationRepository.findNearbyPartnerIds(
-                    request.lat,
-                    request.lng,
-                    request.radiusKm,
-                    300
-            );
-            for (Long id : dbCandidates) {
-                candidateIdsFromDbFallback(id, distanceByPartner, request.lat, request.lng);
-            }
-        }
-        if (geoMatches.isEmpty() && distanceByPartner.isEmpty()) {
+        Set<Long> candidateIds = candidateIds(request, distanceByPartner);
+        if (candidateIds.isEmpty()) {
             nearbyEmptyCounter.increment();
             return empty();
         }
 
+        Map<Long, PartnerShiftEntity> shifts = shiftsByPartner(candidateIds);
+        Map<Long, PartnerOperationalProfile> profiles = profilesByPartner(candidateIds);
+        Map<Long, CurrentPartnerLocationEntity> locations = locationsByPartner(candidateIds);
+        LocalDateTime staleCutoff = LocalDateTime.now().minusMinutes(staleLocationMinutes);
+        String requestedService = normalizeServiceType(request.serviceType);
+        List<PartnerNearbyResponse.PartnerSummary> partners = eligiblePartners(
+                candidateIds, shifts, profiles, locations, staleCutoff, requestedService, distanceByPartner);
+
+        partners.sort(Comparator
+                .comparing((PartnerNearbyResponse.PartnerSummary p) -> p.distanceKm)
+                .thenComparing((PartnerNearbyResponse.PartnerSummary p) -> p.rating, Comparator.reverseOrder())
+                .thenComparing(p -> p.activeJobs));
+
+        PartnerNearbyResponse response = new PartnerNearbyResponse();
+        response.partners = partners.size() > 50 ? partners.subList(0, 50) : partners;
+        recordNearbyResult(response);
+        return response;
+    }
+
+    private Set<Long> candidateIds(PartnerNearbyRequest request, Map<Long, Double> distanceByPartner) {
+        List<GeoResult<RedisGeoCommands.GeoLocation<String>>> geoMatches = partnerGeoIndexService.findNearby(
+                request.lat,
+                request.lng,
+                request.radiusKm,
+                300
+        );
+        if (geoMatches.isEmpty()) {
+            addDbFallbackCandidates(request, distanceByPartner);
+        }
         Set<Long> candidateIds = new HashSet<>();
         for (GeoResult<RedisGeoCommands.GeoLocation<String>> result : geoMatches) {
             Long partnerId = parsePartnerId(result.getContent().getName());
@@ -95,82 +109,118 @@ public class PartnerNearbyService {
         if (candidateIds.isEmpty()) {
             candidateIds.addAll(distanceByPartner.keySet());
         }
-        if (candidateIds.isEmpty()) {
-            nearbyEmptyCounter.increment();
-            return empty();
-        }
+        return candidateIds;
+    }
 
+    private void addDbFallbackCandidates(PartnerNearbyRequest request, Map<Long, Double> distanceByPartner) {
+        List<Long> dbCandidates = currentPartnerLocationRepository.findNearbyPartnerIds(
+                request.lat,
+                request.lng,
+                request.radiusKm,
+                300
+        );
+        for (Long id : dbCandidates) {
+            candidateIdsFromDbFallback(id, distanceByPartner, request.lat, request.lng);
+        }
+    }
+
+    private Map<Long, PartnerShiftEntity> shiftsByPartner(Set<Long> candidateIds) {
         Map<Long, PartnerShiftEntity> shifts = new HashMap<>();
         for (PartnerShiftEntity shift : partnerShiftRepository.findByPartnerIdInAndDeletedFalse(candidateIds)) {
             shifts.put(shift.getPartnerId(), shift);
         }
+        return shifts;
+    }
 
-        Map<Long, PartnerProfile> profiles = new HashMap<>();
-        for (PartnerProfile profile : partnerProfileRepository.findAllById(candidateIds)) {
+    private Map<Long, PartnerOperationalProfile> profilesByPartner(Set<Long> candidateIds) {
+        Map<Long, PartnerOperationalProfile> profiles = new HashMap<>();
+        for (PartnerOperationalProfile profile : partnerProfileRepository.findAllById(candidateIds)) {
             profiles.put(profile.getId(), profile);
         }
+        return profiles;
+    }
 
+    private Map<Long, CurrentPartnerLocationEntity> locationsByPartner(Set<Long> candidateIds) {
         Map<Long, CurrentPartnerLocationEntity> locations = new HashMap<>();
         for (CurrentPartnerLocationEntity location : currentPartnerLocationRepository.findByPartnerIdInAndDeletedFalse(candidateIds)) {
             locations.put(location.getPartnerId(), location);
         }
+        return locations;
+    }
 
-        LocalDateTime staleCutoff = LocalDateTime.now().minusMinutes(staleLocationMinutes);
-        String requestedService = normalizeServiceType(request.serviceType);
+    private List<PartnerNearbyResponse.PartnerSummary> eligiblePartners(
+            Set<Long> candidateIds,
+            Map<Long, PartnerShiftEntity> shifts,
+            Map<Long, PartnerOperationalProfile> profiles,
+            Map<Long, CurrentPartnerLocationEntity> locations,
+            LocalDateTime staleCutoff,
+            String requestedService,
+            Map<Long, Double> distanceByPartner) {
         List<PartnerNearbyResponse.PartnerSummary> partners = new ArrayList<>();
 
         for (Long partnerId : candidateIds) {
             PartnerShiftEntity shift = shifts.get(partnerId);
-            PartnerProfile profile = profiles.get(partnerId);
+            PartnerOperationalProfile profile = profiles.get(partnerId);
             CurrentPartnerLocationEntity location = locations.get(partnerId);
-            if (shift == null || profile == null || location == null) {
+            if (!isEligible(partnerId, shift, profile, location, staleCutoff, requestedService)) {
                 continue;
             }
-            if (!shift.isOnline() || !profile.isOnline() || profile.isDeleted()) {
-                continue;
-            }
-            if (shift.getActiveJobsCount() >= shift.getMaxActiveJobs()) {
-                continue;
-            }
-            if (location.getUpdatedAt() == null || location.getUpdatedAt().isBefore(staleCutoff)) {
-                partnerGeoIndexService.removePartner(partnerId);
-                continue;
-            }
-            if (!requestedService.isEmpty() && !matchesService(profile, requestedService)) {
-                continue;
-            }
-
-            PartnerNearbyResponse.PartnerSummary summary = new PartnerNearbyResponse.PartnerSummary();
-            summary.partnerId = partnerId;
-            summary.distanceKm = round3(distanceByPartner.getOrDefault(partnerId, 9999.0d));
-            summary.rating = profile.getRating() == null ? 0.0d : profile.getRating();
-            summary.activeJobs = shift.getActiveJobsCount();
-            summary.maxActiveJobs = shift.getMaxActiveJobs();
-            summary.online = true;
-            summary.serviceCategory = profile.getServiceCategory();
-            summary.lat = location.getLatitude() == null ? null : location.getLatitude().doubleValue();
-            summary.lng = location.getLongitude() == null ? null : location.getLongitude().doubleValue();
-            summary.geohash = (summary.lat == null || summary.lng == null) ? null : GeoHashUtil.encode(summary.lat, summary.lng, 7);
-            summary.lastSeenAt = location.getUpdatedAt().atOffset(ZoneOffset.UTC).toString();
-            partners.add(summary);
+            partners.add(partnerSummary(partnerId, shift, profile, location, distanceByPartner));
         }
+        return partners;
+    }
 
-        partners.sort(Comparator
-                .comparing((PartnerNearbyResponse.PartnerSummary p) -> p.distanceKm)
-                .thenComparing((PartnerNearbyResponse.PartnerSummary p) -> p.rating, Comparator.reverseOrder())
-                .thenComparing(p -> p.activeJobs));
+    private boolean isEligible(Long partnerId,
+                               PartnerShiftEntity shift,
+                               PartnerOperationalProfile profile,
+                               CurrentPartnerLocationEntity location,
+                               LocalDateTime staleCutoff,
+                               String requestedService) {
+        if (shift == null || profile == null || location == null) {
+            return false;
+        }
+        if (!shift.isOnline() || !profile.isOnline() || profile.isDeleted()) {
+            return false;
+        }
+        if (shift.getActiveJobsCount() >= shift.getMaxActiveJobs()) {
+            return false;
+        }
+        if (location.getUpdatedAt() == null || location.getUpdatedAt().isBefore(staleCutoff)) {
+            partnerGeoIndexService.removePartner(partnerId);
+            return false;
+        }
+        return requestedService.isEmpty() || matchesService(profile, requestedService);
+    }
 
-        PartnerNearbyResponse response = new PartnerNearbyResponse();
-        response.partners = partners.size() > 50 ? partners.subList(0, 50) : partners;
+    private PartnerNearbyResponse.PartnerSummary partnerSummary(Long partnerId,
+                                                                PartnerShiftEntity shift,
+                                                                PartnerOperationalProfile profile,
+                                                                CurrentPartnerLocationEntity location,
+                                                                Map<Long, Double> distanceByPartner) {
+        PartnerNearbyResponse.PartnerSummary summary = new PartnerNearbyResponse.PartnerSummary();
+        summary.partnerId = partnerId;
+        summary.distanceKm = round3(distanceByPartner.getOrDefault(partnerId, 9999.0d));
+        summary.rating = profile.getRating() == null ? 0.0d : profile.getRating();
+        summary.activeJobs = shift.getActiveJobsCount();
+        summary.maxActiveJobs = shift.getMaxActiveJobs();
+        summary.online = true;
+        summary.serviceCategory = profile.getServiceCategory();
+        summary.lat = location.getLatitude() == null ? null : location.getLatitude().doubleValue();
+        summary.lng = location.getLongitude() == null ? null : location.getLongitude().doubleValue();
+        summary.geohash = (summary.lat == null || summary.lng == null) ? null : GeoHashUtil.encode(summary.lat, summary.lng, 7);
+        summary.lastSeenAt = location.getUpdatedAt().atOffset(ZoneOffset.UTC).toString();
+        return summary;
+    }
+
+    private void recordNearbyResult(PartnerNearbyResponse response) {
         if (response.partners.isEmpty()) {
             nearbyEmptyCounter.increment();
         } else {
             nearbyMatchCounter.increment(response.partners.size());
         }
-        return response;
     }
 
-    private boolean matchesService(PartnerProfile profile, String requestedService) {
+    private boolean matchesService(PartnerOperationalProfile profile, String requestedService) {
         String partnerService = normalizeServiceType(profile.getServiceCategory());
         return partnerService.contains(requestedService) || requestedService.contains(partnerService);
     }
@@ -212,7 +262,7 @@ public class PartnerNearbyService {
         }
         currentPartnerLocationRepository.findByPartnerIdAndDeletedFalse(partnerId).ifPresent(location -> {
             if (location.getLatitude() != null && location.getLongitude() != null) {
-                distanceByPartner.put(partnerId, haversineKm(
+                distanceByPartner.put(partnerId, GeoDistanceCalculator.haversineKm(
                         lat,
                         lng,
                         location.getLatitude().doubleValue(),
@@ -222,14 +272,4 @@ public class PartnerNearbyService {
         });
     }
 
-    private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
-        double earthRadiusKm = 6371.0;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadiusKm * c;
-    }
 }

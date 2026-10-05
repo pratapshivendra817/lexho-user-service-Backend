@@ -37,6 +37,8 @@ import java.util.Locale;
 public class BookingManagementService {
 
     private static final Logger LOG = LoggerFactory.getLogger(BookingManagementService.class);
+    private static final String CREATED_AT_KEY = "createdAt";
+    private static final String UPDATED_AT_KEY = "updatedAt";
 
     private final BookingRepository bookingRepository;
     private final UserRepository userRepository;
@@ -214,11 +216,11 @@ public class BookingManagementService {
     private String normalizeSortBy(String sortBy) {
         String normalized = normalize(sortBy);
         if (normalized == null) {
-            return "createdAt";
+            return CREATED_AT_KEY;
         }
         return switch (normalized) {
-            case "bookingDate", "amount", "createdAt", "updatedAt", "bookingStatus" -> normalized;
-            default -> "createdAt";
+            case "bookingDate", "amount", CREATED_AT_KEY, UPDATED_AT_KEY, "bookingStatus" -> normalized;
+            default -> CREATED_AT_KEY;
         };
     }
 }

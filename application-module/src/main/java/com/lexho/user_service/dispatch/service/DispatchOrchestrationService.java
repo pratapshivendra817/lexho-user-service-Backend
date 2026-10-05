@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lexho.booking.entity.Order;
 import com.lexho.booking.repository.OrderRepository;
 import com.lexho.common.enums.OrderStatus;
+import com.lexho.common.enums.PaymentStatus;
 import com.lexho.user_service.admin.serviceablearea.repository.ServiceableAreaRepository;
 import com.lexho.user_service.admin.entity.AdminServiceEntity;
 import com.lexho.user_service.admin.repository.AdminServiceEntityRepository;
@@ -24,9 +25,13 @@ import com.lexho.user_service.lexho.repository.LexhoAddressRepository;
 import com.lexho.user_service.partnerrequest.entity.PartnerServiceRequestEntity;
 import com.lexho.user_service.partnerrequest.model.PartnerServiceRequestStatus;
 import com.lexho.user_service.partnerrequest.repository.PartnerServiceRequestRepository;
+import com.lexho.user_service.partnerrequest.service.PartnerDispatchRealtimeService;
 import com.lexho.provider.entity.Partner;
-import com.lexho.provider.repository.PartnerRepository;
+import com.lexho.user_service.lexhopartner.service.PartnerMarketplaceService;
 import com.lexho.user_service.booking.model.BookingType;
+import com.lexho.user_service.booking.service.BookingLifecycleEventService;
+import com.lexho.user_service.util.GeoDistanceCalculator;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,8 +47,17 @@ import java.util.stream.Collectors;
 public class DispatchOrchestrationService {
     public static final int INSTANT_SLA_MINUTES = 30;
     public static final int PARTNER_RESPONSE_WINDOW_MINUTES = 2;
+    public static final int MAX_SCHEDULED_DISPATCH_ATTEMPTS = 5;
     private static final double ETA_SPEED_KMPH = 25.0;
     private static final ZoneId APPLICATION_ZONE = ZoneId.systemDefault();
+    private static final String EVENT_PARTNER_SEARCH_FAILED = "PARTNER_SEARCH_FAILED";
+    private static final String EVENT_DISPATCH_REJECTED = "DISPATCH_REJECTED";
+    private static final String REASON_KEY = "reason";
+    private static final String PARTNER_ID_KEY = "partnerId";
+    private static final String PINCODE_KEY = "pincode";
+    private static final String NO_ELIGIBLE_PARTNER_REASON = "NO_ELIGIBLE_PARTNER";
+    private static final String ORDER_NOT_FOUND_MESSAGE = "Order not found";
+    private static final String SCHEDULED_DISPATCH_ATTEMPT_EVENT = "SCHEDULED_DISPATCH_ATTEMPT";
 
     private final OrderRepository orderRepository;
     private final LexhoAddressRepository lexhoAddressRepository;
@@ -51,7 +65,7 @@ public class DispatchOrchestrationService {
     private final PartnerShiftRepository partnerShiftRepository;
     private final CurrentPartnerLocationRepository currentPartnerLocationRepository;
     private final PincodeAdjacencyRepository pincodeAdjacencyRepository;
-    private final PartnerRepository partnerRepository;
+    private final PartnerMarketplaceService partnerMarketplaceService;
     private final PartnerServiceRequestRepository partnerServiceRequestRepository;
     private final PartnerServiceSkillRepository partnerServiceSkillRepository;
     private final AdminServiceEntityRepository adminServiceEntityRepository;
@@ -60,14 +74,18 @@ public class DispatchOrchestrationService {
     private final ObjectMapper objectMapper;
     private final DispatchProperties dispatchProperties;
     private final TrackingLifecycleService trackingLifecycleService;
+    private final PartnerDispatchEligibilityService partnerDispatchEligibilityService;
+    private final BookingLifecycleEventService bookingLifecycleEventService;
+    private final PartnerDispatchRealtimeService partnerDispatchRealtimeService;
 
+    @Autowired
     public DispatchOrchestrationService(OrderRepository orderRepository,
                                         LexhoAddressRepository lexhoAddressRepository,
                                         ServiceableAreaRepository serviceableAreaRepository,
                                         PartnerShiftRepository partnerShiftRepository,
                                         CurrentPartnerLocationRepository currentPartnerLocationRepository,
                                         PincodeAdjacencyRepository pincodeAdjacencyRepository,
-                                        PartnerRepository partnerRepository,
+                                        com.lexho.provider.repository.PartnerRepository partnerRepository,
                                         PartnerServiceRequestRepository partnerServiceRequestRepository,
                                         PartnerServiceSkillRepository partnerServiceSkillRepository,
                                         AdminServiceEntityRepository adminServiceEntityRepository,
@@ -75,14 +93,17 @@ public class DispatchOrchestrationService {
                                         DispatchScoringPolicy dispatchScoringPolicy,
                                         ObjectMapper objectMapper,
                                         TrackingLifecycleService trackingLifecycleService,
-                                        DispatchProperties dispatchProperties) {
+                                        DispatchProperties dispatchProperties,
+                                        PartnerDispatchEligibilityService partnerDispatchEligibilityService,
+                                        BookingLifecycleEventService bookingLifecycleEventService,
+                                        PartnerDispatchRealtimeService partnerDispatchRealtimeService) {
         this.orderRepository = orderRepository;
         this.lexhoAddressRepository = lexhoAddressRepository;
         this.serviceableAreaRepository = serviceableAreaRepository;
         this.partnerShiftRepository = partnerShiftRepository;
         this.currentPartnerLocationRepository = currentPartnerLocationRepository;
         this.pincodeAdjacencyRepository = pincodeAdjacencyRepository;
-        this.partnerRepository = partnerRepository;
+        this.partnerMarketplaceService = new PartnerMarketplaceService(partnerRepository);
         this.partnerServiceRequestRepository = partnerServiceRequestRepository;
         this.partnerServiceSkillRepository = partnerServiceSkillRepository;
         this.adminServiceEntityRepository = adminServiceEntityRepository;
@@ -91,6 +112,32 @@ public class DispatchOrchestrationService {
         this.objectMapper = objectMapper;
         this.trackingLifecycleService = trackingLifecycleService;
         this.dispatchProperties = dispatchProperties;
+        this.partnerDispatchEligibilityService = partnerDispatchEligibilityService;
+        this.bookingLifecycleEventService = bookingLifecycleEventService;
+        this.partnerDispatchRealtimeService = partnerDispatchRealtimeService;
+    }
+
+    DispatchOrchestrationService(OrderRepository orderRepository,
+                                 LexhoAddressRepository lexhoAddressRepository,
+                                 ServiceableAreaRepository serviceableAreaRepository,
+                                 PartnerShiftRepository partnerShiftRepository,
+                                 CurrentPartnerLocationRepository currentPartnerLocationRepository,
+                                 PincodeAdjacencyRepository pincodeAdjacencyRepository,
+                                 com.lexho.provider.repository.PartnerRepository partnerRepository,
+                                 PartnerServiceRequestRepository partnerServiceRequestRepository,
+                                 PartnerServiceSkillRepository partnerServiceSkillRepository,
+                                 AdminServiceEntityRepository adminServiceEntityRepository,
+                                 BookingEventRepository bookingEventRepository,
+                                 DispatchScoringPolicy dispatchScoringPolicy,
+                                 ObjectMapper objectMapper,
+                                 TrackingLifecycleService trackingLifecycleService,
+                                 DispatchProperties dispatchProperties,
+                                 PartnerDispatchEligibilityService partnerDispatchEligibilityService) {
+        this(orderRepository, lexhoAddressRepository, serviceableAreaRepository, partnerShiftRepository,
+                currentPartnerLocationRepository, pincodeAdjacencyRepository, partnerRepository,
+                partnerServiceRequestRepository, partnerServiceSkillRepository, adminServiceEntityRepository,
+                bookingEventRepository, dispatchScoringPolicy, objectMapper, trackingLifecycleService,
+                dispatchProperties, partnerDispatchEligibilityService, null, null);
     }
 
     @Async
@@ -108,7 +155,13 @@ public class DispatchOrchestrationService {
                                       Integer quantity, LocalDateTime scheduledAt) {
         DispatchContext context = buildDispatchContext(orderId, customerId, addressId, serviceId, quantity, scheduledAt);
         ensureServiceable(context);
-        saveEvent(orderId, "BOOKING_CREATED", Map.of("orderId", orderId, "customerId", customerId));
+        saveBookingEvent(orderId, "BOOKING_CREATED", Map.of("orderId", orderId, "customerId", customerId));
+
+        if (shouldWaitForPayment(context)) {
+            saveBookingEvent(orderId, "DISPATCH_PAYMENT_PENDING", Map.of(REASON_KEY, "PAYMENT_PENDING"));
+            publishLifecycle(context.order(), "PAYMENT_PENDING", Map.of(REASON_KEY, "PAYMENT_PENDING"));
+            return 0;
+        }
 
         if (shouldDeferDispatch(context)) {
             return 0;
@@ -122,8 +175,8 @@ public class DispatchOrchestrationService {
 
     private DispatchContext buildDispatchContext(Long orderId, Long customerId, Long addressId, Long serviceId,
                                                  Integer quantity, LocalDateTime scheduledAt) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_MESSAGE));
         LexhoAddress address = lexhoAddressRepository.findByIdAndUserId(addressId, customerId)
                 .orElseThrow(() -> new BadRequestException("Address not found"));
         ResolvedService resolvedService = resolveRequestedService(serviceId);
@@ -151,7 +204,7 @@ public class DispatchOrchestrationService {
     }
 
     private ResolvedService resolveLegacyPartnerService(Long serviceId) {
-        Partner partnerFromLegacyId = partnerRepository.findById(serviceId).orElse(null);
+        Partner partnerFromLegacyId = partnerMarketplaceService.find(serviceId).orElse(null);
         if (partnerFromLegacyId == null || partnerFromLegacyId.getSubCategoryId() == null) {
             throw new BadRequestException("Requested service not found");
         }
@@ -169,17 +222,22 @@ public class DispatchOrchestrationService {
         if (serviceableAreaRepository.existsByPincodeAndActiveTrueAndDeletedFalse(context.pincode())) {
             return;
         }
-        saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED",
-                Map.of("reason", "PINCODE_NOT_SERVICEABLE", "pincode", context.pincode()));
+        saveBookingEvent(context.orderId(), EVENT_PARTNER_SEARCH_FAILED,
+                Map.of(REASON_KEY, "PINCODE_NOT_SERVICEABLE", PINCODE_KEY, context.pincode()));
         throw new BadRequestException("Service is not available for this pincode");
+    }
+
+    private boolean shouldWaitForPayment(DispatchContext context) {
+        return (context.instant() || context.scheduled())
+                && context.order().getPaymentStatus() != PaymentStatus.SUCCESS;
     }
 
     private boolean shouldDeferDispatch(DispatchContext context) {
         if (!context.scheduled() || shouldActivateScheduledDispatch(context.scheduledAt())) {
             return false;
         }
-        saveEvent(context.orderId(), "DISPATCH_DEFERRED", Map.of(
-                "reason", "PRE_ARRIVAL_WINDOW_NOT_REACHED",
+        saveBookingEvent(context.orderId(), "DISPATCH_DEFERRED", Map.of(
+                REASON_KEY, "PRE_ARRIVAL_WINDOW_NOT_REACHED",
                 "scheduledAt", context.scheduledAt(),
                 "activationMinutesBefore", getScheduledPreDispatchMinutes()
         ));
@@ -187,14 +245,26 @@ public class DispatchOrchestrationService {
     }
 
     private void startPartnerSearch(DispatchContext context) {
-        saveEvent(context.orderId(), context.instant() ? "SEARCHING_PARTNER" : "PARTNER_SEARCH",
-                Map.of("pincode", context.pincode()));
+        saveBookingEvent(context.orderId(), context.instant() ? "SEARCHING_PARTNER" : "PARTNER_SEARCH",
+                Map.of(PINCODE_KEY, context.pincode()));
         OrderStatus searchStatus = context.instant() ? OrderStatus.SEARCHING_PARTNER : OrderStatus.PARTNER_SEARCH;
-        if (context.order().getStatus() == OrderStatus.BOOKING_CREATED
-                && context.order().getStatus().canTransitionTo(searchStatus)) {
-            context.order().setStatus(searchStatus);
+        if (canEnterPartnerSearch(context.order().getStatus(), searchStatus)
+                && applyStatusTransition(context.order(), searchStatus)) {
             orderRepository.save(context.order());
+            publishLifecycle(context.order(), searchStatus.name(), Map.of(PINCODE_KEY, context.pincode()));
         }
+    }
+
+    private boolean canEnterPartnerSearch(OrderStatus currentStatus, OrderStatus searchStatus) {
+        if (currentStatus == null) {
+            return true;
+        }
+        if (currentStatus == OrderStatus.BOOKING_CREATED && currentStatus.canTransitionTo(searchStatus)) {
+            return true;
+        }
+        return currentStatus == OrderStatus.CREATED
+                || currentStatus == OrderStatus.CONFIRMED
+                || currentStatus == OrderStatus.SCHEDULED;
     }
 
     private int dispatchAttemptsForOrder(DispatchContext context) {
@@ -216,17 +286,19 @@ public class DispatchOrchestrationService {
         }
 
         if (getMaxSearchRadiusKm() <= getInitialSearchRadiusKm()) {
-            saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
+            saveBookingEvent(context.orderId(), EVENT_PARTNER_SEARCH_FAILED,
+                    Map.of(REASON_KEY, NO_ELIGIBLE_PARTNER_REASON));
             return 0;
         }
 
-        saveEvent(context.orderId(), "PARTNER_SEARCH_RADIUS_EXPANDED", Map.of(
+        saveBookingEvent(context.orderId(), "PARTNER_SEARCH_RADIUS_EXPANDED", Map.of(
                 "fromRadiusKm", getInitialSearchRadiusKm(),
                 "toRadiusKm", getMaxSearchRadiusKm()
         ));
         List<Candidate> expandedEligible = findEligibleCandidates(context, getMaxSearchRadiusKm(), requestedPartnerIds);
         if (expandedEligible.isEmpty()) {
-            saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
+            saveBookingEvent(context.orderId(), EVENT_PARTNER_SEARCH_FAILED,
+                    Map.of(REASON_KEY, NO_ELIGIBLE_PARTNER_REASON));
             return 0;
         }
         expandedEligible.sort(dispatchScoringPolicy.comparator(context.pincode()));
@@ -240,17 +312,17 @@ public class DispatchOrchestrationService {
         if (nearbyPartnerIds.isEmpty()) {
             return List.of();
         }
-        List<PartnerShiftEntity> onlineShifts = partnerShiftRepository.findByPartnerIdInAndDeletedFalse(nearbyPartnerIds).stream()
-                .filter(shift -> shift.isOnline() && !shift.isDeleted())
+        List<PartnerShiftEntity> shifts = partnerShiftRepository.findByPartnerIdInAndDeletedFalse(nearbyPartnerIds).stream()
+                .filter(shift -> !shift.isDeleted())
                 .filter(shift -> !excludedPartnerIds.contains(shift.getPartnerId()))
                 .toList();
-        if (onlineShifts.isEmpty()) {
+        if (shifts.isEmpty()) {
             return List.of();
         }
 
-        Map<Long, Partner> partnersById = findPartnersById(onlineShifts);
+        Map<Long, Partner> partnersById = findPartnersById(shifts);
         List<Candidate> eligible = new ArrayList<>();
-        for (PartnerShiftEntity shift : onlineShifts) {
+        for (PartnerShiftEntity shift : shifts) {
             candidateForShift(context, partnersById, shift, radiusKm).ifPresent(eligible::add);
         }
         return eligible;
@@ -259,7 +331,7 @@ public class DispatchOrchestrationService {
     private Map<Long, Partner> findPartnersById(List<PartnerShiftEntity> onlineShifts) {
         Map<Long, Partner> partnersById = new HashMap<>();
         List<Long> partnerIds = onlineShifts.stream().map(PartnerShiftEntity::getPartnerId).toList();
-        for (Partner partner : partnerRepository.findAllById(partnerIds)) {
+        for (Partner partner : partnerMarketplaceService.findAllByIds(partnerIds)) {
             partnersById.put(partner.getId(), partner);
         }
         return partnersById;
@@ -282,20 +354,23 @@ public class DispatchOrchestrationService {
     }
 
     private boolean isEligiblePartner(DispatchContext context, Partner partner, PartnerShiftEntity shift) {
-        return partner != null
-                && Boolean.TRUE.equals(partner.getAvailable())
-                && isApprovedPartner(partner)
-                && hasRequiredSkill(partner, context.resolvedSubServiceId(), context.requestedCategoryId())
-                && shift.getActiveJobsCount() < shift.getMaxActiveJobs()
-                && isShiftActive(shift);
-    }
-
-    private boolean isShiftActive(PartnerShiftEntity shift) {
-        if (shift.getShiftStart() == null || shift.getShiftEnd() == null) {
-            return true;
+        PartnerDispatchEligibilityResult eligibility =
+                partnerDispatchEligibilityService.canReceiveNewBookings(partner, shift);
+        if (!eligibility.eligible()) {
+            saveBookingEvent(context.orderId(), EVENT_DISPATCH_REJECTED, Map.of(
+                    PARTNER_ID_KEY, shift == null ? null : shift.getPartnerId(),
+                    REASON_KEY, eligibility.reason().name()
+            ));
+            return false;
         }
-        LocalDateTime currentTime = now();
-        return !currentTime.isBefore(shift.getShiftStart()) && !currentTime.isAfter(shift.getShiftEnd());
+        boolean skilled = hasRequiredSkill(partner, context.resolvedSubServiceId(), context.requestedCategoryId());
+        if (!skilled) {
+            saveBookingEvent(context.orderId(), EVENT_DISPATCH_REJECTED, Map.of(
+                    PARTNER_ID_KEY, shift == null ? null : shift.getPartnerId(),
+                    REASON_KEY, "SKILL_MISMATCH"
+            ));
+        }
+        return skilled;
     }
 
     private boolean isDispatchable(DispatchContext context, BigDecimal distance, int etaMinutes, double radiusKm) {
@@ -310,10 +385,35 @@ public class DispatchOrchestrationService {
             if (hasPendingRequest(context.orderId(), candidate.partner().getId())) {
                 continue;
             }
-            partnerServiceRequestRepository.save(toPartnerServiceRequest(context, candidate, dispatchAttempt));
+            if (!revalidateCandidateForNewDispatch(context, candidate)) {
+                continue;
+            }
+            PartnerServiceRequestEntity saved = partnerServiceRequestRepository.save(
+                    toPartnerServiceRequest(context, candidate, dispatchAttempt));
+            publishPartnerDispatch(saved, "REQUEST_CREATED");
+            saveBookingEvent(context.orderId(), "DISPATCH_ELIGIBLE",
+                    Map.of(PARTNER_ID_KEY, candidate.partner().getId()));
+            publishLifecycle(context.order(), "PARTNER_REQUESTED",
+                    Map.of(PARTNER_ID_KEY, candidate.partner().getId()));
             created++;
         }
         return created;
+    }
+
+    private boolean revalidateCandidateForNewDispatch(DispatchContext context, Candidate candidate) {
+        PartnerShiftEntity lockedShift = partnerShiftRepository.findByPartnerIdForUpdate(candidate.partner().getId()).orElse(null);
+        Partner lockedPartner = partnerMarketplaceService.find(candidate.partner().getId()).orElse(null);
+        PartnerDispatchEligibilityResult eligibility =
+                partnerDispatchEligibilityService.canReceiveNewBookings(lockedPartner, lockedShift);
+        if (eligibility.eligible()
+                && hasRequiredSkill(lockedPartner, context.resolvedSubServiceId(), context.requestedCategoryId())) {
+            return true;
+        }
+        saveBookingEvent(context.orderId(), EVENT_DISPATCH_REJECTED, Map.of(
+                PARTNER_ID_KEY, candidate.partner().getId(),
+                REASON_KEY, eligibility.eligible() ? "SKILL_MISMATCH" : eligibility.reason().name()
+        ));
+        return false;
     }
 
     private boolean hasPendingRequest(Long orderId, Long partnerId) {
@@ -352,11 +452,12 @@ public class DispatchOrchestrationService {
 
     private void finishDispatch(DispatchContext context, int created) {
         if (created <= 0) {
-            saveEvent(context.orderId(), "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_NEW_REQUEST_CREATED"));
+            saveBookingEvent(context.orderId(), EVENT_PARTNER_SEARCH_FAILED,
+                    Map.of(REASON_KEY, "NO_NEW_REQUEST_CREATED"));
             return;
         }
-        saveEvent(context.orderId(), context.instant() ? "INSTANT_DISPATCHED" : "PARTNER_ASSIGNED",
-                Map.of("candidateCount", created, "pincode", context.pincode()));
+        saveBookingEvent(context.orderId(), context.instant() ? "INSTANT_DISPATCHED" : "PARTNER_ASSIGNED",
+                Map.of("candidateCount", created, PINCODE_KEY, context.pincode()));
         assignScheduledPartnerIfAllowed(context);
     }
 
@@ -371,41 +472,77 @@ public class DispatchOrchestrationService {
 
     @Transactional
     public void markPartnerAccepted(Long orderId, Long partnerId, Integer etaMinutesAtAcceptance) {
-        Order order = orderRepository.findByIdForUpdate(orderId).orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_MESSAGE));
+        if (order.getAssignedPartnerId() != null && order.getAssignedPartnerId().equals(partnerId)
+                && isAcceptedOrAssigned(order.getStatus())) {
+            return;
+        }
         if (order.getAssignedPartnerId() != null && !order.getAssignedPartnerId().equals(partnerId)) {
             throw new BadRequestException("Order is already assigned to another partner");
         }
+        PartnerShiftEntity lockedShift = partnerShiftRepository.findByPartnerIdForUpdate(partnerId).orElse(null);
+        Partner lockedPartner = partnerMarketplaceService.find(partnerId).orElse(null);
+        PartnerDispatchEligibilityResult eligibility =
+                partnerDispatchEligibilityService.canReceiveNewBookings(lockedPartner, lockedShift);
+        if (!eligibility.eligible()) {
+            saveBookingEvent(orderId, EVENT_DISPATCH_REJECTED,
+                    Map.of(PARTNER_ID_KEY, partnerId, REASON_KEY, eligibility.reason().name()));
+            throw new BadRequestException("Partner is not eligible for new dispatch: " + eligibility.reason().name());
+        }
         boolean instant = BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType());
         if (instant) {
-            order.setStatus(OrderStatus.PARTNER_ASSIGNED);
+            if (!isAcceptableInstantStatus(order.getStatus())) {
+                throw new BadRequestException("Order is not accepting partner assignment");
+            }
+            applyStatusTransition(order, OrderStatus.PARTNER_ASSIGNED);
             order.setSlaMinutes(INSTANT_SLA_MINUTES);
             int eta = etaMinutesAtAcceptance == null ? INSTANT_SLA_MINUTES : etaMinutesAtAcceptance;
             order.setPromisedStartTime(now().plusMinutes(eta));
             order.setUnavailableReason(null);
         } else if (order.getStatus() == OrderStatus.CREATED || order.getStatus() == OrderStatus.PARTNER_ASSIGNED
                 || order.getStatus() == OrderStatus.PARTNER_SEARCH || order.getStatus() == OrderStatus.BOOKING_CREATED) {
-            order.setStatus(OrderStatus.PARTNER_ACCEPTED);
+            applyStatusTransition(order, OrderStatus.PARTNER_ACCEPTED);
         }
         order.setAssignedPartnerId(partnerId);
         orderRepository.save(order);
         syncTrackingStateFromOrder(order, order.getStatus());
-        PartnerShiftEntity shift = partnerShiftRepository.findByPartnerId(partnerId).orElse(null);
+        PartnerShiftEntity shift = lockedShift;
         if (shift != null) {
             shift.setActiveJobsCount(shift.getActiveJobsCount() + 1);
             partnerShiftRepository.save(shift);
         }
-        saveEvent(orderId, "PARTNER_ACCEPTED", Map.of("partnerId", partnerId, "etaMinutes", etaMinutesAtAcceptance));
+        saveBookingEvent(orderId, "PARTNER_ACCEPTED",
+                Map.of(PARTNER_ID_KEY, partnerId, "etaMinutes", etaMinutesAtAcceptance));
+        publishLifecycle(order, "PARTNER_ACCEPTED",
+                Map.of(PARTNER_ID_KEY, partnerId, "etaMinutes", etaMinutesAtAcceptance));
+    }
+
+    private boolean isAcceptedOrAssigned(OrderStatus status) {
+        return status == OrderStatus.PARTNER_ASSIGNED || status == OrderStatus.PARTNER_ACCEPTED;
+    }
+
+    private boolean isAcceptableInstantStatus(OrderStatus status) {
+        return status == OrderStatus.CREATED
+                || status == OrderStatus.CONFIRMED
+                || status == OrderStatus.BOOKING_CREATED
+                || status == OrderStatus.SEARCHING_PARTNER;
     }
 
     @Transactional
     public void markPartnerRejected(Long orderId, Long partnerId) {
-        saveEvent(orderId, "PARTNER_REJECTED", Map.of("partnerId", partnerId));
+        saveBookingEvent(orderId, "PARTNER_REJECTED", Map.of(PARTNER_ID_KEY, partnerId));
     }
 
     @Transactional
     public int retryDispatch(Long orderId) {
-        Order order = orderRepository.findById(orderId).orElse(null);
+        Order order = orderRepository.findByIdForUpdate(orderId).orElse(null);
         if (order == null || order.getUserId() == null) {
+            return 0;
+        }
+        if (BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType())
+                && order.getPaymentStatus() != PaymentStatus.SUCCESS) {
+            saveBookingEvent(orderId, "DISPATCH_PAYMENT_PENDING", Map.of(REASON_KEY, "PAYMENT_PENDING"));
             return 0;
         }
         PartnerServiceRequestEntity dispatchSnapshot = partnerServiceRequestRepository.findByCartId(orderId).stream()
@@ -430,7 +567,7 @@ public class DispatchOrchestrationService {
                 .collect(Collectors.toSet());
         List<Candidate> expandedEligible = findEligibleCandidates(context, getMaxSearchRadiusKm(), requestedPartnerIds);
         if (expandedEligible.isEmpty()) {
-            saveEvent(orderId, "PARTNER_SEARCH_FAILED", Map.of("reason", "NO_ELIGIBLE_PARTNER"));
+            saveBookingEvent(orderId, EVENT_PARTNER_SEARCH_FAILED, Map.of(REASON_KEY, NO_ELIGIBLE_PARTNER_REASON));
             return 0;
         }
         expandedEligible.sort(dispatchScoringPolicy.comparator(context.pincode()));
@@ -441,13 +578,198 @@ public class DispatchOrchestrationService {
                 .orElse(0) + 1;
         int created = createPartnerRequests(context, expandedEligible, Math.max(2, nextAttempt));
         if (created > 0) {
-            saveEvent(orderId, "PARTNER_SEARCH_RADIUS_EXPANDED", Map.of("toRadiusKm", getMaxSearchRadiusKm()));
+            saveBookingEvent(orderId, "PARTNER_SEARCH_RADIUS_EXPANDED", Map.of("toRadiusKm", getMaxSearchRadiusKm()));
         }
         return created;
     }
 
     @Transactional
+    public int dispatchPaidInstantBooking(Long orderId) {
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_MESSAGE));
+        if (!BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType())) {
+            return 0;
+        }
+        if (order.getPaymentStatus() != PaymentStatus.SUCCESS) {
+            saveBookingEvent(orderId, "DISPATCH_PAYMENT_PENDING", Map.of(REASON_KEY, "PAYMENT_PENDING"));
+            return 0;
+        }
+        if (order.getDispatchStartedAt() != null
+                || order.getAssignedPartnerId() != null
+                || order.getStatus() == OrderStatus.PARTNER_ASSIGNED
+                || order.getStatus() == OrderStatus.PARTNER_ACCEPTED) {
+            saveBookingEvent(orderId, "DISPATCH_ALREADY_STARTED", Map.of("status", order.getStatus().name()));
+            return 0;
+        }
+        if (!isEligibleForInitialDispatch(order.getStatus())
+                && order.getStatus() != OrderStatus.SEARCHING_PARTNER) {
+            saveBookingEvent(orderId, "DISPATCH_SKIPPED_INVALID_STATUS",
+                    Map.of("status", order.getStatus() == null ? "UNKNOWN" : order.getStatus().name()));
+            return 0;
+        }
+        if (order.getDispatchAddressId() == null || order.getDispatchServiceId() == null) {
+            saveBookingEvent(orderId, EVENT_PARTNER_SEARCH_FAILED, Map.of(REASON_KEY, "DISPATCH_METADATA_MISSING"));
+            throw new BadRequestException("Dispatch metadata is missing for booking " + orderId);
+        }
+        order.setDispatchStartedAt(now());
+        orderRepository.save(order);
+        publishLifecycle(order, "PAYMENT_CONFIRMED", Map.of());
+        return dispatchOrderInternal(
+                order.getId(),
+                order.getUserId(),
+                order.getDispatchAddressId(),
+                order.getDispatchServiceId(),
+                order.getDispatchQuantity() == null ? 1 : order.getDispatchQuantity(),
+                order.getScheduledAt()
+        );
+    }
+
+    @Transactional
+    public int dispatchPaidScheduledBooking(Long orderId) {
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_MESSAGE));
+        if (!BookingType.SCHEDULED.name().equalsIgnoreCase(order.getBookingType())) {
+            return 0;
+        }
+        if (order.getPaymentStatus() != PaymentStatus.SUCCESS) {
+            saveBookingEvent(orderId, "DISPATCH_PAYMENT_PENDING", Map.of(REASON_KEY, "PAYMENT_PENDING"));
+            return 0;
+        }
+        if (order.getDispatchStartedAt() != null
+                || order.getAssignedPartnerId() != null
+                || order.getScheduledAt() == null
+                || !shouldActivateScheduledDispatch(order.getScheduledAt())) {
+            if (order.getDispatchStartedAt() != null || order.getAssignedPartnerId() != null) {
+                saveBookingEvent(orderId, "DISPATCH_ALREADY_STARTED",
+                        Map.of("status", order.getStatus() == null ? "UNKNOWN" : order.getStatus().name()));
+            }
+            return 0;
+        }
+        if (!isEligibleForInitialDispatch(order.getStatus())
+                && order.getStatus() != OrderStatus.SCHEDULED
+                && order.getStatus() != OrderStatus.PARTNER_SEARCH) {
+            saveBookingEvent(orderId, "DISPATCH_SKIPPED_INVALID_STATUS",
+                    Map.of("status", order.getStatus() == null ? "UNKNOWN" : order.getStatus().name()));
+            return 0;
+        }
+        long previousAttempts = bookingEventRepository.countByBookingIdAndEventType(
+                orderId, SCHEDULED_DISPATCH_ATTEMPT_EVENT);
+        if (previousAttempts >= MAX_SCHEDULED_DISPATCH_ATTEMPTS) {
+            order.setUnavailableReason("NO_PARTNER_AVAILABLE_MAX_ATTEMPTS");
+            orderRepository.save(order);
+            saveBookingEvent(orderId, "SCHEDULED_DISPATCH_EXHAUSTED",
+                    Map.of("attempts", previousAttempts, REASON_KEY, "NO_PARTNER_AVAILABLE"));
+            publishLifecycle(order, "DISPATCH_FAILED",
+                    Map.of("attempts", previousAttempts, REASON_KEY, "NO_PARTNER_AVAILABLE"));
+            return 0;
+        }
+        if (order.getDispatchAddressId() == null || order.getDispatchServiceId() == null) {
+            saveBookingEvent(orderId, EVENT_PARTNER_SEARCH_FAILED, Map.of(REASON_KEY, "DISPATCH_METADATA_MISSING"));
+            throw new BadRequestException("Dispatch metadata is missing for booking " + orderId);
+        }
+        saveBookingEvent(orderId, SCHEDULED_DISPATCH_ATTEMPT_EVENT,
+                Map.of("attempt", previousAttempts + 1));
+        order.setDispatchStartedAt(now());
+        order.setUnavailableReason(null);
+        orderRepository.save(order);
+        publishLifecycle(order, "PAYMENT_CONFIRMED", Map.of());
+        int created = dispatchOrderInternal(
+                order.getId(),
+                order.getUserId(),
+                order.getDispatchAddressId(),
+                order.getDispatchServiceId(),
+                order.getDispatchQuantity() == null ? 1 : order.getDispatchQuantity(),
+                order.getScheduledAt()
+        );
+        if (created == 0) {
+            order.setDispatchStartedAt(null);
+            orderRepository.save(order);
+            saveBookingEvent(orderId, "SCHEDULED_DISPATCH_RETRY_SCHEDULED",
+                    Map.of("attempt", previousAttempts + 1, "nextScanSeconds", 60));
+        }
+        return created;
+    }
+
+    private boolean isEligibleForInitialDispatch(OrderStatus status) {
+        return status == null
+                || status == OrderStatus.BOOKING_CREATED
+                || status == OrderStatus.CREATED
+                || status == OrderStatus.CONFIRMED;
+    }
+
+    @Transactional
+    public void handlePaymentFailed(Long orderId, String reason) {
+        Order order = orderRepository.findByIdForUpdate(orderId).orElse(null);
+        if (order == null || !BookingType.INSTANT.name().equalsIgnoreCase(order.getBookingType())) {
+            return;
+        }
+        expirePendingRequests(orderId, "PAYMENT_FAILED");
+        if (order.getStatus() == OrderStatus.SERVICE_STARTED
+                || order.getStatus() == OrderStatus.SERVICE_IN_PROGRESS
+                || order.getStatus() == OrderStatus.SERVICE_COMPLETED
+                || order.getStatus() == OrderStatus.PAYMENT_COMPLETED
+                || order.getStatus() == OrderStatus.DELIVERED) {
+            return;
+        }
+        decrementActiveJobs(order.getAssignedPartnerId());
+        order.setAssignedPartnerId(null);
+        applyStatusTransition(order, OrderStatus.CANCELLED);
+        order.setUnavailableReason("PAYMENT_FAILED");
+        orderRepository.save(order);
+        saveBookingEvent(orderId, "PAYMENT_FAILED", Map.of(REASON_KEY, reason == null ? "PAYMENT_FAILED" : reason));
+        publishLifecycle(order, "PAYMENT_FAILED",
+                Map.of(REASON_KEY, reason == null ? "PAYMENT_FAILED" : reason));
+    }
+
+    private void decrementActiveJobs(Long partnerId) {
+        if (partnerId == null) {
+            return;
+        }
+        partnerShiftRepository.findByPartnerIdForUpdate(partnerId).ifPresent(shift -> {
+            shift.setActiveJobsCount(Math.max(0, shift.getActiveJobsCount() - 1));
+            partnerShiftRepository.save(shift);
+        });
+    }
+
+    @Transactional
+    public int expireStuckInstantSearches(LocalDateTime createdBefore) {
+        int expired = 0;
+        for (Order candidate : orderRepository.findStuckInstantSearchOrders(
+                BookingType.INSTANT.name(), OrderStatus.SEARCHING_PARTNER, createdBefore)) {
+            Order order = orderRepository.findByIdForUpdate(candidate.getId()).orElse(null);
+            if (order == null
+                    || order.getAssignedPartnerId() != null
+                    || order.getStatus() != OrderStatus.SEARCHING_PARTNER
+                    || order.getPaymentStatus() != PaymentStatus.SUCCESS) {
+                continue;
+            }
+            expirePendingRequests(order.getId(), "SEARCH_TIMEOUT");
+            applyStatusTransition(order, OrderStatus.INSTANT_FAILED);
+            order.setUnavailableReason("SEARCH_TIMEOUT");
+            orderRepository.save(order);
+            saveBookingEvent(order.getId(), "SEARCH_TIMEOUT", Map.of(REASON_KEY, "SEARCH_TIMEOUT"));
+            publishLifecycle(order, "SEARCH_TIMEOUT", Map.of(REASON_KEY, "SEARCH_TIMEOUT"));
+            expired++;
+        }
+        return expired;
+    }
+
+    private void expirePendingRequests(Long orderId, String reason) {
+        List<PartnerServiceRequestEntity> pending =
+                partnerServiceRequestRepository.findByCartIdAndStatus(orderId, PartnerServiceRequestStatus.PENDING);
+        for (PartnerServiceRequestEntity request : pending) {
+            request.setStatus(PartnerServiceRequestStatus.EXPIRED);
+            request.setRejectionReason(reason);
+        }
+        partnerServiceRequestRepository.saveAll(pending);
+    }
+
+    @Transactional
     public void saveEvent(Long orderId, String eventType, Object payload) {
+        saveBookingEvent(orderId, eventType, payload);
+    }
+
+    private void saveBookingEvent(Long orderId, String eventType, Object payload) {
         BookingEventEntity event = new BookingEventEntity();
         event.setBookingId(orderId);
         event.setEventType(eventType);
@@ -458,10 +780,13 @@ public class DispatchOrchestrationService {
     @Transactional
     public OrderStatus transitionOrderStatus(Long orderId, OrderStatus targetStatus) {
         Order order = orderRepository.findByIdForUpdate(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+                .orElseThrow(() -> new ResourceNotFoundException(ORDER_NOT_FOUND_MESSAGE));
         OrderStatus current = order.getStatus();
         if (current == null) {
             current = OrderStatus.BOOKING_CREATED;
+        }
+        if (current == targetStatus) {
+            return targetStatus;
         }
         if (!current.canTransitionTo(targetStatus)) {
             throw new BadRequestException("Invalid order status transition from " + current + " to " + targetStatus);
@@ -470,8 +795,37 @@ public class DispatchOrchestrationService {
         applyLifecycleTimestamp(order, targetStatus);
         orderRepository.save(order);
         syncTrackingStateFromOrder(order, targetStatus);
-        saveEvent(orderId, targetStatus.name(), Map.of("previous", current.name(), "next", targetStatus.name()));
+        saveBookingEvent(orderId, targetStatus.name(), Map.of("previous", current.name(), "next", targetStatus.name()));
+        publishLifecycle(order, targetStatus.name(), Map.of("previous", current.name(), "next", targetStatus.name()));
         return targetStatus;
+    }
+
+    private boolean applyStatusTransition(Order order, OrderStatus targetStatus) {
+        OrderStatus current = order.getStatus();
+        if (current == targetStatus) {
+            return false;
+        }
+        if (current == null) {
+            current = OrderStatus.BOOKING_CREATED;
+        }
+        if (!current.canTransitionTo(targetStatus)) {
+            throw new BadRequestException("Invalid order status transition from " + current + " to " + targetStatus);
+        }
+        order.setStatus(targetStatus);
+        applyLifecycleTimestamp(order, targetStatus);
+        return true;
+    }
+
+    private void publishLifecycle(Order order, String eventName, Map<String, Object> details) {
+        if (bookingLifecycleEventService != null) {
+            bookingLifecycleEventService.publish(order, eventName, details);
+        }
+    }
+
+    private void publishPartnerDispatch(PartnerServiceRequestEntity request, String eventName) {
+        if (partnerDispatchRealtimeService != null) {
+            partnerDispatchRealtimeService.publishRequestEvent(request, eventName);
+        }
     }
 
     private String toJson(Object payload) {
@@ -500,24 +854,13 @@ public class DispatchOrchestrationService {
         if (location == null) {
             return null;
         }
-        double km = haversineKm(
+        double km = GeoDistanceCalculator.haversineKm(
                 address.getLatitude().doubleValue(),
                 address.getLongitude().doubleValue(),
                 location.getLatitude().doubleValue(),
                 location.getLongitude().doubleValue()
         );
         return BigDecimal.valueOf(km).setScale(3, RoundingMode.HALF_UP);
-    }
-
-    private double haversineKm(double lat1, double lon1, double lat2, double lon2) {
-        double earthRadiusKm = 6371.0;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadiusKm * c;
     }
 
     public int estimateEtaMinutes(BigDecimal distanceKm) {
@@ -610,6 +953,9 @@ public class DispatchOrchestrationService {
     }
 
     private boolean hasRequiredSkill(Partner partner, Long requestedSubServiceId, Long requestedCategoryId) {
+        if (partner == null || partner.getId() == null || requestedSubServiceId == null) {
+            return false;
+        }
         if (partner.getSubCategoryId() != null && partner.getSubCategoryId().equals(requestedSubServiceId)) {
             return true;
         }
@@ -633,15 +979,6 @@ public class DispatchOrchestrationService {
                 radiusKm,
                 200
         );
-    }
-
-    private boolean isApprovedPartner(Partner partner) {
-        String verificationStatus = partner.getVerificationStatus();
-        if (verificationStatus == null || verificationStatus.isBlank()) {
-            return false;
-        }
-        String normalized = verificationStatus.trim().toUpperCase(Locale.ROOT);
-        return "APPROVED".equals(normalized) || "VERIFIED".equals(normalized);
     }
 
     private double getInitialSearchRadiusKm() {
