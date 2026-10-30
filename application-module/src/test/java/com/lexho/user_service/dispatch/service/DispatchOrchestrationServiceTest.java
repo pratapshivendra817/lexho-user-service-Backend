@@ -561,6 +561,25 @@ class DispatchOrchestrationServiceTest {
     }
 
     @Test
+    void dispatchPaidScheduledBookingShouldMarkMissingMetadataUnavailable() {
+        Order order = baseOrder(26L, "SCHEDULED", OrderStatus.SCHEDULED);
+        order.setScheduledAt(LocalDateTime.now().plusMinutes(5));
+        when(orderRepository.findByIdForUpdate(26L)).thenReturn(Optional.of(order));
+        when(bookingEventRepository.countByBookingIdAndEventType(26L, "SCHEDULED_DISPATCH_ATTEMPT"))
+                .thenReturn(0L);
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        int created = dispatchOrchestrationService.dispatchPaidScheduledBooking(26L);
+
+        assertEquals(0, created);
+        assertEquals("DISPATCH_METADATA_MISSING", order.getUnavailableReason());
+        verify(orderRepository).save(order);
+        verify(bookingEventRepository).save(argThat(event ->
+                "PARTNER_SEARCH_FAILED".equals(event.getEventType())));
+        verify(lexhoAddressRepository, never()).findByIdAndUserId(anyLong(), anyLong());
+    }
+
+    @Test
     void handlePaymentFailedShouldNotRewindTerminalLifecycle() {
         Order order = baseOrder(22L, "INSTANT", OrderStatus.SERVICE_STARTED);
         order.setAssignedPartnerId(99L);

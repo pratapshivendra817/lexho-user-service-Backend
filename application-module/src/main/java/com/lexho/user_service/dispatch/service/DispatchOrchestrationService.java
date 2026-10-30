@@ -56,6 +56,7 @@ public class DispatchOrchestrationService {
     private static final String PARTNER_ID_KEY = "partnerId";
     private static final String PINCODE_KEY = "pincode";
     private static final String NO_ELIGIBLE_PARTNER_REASON = "NO_ELIGIBLE_PARTNER";
+    private static final String DISPATCH_METADATA_MISSING_REASON = "DISPATCH_METADATA_MISSING";
     private static final String ORDER_NOT_FOUND_MESSAGE = "Order not found";
     private static final String SCHEDULED_DISPATCH_ATTEMPT_EVENT = "SCHEDULED_DISPATCH_ATTEMPT";
 
@@ -608,7 +609,8 @@ public class DispatchOrchestrationService {
             return 0;
         }
         if (order.getDispatchAddressId() == null || order.getDispatchServiceId() == null) {
-            saveBookingEvent(orderId, EVENT_PARTNER_SEARCH_FAILED, Map.of(REASON_KEY, "DISPATCH_METADATA_MISSING"));
+            saveBookingEvent(orderId, EVENT_PARTNER_SEARCH_FAILED,
+                    Map.of(REASON_KEY, DISPATCH_METADATA_MISSING_REASON));
             throw new BadRequestException("Dispatch metadata is missing for booking " + orderId);
         }
         order.setDispatchStartedAt(now());
@@ -664,8 +666,13 @@ public class DispatchOrchestrationService {
             return 0;
         }
         if (order.getDispatchAddressId() == null || order.getDispatchServiceId() == null) {
-            saveBookingEvent(orderId, EVENT_PARTNER_SEARCH_FAILED, Map.of(REASON_KEY, "DISPATCH_METADATA_MISSING"));
-            throw new BadRequestException("Dispatch metadata is missing for booking " + orderId);
+            order.setUnavailableReason(DISPATCH_METADATA_MISSING_REASON);
+            orderRepository.save(order);
+            saveBookingEvent(orderId, EVENT_PARTNER_SEARCH_FAILED,
+                    Map.of(REASON_KEY, DISPATCH_METADATA_MISSING_REASON));
+            publishLifecycle(order, "DISPATCH_FAILED",
+                    Map.of(REASON_KEY, DISPATCH_METADATA_MISSING_REASON));
+            return 0;
         }
         saveBookingEvent(orderId, SCHEDULED_DISPATCH_ATTEMPT_EVENT,
                 Map.of("attempt", previousAttempts + 1));
